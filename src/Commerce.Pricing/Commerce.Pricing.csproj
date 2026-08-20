@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Commerce.Pricing</RootNamespace>
+    <AssemblyName>Commerce.Pricing</AssemblyName>
+    <DebugType>portable</DebugType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Infrastructure.Collections\Infrastructure.Collections.csproj" />
+  </ItemGroup>
+
+</Project>

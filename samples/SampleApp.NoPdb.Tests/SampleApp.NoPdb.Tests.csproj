@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>SampleApp.NoPdb.Tests</RootNamespace>
+    <AssemblyName>SampleApp.NoPdb.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <DebugType>portable</DebugType>
+    <!-- This intentionally invalid fixture is run only by verify-negative-tests.ps1. -->
+    <BehaviorDiffExclude>true</BehaviorDiffExclude>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SampleApp.NoPdb\SampleApp.NoPdb.csproj" />
+    <ProjectReference Include="..\..\src\BehaviorDiff.Tracer.Xunit\BehaviorDiff.Tracer.Xunit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2" />
+  </ItemGroup>
+
+</Project>

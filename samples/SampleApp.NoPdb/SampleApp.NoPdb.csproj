@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>SampleApp.NoPdb</RootNamespace>
+    <AssemblyName>SampleApp.NoPdb</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- Deliberate. This is the fixture for the SourceUnavailable negative test: with no PDB the tracer
+         cannot resolve a source line for any member, so every divergence would classify EXPECTED. -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+</Project>

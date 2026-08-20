@@ -1,0 +1,42 @@
+name: Bug report
+description: Report incorrect analysis, instrumentation failure, or a reproducible crash
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve BehaviorDiff. Remove secrets and proprietary source from logs and traces.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: BehaviorDiff version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, .NET SDK, target framework, and test framework
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal repository or exact commands and refs
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Include the exit code and concise log tail. Do not include credentials.
+      render: text

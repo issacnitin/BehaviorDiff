@@ -1,0 +1,12 @@
+bin/
+obj/
+artifacts/
+*.user
+.vs/
+.idea/
+
+# Trace output and engine artifacts are run products, not sources.
+*.ndjson
+*.ndjson.FAILED
+traces/
+runs/

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>SampleApp.Tests</RootNamespace>
+    <AssemblyName>SampleApp.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Commerce.Pricing\Commerce.Pricing.csproj" />
+    <ProjectReference Include="..\SampleApp\SampleApp.csproj" />
+    <ProjectReference Include="..\SampleApp.Plugin\SampleApp.Plugin.csproj" />
+    <ProjectReference Include="..\..\src\BehaviorDiff.Tracer.Xunit\BehaviorDiff.Tracer.Xunit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\payment-config.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

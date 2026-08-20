@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-prove:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build BehaviorDiff.sln -c Release --nologo
+
+      - name: Verify contracts
+        shell: pwsh
+        run: pwsh -NoProfile -File tools/verify-contracts.ps1
+
+      - name: Verify demo fixtures
+        shell: pwsh
+        run: pwsh -NoProfile -File tools/verify-demo-fixtures.ps1
+
+      - name: Pack CLI tool
+        shell: pwsh
+        run: dotnet pack src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj -c Release -o artifacts/packages
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: behaviordiff-tool
+          path: artifacts/packages/*.nupkg

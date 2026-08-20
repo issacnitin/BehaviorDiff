@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>BehaviorDiff.Cli</RootNamespace>
+    <AssemblyName>behaviordiff</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>behaviordiff</ToolCommandName>
+    <PackageId>BehaviorDiff.Tool</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Nitin Issac Joy</Authors>
+    <Description>Detect behavior changes between two .NET builds by tracing and comparing test execution.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/issacnitin/BehaviorDiff</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/issacnitin/BehaviorDiff.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BehaviorDiff.Engine\BehaviorDiff.Engine.csproj" />
+    <!-- Referenced so the tracer and its runtime dependencies land in this app's output and can be
+         copied into the injection kit; the CLI itself never calls into them. -->
+    <ProjectReference Include="..\BehaviorDiff.Tracer.Xunit\BehaviorDiff.Tracer.Xunit.csproj" />
+    <ProjectReference Include="..\..\tools\Weaver\Weaver.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <!-- The weaver reflection-loads target assemblies and therefore needs its own runtimeconfig with
+       RollForward=LatestMajor. Copying its complete output preserves that separate process boundary. -->
+  <Target Name="CopyBehaviorDiffWeaver" AfterTargets="Build">
+    <ItemGroup>
+      <_BehaviorDiffWeaverFiles Include="$(MSBuildThisFileDirectory)..\..\tools\Weaver\bin\$(Configuration)\net8.0\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_BehaviorDiffWeaverFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <ItemGroup>
+    <!-- The adapter is recompiled per target repo against that repo's own xunit version, so its source
+         is embedded rather than copied - a second copy would drift from the type actually shipped. -->
+    <EmbeddedResource Include="..\BehaviorDiff.Tracer.Xunit\TraceTestAttribute.cs" LogicalName="TraceTestAttribute.cs" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+        <None Include="..\..\tools\Weaver\bin\$(Configuration)\net8.0\behaviordiff-weaver.dll"
+          Pack="true" PackagePath="tools\net8.0\any" />
+        <None Include="..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil*.dll"
+          Pack="true" PackagePath="tools\net8.0\any" />
+  </ItemGroup>
+
+</Project>
