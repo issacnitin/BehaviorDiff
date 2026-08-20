@@ -71,6 +71,20 @@ This covers sort stability, retry policy, and configuration parsing.
 
 ## Install the CLI
 
+### Install the GitHub release
+
+Download the package from the [latest release](https://github.com/issacnitin/BehaviorDiff/releases/latest), then install it from the download directory:
+
+```powershell
+dotnet tool install --global BehaviorDiff.Tool `
+  --version 0.1.0 `
+  --add-source .
+
+behaviordiff --help
+```
+
+The package is attached as `BehaviorDiff.Tool.0.1.0.nupkg`.
+
 ### Build and install from source
 
 ```powershell
