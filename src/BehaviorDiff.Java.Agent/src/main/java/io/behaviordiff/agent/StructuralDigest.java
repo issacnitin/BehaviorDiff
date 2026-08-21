@@ -245,6 +245,7 @@ public final class StructuralDigest {
             output.append(field.getDeclaringClass().getName()).append('.').append(field.getName()).append('=');
             try {
                 if (!field.trySetAccessible()) {
+                    ERRORED.increment();
                     output.append("<error:").append(field.getName()).append(":Inaccessible>");
                 } else {
                     write(field.get(value), output, context, depth + 1);
