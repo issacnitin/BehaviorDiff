@@ -8,7 +8,9 @@ import (
 	"go/token"
 	"go/types"
 	"io/fs"
+	"os"
 	"path/filepath"
+	"strings"
 )
 
 type moduleModel struct {
@@ -29,15 +31,17 @@ type packageModel struct {
 }
 
 type sourceFile struct {
-	path string
-	rel  string
-	file *ast.File
-	pkg  *packageModel
+	path        string
+	rel         string
+	attribution string
+	file        *ast.File
+	pkg         *packageModel
 }
 
 func analyzeModule(source, modulePath string) (*moduleModel, error) {
 	model := &moduleModel{source: source, modulePath: modulePath, fset: token.NewFileSet()}
 	packages := make(map[string]*packageModel)
+	attributionPrefix := repositoryRelativePrefix(source)
 	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -75,7 +79,14 @@ func analyzeModule(source, modulePath string) (*moduleModel, error) {
 		if err != nil {
 			return err
 		}
-		file := &sourceFile{path: path, rel: filepath.ToSlash(rel), file: parsed, pkg: pkg}
+		attribution := rel
+		if attributionPrefix != "" {
+			attribution = filepath.Join(attributionPrefix, rel)
+		}
+		file := &sourceFile{
+			path: path, rel: filepath.ToSlash(rel), attribution: filepath.ToSlash(attribution),
+			file: parsed, pkg: pkg,
+		}
 		pkg.files = append(pkg.files, file)
 		return nil
 	})
@@ -88,6 +99,22 @@ func analyzeModule(source, modulePath string) (*moduleModel, error) {
 		}
 	}
 	return model, nil
+}
+
+func repositoryRelativePrefix(source string) string {
+	repositoryRoot := strings.TrimSpace(os.Getenv("BEHAVIORDIFF_REPOSITORY_ROOT"))
+	if repositoryRoot == "" {
+		return ""
+	}
+	absoluteRoot, err := filepath.Abs(repositoryRoot)
+	if err != nil {
+		return ""
+	}
+	relative, err := filepath.Rel(filepath.Clean(absoluteRoot), filepath.Clean(source))
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return relative
 }
 
 func typeCheckPackage(fset *token.FileSet, pkg *packageModel) error {

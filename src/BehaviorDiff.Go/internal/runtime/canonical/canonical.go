@@ -96,7 +96,7 @@ func DigestWithOptions(value any, options Options) Result {
 	rendered := canonical
 	if len(rendered) > options.RenderedCap {
 		current.counters.RenderedTruncated++
-		rendered = truncateRendered(rendered, options.RenderedCap, digest, len(canonical))
+		rendered = truncateRendered(rendered, options.RenderedCap)
 	}
 
 	skipped := make([]SkippedUnexported, 0, len(current.skipped))
@@ -160,7 +160,7 @@ func (current *state) render(value reflect.Value, depth int) (rendered string) {
 	if depth >= current.options.MaxDepth {
 		current.counters.DepthLimited++
 		current.partial = true
-		return "<skipped:max-depth:" + typeLabel(value.Type()) + ">"
+		return "<depth:" + typeLabel(value.Type()) + ">"
 	}
 
 	typeName := typeLabel(value.Type())
@@ -474,13 +474,28 @@ func typeLabel(value reflect.Type) string {
 	}
 }
 
-func truncateRendered(full string, cap int, digest string, fullBytes int) string {
-	marker := "<truncated:sha256=" + digest + ":full-bytes=" + strconv.Itoa(fullBytes) + ">"
+func truncateRendered(full string, cap int) string {
+	marker := retainedPartialMarkers(full) + "<truncated>"
 	if len(marker) >= cap {
 		return marker[:validPrefix(marker, cap)]
 	}
 	prefixCap := cap - len(marker)
 	return full[:validPrefix(full, prefixCap)] + marker
+}
+
+func retainedPartialMarkers(full string) string {
+	var markers strings.Builder
+	for _, prefix := range []string{"<skipped:", "<depth:", "<error:"} {
+		start := strings.Index(full, prefix)
+		if start < 0 {
+			continue
+		}
+		end := strings.IndexByte(full[start:], '>')
+		if end >= 0 {
+			markers.WriteString(full[start : start+end+1])
+		}
+	}
+	return markers.String()
 }
 
 func validPrefix(value string, limit int) int {

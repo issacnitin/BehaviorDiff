@@ -226,6 +226,9 @@ func (functionTransformer *functionTransformer) resolve(call *ast.CallExpr) reso
 				if declaration := functionTransformer.file.pkg.decls[function]; declaration != nil {
 					return resolution{declaration: declaration}
 				}
+				if declaration := functionTransformer.file.pkg.decls[function.Origin()]; declaration != nil {
+					return resolution{declaration: declaration}
+				}
 				return resolution{}
 			}
 		} else if function, ok := info.Uses[target.Sel].(*types.Func); ok && function.Pkg() != nil {
@@ -288,15 +291,16 @@ func cloneFuncType(functionType *ast.FuncType) (*ast.FuncType, error) {
 	if err := format.Node(&source, token.NewFileSet(), functionType); err != nil {
 		return nil, err
 	}
-	expression, err := parser.ParseExpr(source.String())
+	declarationSource := "package clone\nfunc cloned" + strings.TrimPrefix(source.String(), "func") + " {}"
+	file, err := parser.ParseFile(token.NewFileSet(), "clone.go", declarationSource, 0)
 	if err != nil {
 		return nil, err
 	}
-	cloned, ok := expression.(*ast.FuncType)
+	cloned, ok := file.Decls[0].(*ast.FuncDecl)
 	if !ok {
-		return nil, fmt.Errorf("cloned expression is %T", expression)
+		return nil, fmt.Errorf("cloned declaration is %T", file.Decls[0])
 	}
-	return cloned, nil
+	return cloned.Type, nil
 }
 
 func cloneFieldList(fields *ast.FieldList) (*ast.FieldList, error) {
@@ -603,7 +607,7 @@ func memberMetadata(fset *token.FileSet, file *sourceFile, function *ast.FuncDec
 		returnKind = "Sync"
 	}
 	return memberDefinition{
-		Module: file.pkg.path, Method: methodName(file.pkg, function), File: file.rel,
+		Module: file.pkg.path, Method: methodName(file.pkg, function), File: file.attribution,
 		Line: resolved.Line, ReturnKind: returnKind, SourceResolution: "debugInfo",
 		Status: "Patched", IsTestRoot: testRoot, IsHarness: testRoot,
 	}

@@ -427,13 +427,29 @@ func TestBlockedRuntimeIdentityShapes(t *testing.T) {
 func TestDepthAndEntryLimitsArePartial(t *testing.T) {
 	deep := &cycleNode{Value: 1, Next: &cycleNode{Value: 2}}
 	depth := DigestWithOptions(deep, Options{MaxDepth: 2})
-	if !depth.Partial || depth.Counters.DepthLimited == 0 || !strings.Contains(depth.Canonical, "max-depth") {
+	if !depth.Partial || depth.Counters.DepthLimited == 0 || !strings.Contains(depth.Canonical, "<depth:") {
 		t.Fatalf("depth limit not reported: %+v", depth)
 	}
 
 	entries := DigestWithOptions([]int{1, 2, 3}, Options{MaxEntries: 2})
 	if !entries.Partial || entries.Counters.EntryLimited != 1 || !strings.Contains(entries.Canonical, "max-entries:1") {
 		t.Fatalf("entry limit not reported: %+v", entries)
+	}
+}
+
+func TestRenderedCapRetainsHiddenPartialMarkers(t *testing.T) {
+	deep := &cycleNode{Value: 0}
+	cursor := deep
+	for index := 1; index < DefaultMaxDepth+4; index++ {
+		cursor.Next = &cycleNode{Value: index}
+		cursor = cursor.Next
+	}
+	result := Digest(deep)
+	if !result.Partial || result.Counters.DepthLimited == 0 || result.Counters.RenderedTruncated != 1 {
+		t.Fatalf("deep capped value did not exercise both limits: %+v", result)
+	}
+	if !strings.Contains(result.Canonical, "<depth:") || !strings.HasSuffix(result.Canonical, "<truncated>") {
+		t.Fatalf("capped diagnostic lost its depth marker: %s", result.Canonical)
 	}
 }
 
@@ -453,8 +469,8 @@ func TestRenderedCapHashesFullCanonicalText(t *testing.T) {
 	if left.SHA256 == right.SHA256 {
 		t.Fatal("differences beyond the rendered cap must affect the full canonical digest")
 	}
-	if !strings.Contains(left.Canonical, "<truncated:sha256="+left.SHA256) {
-		t.Fatalf("rendered truncation marker does not identify the full hash: %s", left.Canonical)
+	if !strings.HasSuffix(left.Canonical, "<truncated>") || left.Canonical != right.Canonical {
+		t.Fatalf("rendered truncation marker did not preserve the shared visible prefix: %s", left.Canonical)
 	}
 }
 

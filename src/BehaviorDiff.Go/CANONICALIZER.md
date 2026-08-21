@@ -7,7 +7,7 @@
 `Digest(value any)` returns a `Result` containing:
 
 - `SHA256`: lowercase SHA-256 of the complete canonical UTF-8 text.
-- `Canonical`: a diagnostic rendering capped at 2,000 bytes. A truncated rendering ends with the full-text digest and byte count.
+- `Canonical`: a diagnostic rendering capped at 2,000 bytes. A capped rendering ends with any first hidden skipped, depth, or error markers followed by `<truncated>`.
 - `FullBytes`: byte length of the complete canonical text.
 - `Partial`: whether any value content was skipped, blocked, depth-limited, entry-limited, or lost to a contained reflection panic.
 - `Counters`: coverage and loss counters described below.
@@ -15,7 +15,7 @@
 
 `DigestWithOptions` permits focused callers and tests to lower the rendered, depth, or per-composite entry limits. Defaults are 2,000 rendered bytes, depth 64, and 10,000 entries per struct, map, slice, or array.
 
-Rendered truncation does not set `Partial`: the SHA-256 still covers the complete canonical text. Depth and entry truncation do set `Partial` because value content did not reach that text.
+Rendered truncation does not set `Partial`: the SHA-256 still covers the complete canonical text. Depth and entry truncation do set `Partial` because value content did not reach that text. The engine independently treats `<truncated>` as partial evidence because the diagnostic text hides a suffix.
 
 ## Canonical rules
 
