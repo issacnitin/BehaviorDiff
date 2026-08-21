@@ -199,6 +199,11 @@ namespace SampleApp
             return builder.ToString();
         }
 
+        public static string LongTextWithHiddenSuffix(char suffix)
+        {
+            return LongText(3000) + suffix;
+        }
+
         /// <summary>Entries are removed so the free list is populated, which is what the shape rule must skip.</summary>
         public static Dictionary<string, int> BuildDictionaryWithRemovals()
         {

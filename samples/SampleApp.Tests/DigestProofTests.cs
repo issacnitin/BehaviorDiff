@@ -76,9 +76,12 @@ namespace SampleApp.Tests
         {
             string a = Probes.LongText(3000);
             string b = Probes.LongText(3000);
+            string hiddenA = Probes.LongTextWithHiddenSuffix('a');
+            string hiddenB = Probes.LongTextWithHiddenSuffix('b');
 
             Assert.Equal(3000, a.Length);
             Assert.Equal(a, b);
+            Assert.NotEqual(hiddenA, hiddenB);
         }
 
         [Fact]
