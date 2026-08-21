@@ -171,7 +171,7 @@ namespace BehaviorDiff.Cli
             }
         }
 
-        private static string RenderSummary(JsonElement findings, string marker)
+        internal static string RenderSummary(JsonElement findings, string marker)
         {
             var builder = new StringBuilder();
             string status = String(findings, "status");
@@ -304,9 +304,16 @@ namespace BehaviorDiff.Cli
                     source += ":" + line;
                 }
 
+                string[] tests = Strings(member, "observingTests").Take(2).ToArray();
+                string evidence = string.Join(", ", Strings(member, "symptoms").Take(3));
+                if (tests.Length > 0)
+                {
+                    evidence += "; tests: " + string.Join(", ", tests.Select(test => "`" + Escape(test) + "`"));
+                }
+
                 builder.AppendLine("| `" + Escape(String(member, "memberName")) + "` | "
                     + Int(member, "callSiteCount") + " | `" + Escape(source) + "` | "
-                    + Escape(string.Join(", ", Strings(member, "symptoms").Take(3))) + " |");
+                    + Escape(evidence) + " |");
             }
         }
 
