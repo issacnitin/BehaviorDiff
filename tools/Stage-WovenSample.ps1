@@ -13,7 +13,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$repo = Split-Path -Parent $PSScriptRoot
 
 $built = Join-Path $TreeRoot "samples/SampleApp.Tests/bin/Release/$Tfm"
 if (-not (Test-Path (Join-Path $built 'SampleApp.Tests.dll'))) {
@@ -24,7 +23,7 @@ Remove-Item $OutDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 Copy-Item "$built\*" $OutDir -Recurse -Force
 
-$weaver = Join-Path $repo 'tools/Weaver/Weaver.csproj'
+$weaver = Join-Path $TreeRoot 'tools/Weaver/Weaver.csproj'
 foreach ($target in @(
     @{ Name = 'Infrastructure.Collections'; Test = $false },
     @{ Name = 'Commerce.Pricing'; Test = $false },
