@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import io.behaviordiff.reference.Subject;
 import java.net.URI;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -68,6 +70,67 @@ final class ReferenceTests {
         assertEquals(future, Subject.future(future));
         future.complete("settled");
         assertEquals("settled", future.get(5, TimeUnit.SECONDS));
+        Thread.sleep(100);
+    }
+
+    @Test
+    void virtualDispatchUsesBothImplementations() {
+        Subject.Operation increment = new Subject.IncrementOperation();
+        Subject.Operation triple = new Subject.TripleOperation();
+
+        assertEquals(8, Subject.dispatch(increment, 7));
+        assertEquals(21, Subject.dispatch(triple, 7));
+    }
+
+    @Test
+    void abstractInheritanceCallsOverrideThroughBaseType() {
+        Subject.TextDecorator decorator = new Subject.BracketDecorator();
+
+        assertEquals("[mixed case]", Subject.decorate(decorator, "  mixed case  "));
+    }
+
+    @Test
+    void genericMethodAndBoxPreserveValues() {
+        assertEquals(9, Subject.greater(4, 9));
+
+        Subject.Box<Integer> box = new Subject.Box<>(42);
+        Subject.Box<String> mapped = box.map(new Subject.IntegerTextMapper());
+        assertEquals(42, box.get());
+        assertEquals("42", mapped.get());
+    }
+
+    @Test
+    void overloadsAndChainedConstructorsRemainDistinct() {
+        assertEquals("int:12", Subject.describe(12));
+        assertEquals("text:twelve", Subject.describe("twelve"));
+        assertEquals("3 item", new Subject.ChainedValue(3).render());
+        assertEquals("5 crates", new Subject.ChainedValue(5, "crates").render());
+    }
+
+    @Test
+    void namedFunctionalImplementationDispatches() {
+        Subject.NamedTextFunction function = new Subject.SuffixFunction("!");
+
+        assertEquals("ready!", Subject.dispatchNamed(function, "ready"));
+    }
+
+    @Test
+    void arraysListsAndRecoveredExceptionsAreObservable() {
+        assertEquals(10, Subject.sumArray(new int[] { 1, 2, 3, 4 }));
+        ArrayList<String> normalized = Subject.normalizedList(" first ", "second ");
+        assertEquals(List.of("first", "second"), normalized);
+        assertEquals(17, Subject.parseOrDefault("17", -1));
+        assertEquals(-1, Subject.parseOrDefault("not-a-number", -1));
+    }
+
+    @Test
+    void futureChainEmitsAtSettlement() throws Exception {
+        CompletableFuture<String> source = new CompletableFuture<>();
+        CompletableFuture<String> chained = Subject.futureChain(source);
+        assertEquals(false, chained.isDone());
+
+        source.complete(" settled ");
+        assertEquals("SETTLED", chained.get(5, TimeUnit.SECONDS));
         Thread.sleep(100);
     }
 }

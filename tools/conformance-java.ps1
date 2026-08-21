@@ -10,6 +10,7 @@ $work = if ($ownsWork) {
     Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-java-conformance-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
 Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Conformance.psm1') -Force
+$expectedRunnerCount = 120
 
 function Copy-CleanTree([string]$destination) {
     Remove-Item $destination -Recurse -Force -ErrorAction SilentlyContinue
@@ -32,7 +33,8 @@ function Run-Reference([string]$tree, [string]$agent, [string]$runDirectory) {
     New-Item -ItemType Directory -Path $runDirectory | Out-Null
     $trace = Join-Path $runDirectory 'run.ndjson'
     $argLine = "--add-opens java.base/java.util=ALL-UNNAMED -javaagent:$agent=include=io.behaviordiff.reference;trace=$trace"
-    & mvn -f (Join-Path $tree 'samples/JavaReference/pom.xml') test "-DargLine=$argLine"
+    & mvn -f (Join-Path $tree 'samples/JavaReference/pom.xml') test "-DargLine=$argLine" |
+        ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { throw "Java reference tests failed with $agent" }
 
     $runnerCount = (Get-ChildItem (Join-Path $tree 'samples/JavaReference/target/surefire-reports') -Filter 'TEST-*.xml' |
@@ -50,10 +52,13 @@ function Run-Reference([string]$tree, [string]$agent, [string]$runDirectory) {
         if ([long]$digest.$counter -le 0) { throw "Java digest counter was not exercised: $counter" }
     }
     $derivedCount = @($events | Where-Object methodFullName -In $rootMethods).Count
+    if ($runnerCount -ne $expectedRunnerCount) {
+        throw "Java runner count mismatch: expected=$expectedRunnerCount actual=$runnerCount"
+    }
     if ($runnerCount -ne $derivedCount) {
         throw "Java test count mismatch: runner=$runnerCount derived=$derivedCount"
     }
-    return [int]$runnerCount
+    return [pscustomobject]@{ Runner = [int]$runnerCount; Derived = [int]$derivedCount }
 }
 
 function Events([object]$run, [string]$method) {
@@ -107,7 +112,7 @@ try {
     $engine = Invoke-BehaviorDiffEngineConformance -FirstRun $run1 -SecondRun $run2 -EngineProject $engineProject
 
     Write-Host '=== Java conformance report ===' -ForegroundColor Green
-    Write-Host "  runner tests / derived roots: $count1 / $count2"
+    Write-Host "  runner tests / derived roots: $($count1.Runner) / $($count1.Derived)"
     Write-Host "  matched keys              : $($guard.MatchedKeys)"
     Write-Host "  identical subject methods : $($guard.SubjectMethods)"
     Write-Host "  subject events per run     : $($guard.FirstSubjectEvents) / $($guard.SecondSubjectEvents)"

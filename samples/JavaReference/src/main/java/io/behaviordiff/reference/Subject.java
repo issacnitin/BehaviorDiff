@@ -26,6 +26,39 @@ public final class Subject {
     public static void throwsNow() { throw new IllegalStateException("reference throw"); }
     public static CompletableFuture<String> future(CompletableFuture<String> value) { return value; }
 
+    public static int dispatch(Operation operation, int value) { return operation.apply(value); }
+    public static String decorate(TextDecorator decorator, String value) { return decorator.decorate(value); }
+    public static <T extends Comparable<T>> T greater(T left, T right) {
+        return left.compareTo(right) >= 0 ? left : right;
+    }
+    public static String describe(int value) { return "int:" + value; }
+    public static String describe(String value) { return "text:" + value; }
+    public static String dispatchNamed(NamedTextFunction function, String value) { return function.apply(value); }
+
+    public static int sumArray(int[] values) {
+        int total = 0;
+        for (int value : values) { total += value; }
+        return total;
+    }
+
+    public static ArrayList<String> normalizedList(String... values) {
+        ArrayList<String> normalized = new ArrayList<>();
+        for (String value : values) { normalized.add(value.trim()); }
+        return normalized;
+    }
+
+    public static int parseOrDefault(String value, int fallback) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    public static CompletableFuture<String> futureChain(CompletableFuture<String> value) {
+        return value.thenApply(String::trim).thenApply(String::toUpperCase);
+    }
+
     public static HashMap<String, Integer> map(boolean reverse) {
         HashMap<String, Integer> value = new HashMap<>();
         value.put(reverse ? "b" : "a", reverse ? 2 : 1);
@@ -38,6 +71,66 @@ public final class Subject {
         value.add(reverse ? "b" : "a");
         value.add(reverse ? "a" : "b");
         return value;
+    }
+
+    public interface Operation {
+        int apply(int value);
+    }
+
+    public static final class IncrementOperation implements Operation {
+        @Override public int apply(int value) { return value + 1; }
+    }
+
+    public static final class TripleOperation implements Operation {
+        @Override public int apply(int value) { return value * 3; }
+    }
+
+    public abstract static class TextDecorator {
+        public final String decorate(String value) { return wrap(value.trim()); }
+        protected abstract String wrap(String value);
+    }
+
+    public static final class BracketDecorator extends TextDecorator {
+        @Override protected String wrap(String value) { return "[" + value + "]"; }
+    }
+
+    public static final class Box<T> {
+        private final T value;
+
+        public Box(T value) { this.value = value; }
+        public T get() { return value; }
+        public <R> Box<R> map(BoxMapper<? super T, ? extends R> mapper) {
+            return new Box<>(mapper.map(value));
+        }
+    }
+
+    public interface BoxMapper<T, R> {
+        R map(T value);
+    }
+
+    public static final class IntegerTextMapper implements BoxMapper<Integer, String> {
+        @Override public String map(Integer value) { return Integer.toString(value); }
+    }
+
+    public static final class ChainedValue {
+        private final int value;
+        private final String unit;
+
+        public ChainedValue(int value) { this(value, "item"); }
+        public ChainedValue(int value, String unit) { this.value = value; this.unit = unit; }
+        public String render() { return value + " " + unit; }
+    }
+
+    @FunctionalInterface
+    public interface NamedTextFunction {
+        String apply(String value);
+    }
+
+    public static final class SuffixFunction implements NamedTextFunction {
+        private final String suffix;
+
+        public SuffixFunction(String suffix) { this.suffix = suffix; }
+        @Override public String apply(String value) { return value + suffix; }
     }
 
     public static final class SideEffect implements Iterable<Integer> {
