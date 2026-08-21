@@ -2,6 +2,7 @@ package io.behaviordiff.agent;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class RuntimeHooks {
@@ -47,6 +48,17 @@ public final class RuntimeHooks {
     }
 
     public static void exit(CallFrame frame, Object returnValue, Throwable throwable) {
+        pop(frame);
+        sink.completed(frame, returnValue, throwable);
+    }
+
+    public static void exitFuture(CallFrame frame, CompletableFuture<?> future) {
+        pop(frame);
+        future.whenCompleteAsync((returnValue, throwable) ->
+            sink.completed(frame, returnValue, unwrapCompletion(throwable)));
+    }
+
+    private static void pop(CallFrame frame) {
         Deque<CallFrame> stack = CALL_STACK.get();
         CallFrame current = stack.poll();
         if (current != frame) {
@@ -56,7 +68,13 @@ public final class RuntimeHooks {
         if (stack.isEmpty()) {
             CALL_STACK.remove();
         }
-        sink.completed(frame, returnValue, throwable);
+    }
+
+    private static Throwable unwrapCompletion(Throwable throwable) {
+        if (throwable instanceof java.util.concurrent.CompletionException && throwable.getCause() != null) {
+            return throwable.getCause();
+        }
+        return throwable;
     }
 
     static void setSink(Sink replacement) {

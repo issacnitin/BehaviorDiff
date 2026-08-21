@@ -11,6 +11,9 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -92,6 +95,49 @@ final class ClassRewriterTest {
                 assertEquals(true, frame.parentCallId() > 0);
             }
         }
+    }
+
+    @Test
+    void emitsCompletableFutureOnlyAfterSettlement() throws Exception {
+        List<Completion> completions = new java.util.concurrent.CopyOnWriteArrayList<>();
+        CountDownLatch settled = new CountDownLatch(2);
+        RuntimeHooks.setSink((frame, returnValue, throwable) -> {
+            if (frame.methodFullName().contains("passThrough")) {
+                completions.add(new Completion(frame, returnValue, throwable));
+                settled.countDown();
+            }
+        });
+        Object fixture = loadRewritten(AsyncFixture.class);
+
+        CompletableFuture<String> success = new CompletableFuture<>();
+        CompletableFuture<String> failure = new CompletableFuture<>();
+        assertEquals(success, invoke(
+            fixture,
+            "passThrough",
+            new Class<?>[] { CompletableFuture.class },
+            success));
+        assertEquals(failure, invoke(
+            fixture,
+            "passThrough",
+            new Class<?>[] { CompletableFuture.class },
+            failure));
+        assertEquals(0, completions.size());
+
+        success.complete("done");
+        failure.completeExceptionally(new IllegalStateException("failed"));
+        assertEquals(true, settled.await(5, TimeUnit.SECONDS));
+        assertEquals(2, completions.size());
+        Completion successful = completions.stream()
+            .filter(completion -> completion.throwable == null)
+            .findFirst()
+            .orElseThrow();
+        Completion failed = completions.stream()
+            .filter(completion -> completion.throwable != null)
+            .findFirst()
+            .orElseThrow();
+        assertEquals("done", successful.returnValue);
+        assertInstanceOf(IllegalStateException.class, failed.throwable);
+        assertNull(failed.returnValue);
     }
 
     private static Object loadRewrittenFixture() throws Exception {

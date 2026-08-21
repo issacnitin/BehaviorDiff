@@ -34,6 +34,10 @@ final class ClassRewriter {
         });
     private static final Method EXIT_METHOD = new Method(
         "exit", Type.VOID_TYPE, new Type[] { FRAME_TYPE, Type.getType(Object.class), THROWABLE_TYPE });
+    private static final Method EXIT_FUTURE_METHOD = new Method(
+        "exitFuture",
+        Type.VOID_TYPE,
+        new Type[] { FRAME_TYPE, Type.getType(java.util.concurrent.CompletableFuture.class) });
 
     byte[] rewrite(String className, byte[] original, ClassLoader loader) throws IllegalClassFormatException {
         try {
@@ -165,6 +169,14 @@ final class ClassRewriter {
                     returnLocal = newLocal(returnType);
                 }
                 storeLocal(returnLocal, returnType);
+            }
+
+            if (returnType.equals(Type.getType(java.util.concurrent.CompletableFuture.class))) {
+                loadLocal(frameLocal);
+                loadLocal(returnLocal, returnType);
+                invokeStatic(HOOKS_TYPE, EXIT_FUTURE_METHOD);
+                loadLocal(returnLocal, returnType);
+                return;
             }
 
             loadLocal(frameLocal);
