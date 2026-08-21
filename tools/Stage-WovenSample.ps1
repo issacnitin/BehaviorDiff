@@ -9,6 +9,7 @@ Writes to $OutDir and returns nothing; callers use $OutDir directly.
 param(
     [Parameter(Mandatory)][string]$TreeRoot,
     [Parameter(Mandatory)][string]$OutDir,
+    [string]$InstrumentationTreeRoot = $TreeRoot,
     [string]$Tfm = 'net8.0'
 )
 
@@ -23,7 +24,17 @@ Remove-Item $OutDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 Copy-Item "$built\*" $OutDir -Recurse -Force
 
-$weaver = Join-Path $TreeRoot 'tools/Weaver/Weaver.csproj'
+foreach ($instrumentation in @(
+    'src/BehaviorDiff.Contracts/bin/Release/netstandard2.0/BehaviorDiff.Contracts',
+    'src/BehaviorDiff.Tracer/bin/Release/netstandard2.0/BehaviorDiff.Tracer',
+    'src/BehaviorDiff.Tracer.Xunit/bin/Release/netstandard2.0/BehaviorDiff.Tracer.Xunit')) {
+    foreach ($extension in @('.dll', '.pdb')) {
+        $source = Join-Path $InstrumentationTreeRoot ($instrumentation + $extension)
+        if (Test-Path $source) { Copy-Item $source $OutDir -Force }
+    }
+}
+
+$weaver = Join-Path $InstrumentationTreeRoot 'tools/Weaver/Weaver.csproj'
 foreach ($target in @(
     @{ Name = 'Infrastructure.Collections'; Test = $false },
     @{ Name = 'Commerce.Pricing'; Test = $false },

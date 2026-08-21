@@ -235,7 +235,8 @@ function Invoke-BehaviorDiffEngineConformance {
         if (-not [string]::IsNullOrWhiteSpace($BaseRoot)) { $arguments += @('--base-root', $BaseRoot) }
         if (-not [string]::IsNullOrWhiteSpace($PrRoot)) { $arguments += @('--pr-root', $PrRoot) }
 
-        & dotnet @arguments
+        $engineOutput = @(& dotnet @arguments 2>&1)
+        $engineOutput | ForEach-Object { Write-Host $_ }
         if ($LASTEXITCODE -ne 0) { throw "Engine conformance comparison failed with exit code $LASTEXITCODE" }
 
         $document = Get-Content $output -Raw | ConvertFrom-Json
