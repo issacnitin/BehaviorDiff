@@ -90,12 +90,13 @@ The package is attached as `BehaviorDiff.Tool.0.1.0.nupkg`.
 ```powershell
 git clone https://github.com/issacnitin/BehaviorDiff.git
 cd BehaviorDiff
-dotnet pack src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj `
-  -c Release -o artifacts/packages
+pwsh -File tools/package-cli.ps1
 dotnet tool install --global BehaviorDiff.Tool `
   --add-source ./artifacts/packages
 behaviordiff --help
 ```
+
+The packaging wrapper builds and stages the shaded Java agent and the Node tracer with its production dependencies before passing `CrossLanguageTracerRoot` to `dotnet pack`. An ordinary `dotnet build` remains independent of Maven and npm.
 
 To update an existing source installation:
 

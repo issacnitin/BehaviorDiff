@@ -11,7 +11,7 @@
     <PackageId>BehaviorDiff.Tool</PackageId>
     <Version>0.1.0</Version>
     <Authors>Nitin Issac Joy</Authors>
-    <Description>Detect behavior changes between two .NET builds by tracing and comparing test execution.</Description>
+    <Description>Detect behavior changes between two .NET, Java, or Node builds by tracing and comparing test execution.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/issacnitin/BehaviorDiff</PackageProjectUrl>
     <RepositoryUrl>https://github.com/issacnitin/BehaviorDiff.git</RepositoryUrl>
@@ -45,6 +45,15 @@
           Pack="true" PackagePath="tools\net8.0\any" />
         <None Include="..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil*.dll"
           Pack="true" PackagePath="tools\net8.0\any" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(CrossLanguageTracerRoot)' != '' and Exists('$(CrossLanguageTracerRoot)')">
+    <_CrossLanguageTracerFiles Include="$(CrossLanguageTracerRoot)\**\*" />
+    <None Include="@(_CrossLanguageTracerFiles)"
+          Pack="true"
+          PackagePath="tools\net8.0\any\tracers\%(RecursiveDir)"
+          Link="tracers\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
