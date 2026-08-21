@@ -9,13 +9,16 @@ import java.util.Map;
 final class AgentOptions {
     static final String INCLUDE_ENVIRONMENT = "BEHAVIORDIFF_NAMESPACES";
     static final String EXCLUDE_ENVIRONMENT = "BEHAVIORDIFF_EXCLUDE_NAMESPACES";
+    static final String TRACE_ENVIRONMENT = "BEHAVIORDIFF_TRACE";
 
     private final List<String> includes;
     private final List<String> excludes;
+    private final String tracePath;
 
-    private AgentOptions(List<String> includes, List<String> excludes) {
+    private AgentOptions(List<String> includes, List<String> excludes, String tracePath) {
         this.includes = includes;
         this.excludes = excludes;
+        this.tracePath = tracePath;
     }
 
     static AgentOptions parse(String agentArguments, Map<String, String> environment) {
@@ -28,7 +31,10 @@ final class AgentOptions {
                 "BehaviorDiff Java agent requires include=<package prefixes> or " + INCLUDE_ENVIRONMENT);
         }
 
-        return new AgentOptions(includes, parsePrefixes(excludeText));
+        return new AgentOptions(
+            includes,
+            parsePrefixes(excludeText),
+            arguments.getOrDefault("trace", environment.get(TRACE_ENVIRONMENT)));
     }
 
     static AgentOptions fromProcess(String agentArguments) {
@@ -41,6 +47,10 @@ final class AgentOptions {
 
     List<String> excludes() {
         return excludes;
+    }
+
+    String tracePath() {
+        return tracePath;
     }
 
     private static Map<String, String> parseArguments(String text) {
@@ -57,7 +67,7 @@ final class AgentOptions {
 
             String name = part.substring(0, separator).trim();
             String value = part.substring(separator + 1).trim();
-            if (!name.equals("include") && !name.equals("exclude")) {
+            if (!name.equals("include") && !name.equals("exclude") && !name.equals("trace")) {
                 throw new IllegalArgumentException("Unknown BehaviorDiff agent option: " + name);
             }
 

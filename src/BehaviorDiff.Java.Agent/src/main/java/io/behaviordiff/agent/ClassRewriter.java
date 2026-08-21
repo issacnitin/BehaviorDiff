@@ -30,7 +30,9 @@ final class ClassRewriter {
             Type.getType(String.class),
             Type.INT_TYPE,
             Type.BOOLEAN_TYPE,
-            Type.BOOLEAN_TYPE
+            Type.BOOLEAN_TYPE,
+            Type.BOOLEAN_TYPE,
+            Type.getType(String.class)
         });
     private static final Method EXIT_METHOD = new Method(
         "exit", Type.VOID_TYPE, new Type[] { FRAME_TYPE, Type.getType(Object.class), THROWABLE_TYPE });
@@ -40,11 +42,17 @@ final class ClassRewriter {
         new Type[] { FRAME_TYPE, Type.getType(java.util.concurrent.CompletableFuture.class) });
 
     byte[] rewrite(String className, byte[] original, ClassLoader loader) throws IllegalClassFormatException {
+        String module = className.substring(0, className.indexOf('/') < 0 ? className.length() : className.indexOf('/'));
+        return rewrite(className, original, loader, module);
+    }
+
+    byte[] rewrite(String className, byte[] original, ClassLoader loader, String module)
+        throws IllegalClassFormatException {
         try {
             ClassReader reader = new ClassReader(original);
             SourceMetadata sourceMetadata = SourceMetadata.read(reader);
             ClassWriter writer = new LoaderAwareClassWriter(reader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS, loader);
-            ClassVisitor visitor = new RewritingClassVisitor(writer, reader.getClassName(), sourceMetadata);
+            ClassVisitor visitor = new RewritingClassVisitor(writer, reader.getClassName(), sourceMetadata, module);
             reader.accept(visitor, ClassReader.EXPAND_FRAMES);
             byte[] rewritten = writer.toByteArray();
             verify(className, rewritten, loader);
@@ -77,11 +85,13 @@ final class ClassRewriter {
     private static final class RewritingClassVisitor extends ClassVisitor {
         private final String owner;
         private final SourceMetadata sourceMetadata;
+        private final String module;
 
-        RewritingClassVisitor(ClassVisitor delegate, String owner, SourceMetadata sourceMetadata) {
+        RewritingClassVisitor(ClassVisitor delegate, String owner, SourceMetadata sourceMetadata, String module) {
             super(Opcodes.ASM9, delegate);
             this.owner = owner;
             this.sourceMetadata = sourceMetadata;
+            this.module = module;
         }
 
         @Override
@@ -106,7 +116,8 @@ final class ClassRewriter {
                 owner,
                 sourceMetadata.location(owner, name, descriptor),
                 sourceMetadata.isHarness(),
-                sourceMetadata.isTestRoot(name, descriptor));
+                sourceMetadata.isTestRoot(name, descriptor),
+                module);
         }
     }
 
@@ -116,6 +127,7 @@ final class ClassRewriter {
         private final SourceLocation sourceLocation;
         private final boolean harness;
         private final boolean testRoot;
+        private final String module;
         private final Label bodyStart = new Label();
         private final Label bodyEnd = new Label();
         private final Label exceptionHandler = new Label();
@@ -130,13 +142,15 @@ final class ClassRewriter {
             String owner,
             SourceLocation sourceLocation,
             boolean harness,
-            boolean testRoot) {
+            boolean testRoot,
+            String module) {
             super(Opcodes.ASM9, delegate, access, name, descriptor);
             methodFullName = owner.replace('/', '.') + "." + name + descriptor;
             returnType = Type.getReturnType(descriptor);
             this.sourceLocation = sourceLocation;
             this.harness = harness;
             this.testRoot = testRoot;
+            this.module = module;
         }
 
         @Override
@@ -152,6 +166,8 @@ final class ClassRewriter {
             push(sourceLocation.line);
             push(harness);
             push(testRoot);
+            push(returnType.getSort() == Type.VOID);
+            push(module);
             invokeStatic(HOOKS_TYPE, ENTER_METHOD);
             frameLocal = newLocal(FRAME_TYPE);
             storeLocal(frameLocal);

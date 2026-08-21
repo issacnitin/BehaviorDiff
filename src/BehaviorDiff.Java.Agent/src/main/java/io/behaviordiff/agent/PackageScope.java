@@ -12,13 +12,25 @@ final class PackageScope {
     }
 
     boolean includes(String internalClassName) {
+        return isIncluded(internalClassName) && !isExcluded(internalClassName);
+    }
+
+    boolean isIncluded(String internalClassName) {
         if (internalClassName == null) {
             return false;
         }
 
         String className = internalClassName.replace('/', '.');
         String packageName = packageName(className);
-        return matchesAny(packageName, includes) && !matchesAny(packageName, excludes);
+        return matchesAny(packageName, includes);
+    }
+
+    boolean isExcluded(String internalClassName) {
+        if (internalClassName == null) {
+            return false;
+        }
+        String className = internalClassName.replace('/', '.');
+        return matchesAny(packageName(className), excludes);
     }
 
     private static String packageName(String className) {

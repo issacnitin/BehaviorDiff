@@ -3,7 +3,9 @@ package io.behaviordiff.agent;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class RuntimeHooks {
     interface Sink {
@@ -12,6 +14,8 @@ public final class RuntimeHooks {
 
     private static final AtomicLong NEXT_CALL_ID = new AtomicLong();
     private static final ThreadLocal<Deque<CallFrame>> CALL_STACK = ThreadLocal.withInitial(ArrayDeque::new);
+    private static final ConcurrentHashMap<String, AtomicInteger> ROOT_ORDINALS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, AtomicInteger> CALL_ORDINALS = new ConcurrentHashMap<>();
     private static volatile Sink sink = (frame, returnValue, throwable) -> { };
 
     private RuntimeHooks() {
@@ -24,13 +28,16 @@ public final class RuntimeHooks {
         String filePathResolution,
         int line,
         boolean harness,
-        boolean testRoot) {
+        boolean testRoot,
+        boolean returnsVoid,
+        String module) {
         Deque<CallFrame> stack = CALL_STACK.get();
         CallFrame parent = stack.peek();
         long callId = NEXT_CALL_ID.incrementAndGet();
         String testId = testRoot
-            ? methodFullName
+            ? methodFullName + "#" + next(ROOT_ORDINALS, methodFullName)
             : parent == null ? "(no-test)" : parent.testId();
+        int ordinal = next(CALL_ORDINALS, testId + "\0" + methodFullName);
         CallFrame frame = new CallFrame(
             callId,
             methodFullName,
@@ -42,7 +49,12 @@ public final class RuntimeHooks {
             parent == null ? 0 : parent.callId(),
             stack.size(),
             harness,
-            testRoot);
+            testRoot,
+            ordinal,
+            Thread.currentThread().getId(),
+            StructuralDigest.compute(arguments),
+            returnsVoid,
+            module);
         stack.push(frame);
         return frame;
     }
@@ -77,8 +89,18 @@ public final class RuntimeHooks {
         return throwable;
     }
 
+    private static int next(ConcurrentHashMap<String, AtomicInteger> counters, String key) {
+        return counters.computeIfAbsent(key, ignored -> new AtomicInteger()).getAndIncrement();
+    }
+
+    static void initialize(TraceSession traceSession) {
+        setSink(traceSession::writeEvent);
+    }
+
     static void setSink(Sink replacement) {
         CALL_STACK.remove();
+        ROOT_ORDINALS.clear();
+        CALL_ORDINALS.clear();
         sink = replacement == null ? (frame, returnValue, throwable) -> { } : replacement;
     }
 }

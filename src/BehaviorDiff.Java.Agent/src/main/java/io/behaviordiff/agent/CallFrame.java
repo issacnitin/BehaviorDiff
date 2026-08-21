@@ -14,6 +14,11 @@ public final class CallFrame {
     private final int callDepth;
     private final boolean harness;
     private final boolean testRoot;
+    private final int ordinal;
+    private final long threadId;
+    private final DigestResult argumentsDigest;
+    private final boolean returnsVoid;
+    private final String module;
 
     CallFrame(
         long callId,
@@ -26,7 +31,12 @@ public final class CallFrame {
         long parentCallId,
         int callDepth,
         boolean harness,
-        boolean testRoot) {
+        boolean testRoot,
+        int ordinal,
+        long threadId,
+        DigestResult argumentsDigest,
+        boolean returnsVoid,
+        String module) {
         this.callId = callId;
         this.methodFullName = methodFullName;
         this.arguments = arguments.clone();
@@ -38,6 +48,11 @@ public final class CallFrame {
         this.callDepth = callDepth;
         this.harness = harness;
         this.testRoot = testRoot;
+        this.ordinal = ordinal;
+        this.threadId = threadId;
+        this.argumentsDigest = argumentsDigest;
+        this.returnsVoid = returnsVoid;
+        this.module = module;
     }
 
     public long callId() {
@@ -82,6 +97,26 @@ public final class CallFrame {
 
     public boolean isTestRoot() {
         return testRoot;
+    }
+
+    public int ordinal() {
+        return ordinal;
+    }
+
+    public long threadId() {
+        return threadId;
+    }
+
+    public DigestResult argumentsDigest() {
+        return argumentsDigest;
+    }
+
+    public boolean returnsVoid() {
+        return returnsVoid;
+    }
+
+    public String module() {
+        return module;
     }
 
     @Override

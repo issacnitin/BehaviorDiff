@@ -17,10 +17,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.LongAdder;
 
 public final class StructuralDigest {
     private static final int MAX_DEPTH = 6;
     private static final int RENDERED_CAP = 2000;
+    private static final LongAdder VALUES_DIGESTED = new LongAdder();
+    private static final LongAdder DEPTH_LIMITED = new LongAdder();
+    private static final LongAdder ERRORED = new LongAdder();
+    private static final LongAdder RENDERED_TRUNCATED = new LongAdder();
 
     private StructuralDigest() {
     }
@@ -33,10 +38,14 @@ public final class StructuralDigest {
         String rendered = text.length() <= RENDERED_CAP
             ? text
             : text.substring(0, RENDERED_CAP) + "<truncated>";
+        if (text.length() > RENDERED_CAP) {
+            RENDERED_TRUNCATED.increment();
+        }
         return new DigestResult(hash(text), rendered);
     }
 
     private static void write(Object value, StringBuilder output, Context context, int depth) {
+        VALUES_DIGESTED.increment();
         if (value == null) {
             output.append("null");
             return;
@@ -48,6 +57,7 @@ public final class StructuralDigest {
         }
 
         if (depth >= MAX_DEPTH) {
+            DEPTH_LIMITED.increment();
             output.append("<depth:").append(type.getName()).append('>');
             return;
         }
@@ -238,6 +248,7 @@ public final class StructuralDigest {
     }
 
     private static void appendError(StringBuilder output, String location, Exception exception) {
+        ERRORED.increment();
         output.append("<error:").append(location).append(':')
             .append(exception.getClass().getSimpleName()).append('>');
     }
@@ -261,5 +272,21 @@ public final class StructuralDigest {
 
     private static final class Context {
         private final IdentityHashMap<Object, Integer> references = new IdentityHashMap<>();
+    }
+
+    static long valuesDigested() {
+        return VALUES_DIGESTED.sum();
+    }
+
+    static long depthLimited() {
+        return DEPTH_LIMITED.sum();
+    }
+
+    static long errored() {
+        return ERRORED.sum();
+    }
+
+    static long renderedTruncated() {
+        return RENDERED_TRUNCATED.sum();
     }
 }
