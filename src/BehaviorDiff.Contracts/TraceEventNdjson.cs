@@ -25,6 +25,7 @@ namespace BehaviorDiff.Contracts
         public const string CallDepthField = "callDepth";
         public const string ParentCallIdField = "parentCallId";
         public const string CallIdField = "callId";
+        public const string OrdinalField = "ordinal";
         public const string ArgsDigestField = "argsDigest";
         public const string ArgsRenderedField = "argsRendered";
         public const string ReturnDigestField = "returnDigest";
@@ -68,6 +69,7 @@ namespace BehaviorDiff.Contracts
             AppendNumber(builder, LineField, traceEvent.Line, first: false);
             AppendNumber(builder, CallDepthField, traceEvent.CallDepth, first: false);
             AppendNumber(builder, CallIdField, traceEvent.CallId, first: false);
+            AppendNumber(builder, OrdinalField, traceEvent.Ordinal, first: false);
 
             if (traceEvent.ParentCallId.HasValue)
             {
@@ -135,6 +137,7 @@ namespace BehaviorDiff.Contracts
             string? exceptionType = null;
             long? callId = null;
             long? parentCallId = null;
+            int? ordinal = null;
             int sourceLine = 0;
             int callDepth = 0;
             int threadId = 0;
@@ -288,6 +291,16 @@ namespace BehaviorDiff.Contracts
 
                             break;
 
+                        case OrdinalField:
+                            int parsedOrdinal;
+                            if (!TryReadInt32(line, ref i, OrdinalField, out parsedOrdinal, out error))
+                            {
+                                return false;
+                            }
+
+                            ordinal = parsedOrdinal;
+                            break;
+
                         case ParentCallIdField:
                             if (!TryReadNullableInt64(line, ref i, ParentCallIdField, out parentCallId, out error))
                             {
@@ -348,6 +361,12 @@ namespace BehaviorDiff.Contracts
                 return false;
             }
 
+            if (!ordinal.HasValue || ordinal.Value < 0)
+            {
+                error = "'" + OrdinalField + "' is required and must be non-negative";
+                return false;
+            }
+
             traceEvent = new TraceEvent
             {
                 TestId = testId!,
@@ -358,6 +377,7 @@ namespace BehaviorDiff.Contracts
                 CallDepth = callDepth,
                 ParentCallId = parentCallId,
                 CallId = callId.Value,
+                Ordinal = ordinal.Value,
                 ArgsDigest = argsDigest,
                 ArgsRendered = argsRendered,
                 ReturnDigest = returnDigest,

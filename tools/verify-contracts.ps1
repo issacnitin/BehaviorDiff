@@ -24,16 +24,16 @@ $out2 = Join-Path $work 'out2.ndjson'
 
 $lines = @(
     # plain root call
-    '{"testId":"Acme.Tests.Cart.AddsItem","methodFullName":"Acme.Cart.Add(System.String,System.Int32)","filePath":"C:\\src\\Acme\\Cart.cs","line":42,"callDepth":0,"callId":1,"argsDigest":"sha256:aa","returnDigest":"void","threadId":1}'
+    '{"testId":"Acme.Tests.Cart.AddsItem","methodFullName":"Acme.Cart.Add(System.String,System.Int32)","filePath":"C:\\src\\Acme\\Cart.cs","line":42,"callDepth":0,"callId":1,"ordinal":0,"argsDigest":"sha256:aa","returnDigest":"void","threadId":1}'
     # quotes, backslashes, embedded newline + tab, BMP escape (U+6F22), astral surrogate pair (U+1F680)
-    '{"testId":"Acme.Tests.Cart.AddsItem","methodFullName":"Acme.Cart.Validate(System.String)","filePath":"C:\\src\\Acme\\Cart.cs","line":77,"callDepth":1,"callId":2,"parentCallId":1,"argsDigest":"a=\"x\\\"y\\\\z\"\nTAB:\there \u6f22 \ud83d\ude80","returnDigest":"true","threadId":1}'
+    '{"testId":"Acme.Tests.Cart.AddsItem","methodFullName":"Acme.Cart.Validate(System.String)","filePath":"C:\\src\\Acme\\Cart.cs","line":77,"callDepth":1,"callId":2,"ordinal":0,"parentCallId":1,"argsDigest":"a=\"x\\\"y\\\\z\"\nTAB:\there \u6f22 \ud83d\ude80","returnDigest":"true","threadId":1}'
     # explicit null parentCallId, exception path, optional fields absent
-    '{"testId":"Acme.Tests.Cart.Throws","methodFullName":"Acme.Cart.Add(System.String,System.Int32)","line":42,"callDepth":0,"callId":3,"parentCallId":null,"exceptionType":"System.ArgumentNullException","threadId":4}'
+    '{"testId":"Acme.Tests.Cart.Throws","methodFullName":"Acme.Cart.Add(System.String,System.Int32)","line":42,"callDepth":0,"callId":3,"ordinal":0,"parentCallId":null,"exceptionType":"System.ArgumentNullException","threadId":4}'
     # unknown forward-compat field holding a nested object/array with a brace inside a string
-    '{"testId":"Acme.Tests.Cart.Throws","methodFullName":"Acme.Cart.Log()","line":0,"callDepth":1,"callId":4,"parentCallId":3,"threadId":4,"futureField":{"nested":[1,2,{"deep":"}"}],"b":true}}'
+    '{"testId":"Acme.Tests.Cart.Throws","methodFullName":"Acme.Cart.Log()","line":0,"callDepth":1,"callId":4,"ordinal":0,"parentCallId":3,"threadId":4,"futureField":{"nested":[1,2,{"deep":"}"}],"b":true}}'
     # blank line mid-stream
     ''
-    '{"testId":"Acme.Tests.Cart.Throws","methodFullName":"Acme.Cart.Flush()","line":9,"callDepth":1,"callId":5,"parentCallId":3,"threadId":4}'
+    '{"testId":"Acme.Tests.Cart.Throws","methodFullName":"Acme.Cart.Flush()","line":9,"callDepth":1,"callId":5,"ordinal":0,"parentCallId":3,"threadId":4}'
     # torn final line: the traced process died mid-write
     '{"testId":"Acme.Tests.Cart.Throws","methodFullName":"Acme.Cart.Tor'
 )

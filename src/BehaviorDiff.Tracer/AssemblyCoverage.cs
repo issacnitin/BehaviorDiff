@@ -27,6 +27,7 @@ namespace BehaviorDiff.Tracer
 
         private long _tracedCalls;
         private int _patchedMembers;
+        private int _skippedMembers;
         private int _patchFailedMembers;
         private int _membersWithExactSource;
         private int _patchingComplete;
@@ -65,6 +66,11 @@ namespace BehaviorDiff.Tracer
         internal void NotePatchedMember()
         {
             Interlocked.Increment(ref _patchedMembers);
+        }
+
+        internal void NoteSkippedMember()
+        {
+            Interlocked.Increment(ref _skippedMembers);
         }
 
         internal void NotePatchFailed()
@@ -135,6 +141,7 @@ namespace BehaviorDiff.Tracer
         internal AssemblyManifestEntry ToManifestEntry()
         {
             int patched = Volatile.Read(ref _patchedMembers);
+            int skipped = Volatile.Read(ref _skippedMembers);
 
             return new AssemblyManifestEntry
             {
@@ -143,6 +150,8 @@ namespace BehaviorDiff.Tracer
                 Scanned = Scanned,
                 Instrumented = patched > 0,
                 PatchedMembers = patched,
+                DiscoveredMembers = patched + skipped,
+                SkippedMembers = skipped,
                 PatchFailedMembers = PatchFailedMembers,
                 QueuedAtMs = QueuedAtMs,
                 PatchedAtMs = PatchedAtMs,

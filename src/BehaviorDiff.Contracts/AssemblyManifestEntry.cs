@@ -48,6 +48,12 @@ namespace BehaviorDiff.Contracts
         /// <summary>Members successfully patched in this assembly.</summary>
         public int PatchedMembers { get; init; }
 
+        /// <summary>All members considered in this module.</summary>
+        public int DiscoveredMembers { get; init; }
+
+        /// <summary>Members deliberately not instrumented.</summary>
+        public int SkippedMembers { get; init; }
+
         /// <summary>
         /// Members selected for patching where the patch threw or did not register. Non-zero alongside a
         /// zero <see cref="PatchedMembers"/> means the tracer failed outright on this assembly, which is

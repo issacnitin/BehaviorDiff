@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using BehaviorDiff.Contracts;
 
 namespace BehaviorDiff.Engine
 {
@@ -159,7 +160,7 @@ namespace BehaviorDiff.Engine
                 // as a callee of this subtree, so its absence is not a gap in this subtree's coverage.
                 if (member.Status == "Skipped"
                     && member.MethodFullName != null
-                    && member.SkipReason != "TypeInitializer")
+                    && member.SkipReason != NeutralSkipReason.Unobservable)
                 {
                     skippedByType[DeclaringType(member.MethodFullName)] = member.MethodFullName
                         + (member.SkipReason is null ? string.Empty : " (" + member.SkipReason + ")");
@@ -613,9 +614,8 @@ namespace BehaviorDiff.Engine
                             StringComparison.Ordinal))
                     .ToArray();
                 if (members.Length == 0 || members.Any(member => member.Status != "Skipped"
-                    || (member.SkipReason != "PropertyOrOperator"
-                        && member.SkipReason != "TypeInitializer"
-                        && member.SkipReason != "ExcludedNamespace")))
+                    || (member.SkipReason != NeutralSkipReason.ExcludedByScope
+                        && member.SkipReason != NeutralSkipReason.Unobservable)))
                 {
                     return false;
                 }

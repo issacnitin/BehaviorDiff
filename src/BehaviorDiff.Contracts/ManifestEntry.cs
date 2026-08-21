@@ -41,7 +41,7 @@ namespace BehaviorDiff.Contracts
 
         public PatchStatus Status { get; init; }
 
-        /// <summary>Why it was skipped. Null unless <see cref="Status"/> is <see cref="PatchStatus.Skipped"/>.</summary>
+        /// <summary>Language-neutral <see cref="NeutralSkipReason"/> value. Null unless skipped.</summary>
         public string? SkipReason { get; init; }
 
         /// <summary>How the member returns its result: Void, Sync, Task, TaskOfT, ValueTask, ValueTaskOfT.</summary>
@@ -57,7 +57,7 @@ namespace BehaviorDiff.Contracts
         /// <summary>How this member's source path was resolved; see <see cref="SourceResolution"/>.</summary>
         public string? SourceResolution { get; init; }
 
-        /// <summary>Error text for a failed patch or a failed type enumeration.</summary>
+        /// <summary>Language-specific skip reason, or error text for a failed patch/enumeration.</summary>
         public string? Detail { get; init; }
     }
 }

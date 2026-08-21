@@ -58,7 +58,7 @@ namespace BehaviorDiff.Engine
                 ManifestEntry? present = baseEntry ?? prEntry;
                 if ((baseEntry is null || prEntry is null)
                     && present?.Status == PatchStatus.Skipped
-                    && present.SkipReason == "ExcludedNamespace")
+                    && present.SkipReason == NeutralSkipReason.ExcludedByScope)
                 {
                     continue;
                 }

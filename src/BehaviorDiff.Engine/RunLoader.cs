@@ -15,7 +15,9 @@ namespace BehaviorDiff.Engine
             IReadOnlyList<LoadedEvent> events,
             IReadOnlyDictionary<string, ManifestEntry> members,
             IReadOnlyDictionary<string, AssemblyManifestEntry> assemblies,
-            IReadOnlyList<string> traceFiles)
+            IReadOnlyList<string> traceFiles,
+            string schema,
+            string language)
         {
             Name = name;
             Root = root;
@@ -23,6 +25,8 @@ namespace BehaviorDiff.Engine
             Members = members;
             Assemblies = assemblies;
             TraceFiles = traceFiles;
+            Schema = schema;
+            Language = language;
         }
 
         internal string Name { get; }
@@ -37,6 +41,10 @@ namespace BehaviorDiff.Engine
         internal IReadOnlyDictionary<string, AssemblyManifestEntry> Assemblies { get; }
 
         internal IReadOnlyList<string> TraceFiles { get; }
+
+        internal string Schema { get; }
+
+        internal string Language { get; }
 
         internal int SubjectEventCount => Events.Count(e => !e.Event.IsHarness);
 
@@ -103,11 +111,14 @@ namespace BehaviorDiff.Engine
             }
 
             var raw = new List<(TraceEvent Event, string ProcessKey, int Line)>();
+            var recordCounts = new Dictionary<string, long>(StringComparer.Ordinal);
             foreach (string file in traceFiles)
             {
                 string processKey = Path.GetFileNameWithoutExtension(file);
                 foreach (TraceLineResult result in NdjsonTraceReader.ReadWithDiagnostics(file))
                 {
+                    recordCounts.TryGetValue(processKey, out long records);
+                    recordCounts[processKey] = records + 1;
                     if (result.Event is null)
                     {
                         report.MalformedLines++;
@@ -130,14 +141,103 @@ namespace BehaviorDiff.Engine
 
             var members = new Dictionary<string, ManifestEntry>(StringComparer.Ordinal);
             var assemblies = new Dictionary<string, AssemblyManifestEntry>(StringComparer.Ordinal);
+            string? schema = null;
+            string? language = null;
             foreach (string manifestPath in manifestFiles)
             {
                 CoverageManifest manifest = ManifestFile.Read(manifestPath);
+                ValidateManifest(manifestPath, manifest, recordCounts);
+
+                if (manifest.Metadata is null)
+                {
+                    throw new DiffInputException("Manifest has no run metadata: " + manifestPath);
+                }
+
+                if (!string.Equals(manifest.Metadata.Schema, TraceFormat.Schema, StringComparison.Ordinal))
+                {
+                    throw new DiffInputException("Manifest schema '" + manifest.Metadata.Schema
+                        + "' is unsupported; expected '" + TraceFormat.Schema + "': " + manifestPath);
+                }
+
+                if (schema != null && !string.Equals(schema, manifest.Metadata.Schema, StringComparison.Ordinal)
+                    || language != null && !string.Equals(language, manifest.Metadata.Language, StringComparison.Ordinal))
+                {
+                    throw new DiffInputException("Process manifests disagree on schema or language in run '" + name + "'.");
+                }
+
+                schema = manifest.Metadata.Schema;
+                language = manifest.Metadata.Language;
                 MergeMembers(members, manifest.Members);
                 MergeAssemblies(assemblies, manifest.Assemblies);
             }
 
-            return new RunData(name, root, events, members, assemblies, traceFiles);
+            if (manifestFiles.Count == 0 || schema is null || language is null)
+            {
+                throw new DiffInputException("Run '" + name + "': no versioned coverage manifests in " + directory);
+            }
+
+            ValidateOrdinals(name, raw);
+            return new RunData(name, root, events, members, assemblies, traceFiles, schema, language);
+        }
+
+        private static void ValidateManifest(
+            string path,
+            CoverageManifest manifest,
+            IReadOnlyDictionary<string, long> recordCounts)
+        {
+            foreach (AssemblyManifestEntry module in manifest.Assemblies)
+            {
+                int memberRecords = manifest.Members.Count(member =>
+                    string.Equals(member.Assembly, module.Assembly, StringComparison.Ordinal));
+                if (module.PatchFailedMembers != 0
+                    || module.DiscoveredMembers != module.PatchedMembers + module.SkippedMembers
+                    || module.DiscoveredMembers != memberRecords)
+                {
+                    throw new DiffInputException("Manifest member accounting does not reconcile for module '"
+                        + module.Assembly + "': discovered=" + module.DiscoveredMembers
+                        + " instrumented=" + module.PatchedMembers + " skipped=" + module.SkippedMembers
+                        + " failed=" + module.PatchFailedMembers + " records=" + memberRecords + ".");
+                }
+            }
+
+            if (manifest.WriterStats is null)
+            {
+                throw new DiffInputException("Manifest has no writer accounting: " + path);
+            }
+
+            WriterStatsEntry writer = manifest.WriterStats;
+            string fileName = Path.GetFileName(path);
+            const string suffix = ".manifest.ndjson";
+            string processKey = fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+                ? fileName.Substring(0, fileName.Length - suffix.Length)
+                : fileName;
+            recordCounts.TryGetValue(processKey, out long physicalRecords);
+            if (writer.Dropped != 0 || writer.Enqueued != writer.Written || writer.Written != physicalRecords)
+            {
+                throw new DiffInputException("Trace writer accounting does not reconcile for '" + processKey
+                    + "': enqueued=" + writer.Enqueued + " written=" + writer.Written
+                    + " records=" + physicalRecords + " dropped=" + writer.Dropped + ".");
+            }
+        }
+
+        private static void ValidateOrdinals(
+            string runName,
+            IReadOnlyList<(TraceEvent Event, string ProcessKey, int Line)> events)
+        {
+            foreach (IGrouping<string, (TraceEvent Event, string ProcessKey, int Line)> group in events.GroupBy(
+                item => item.ProcessKey + "\0" + item.Event.TestId + "\0" + item.Event.MethodFullName,
+                StringComparer.Ordinal))
+            {
+                int expected = 0;
+                foreach (int ordinal in group.Select(item => item.Event.Ordinal).OrderBy(value => value))
+                {
+                    if (ordinal != expected++)
+                    {
+                        throw new DiffInputException("Run '" + runName
+                            + "' has a duplicate or non-contiguous call ordinal for " + group.Key.Replace('\0', '|') + ".");
+                    }
+                }
+            }
         }
 
         /// <summary>

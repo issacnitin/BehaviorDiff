@@ -6,6 +6,14 @@ using static BehaviorDiff.Contracts.Json;
 
 namespace BehaviorDiff.Contracts
 {
+    /// <summary>Required metadata shared by every process manifest in one run.</summary>
+    public sealed class RunMetadataEntry
+    {
+        public string Schema { get; init; } = TraceFormat.Schema;
+
+        public string Language { get; init; } = string.Empty;
+    }
+
     /// <summary>Process-wide canonicalizer counters.</summary>
     public sealed class DigestStatsEntry
     {
@@ -60,6 +68,8 @@ namespace BehaviorDiff.Contracts
     /// <summary>Everything one process recorded about what it could and could not observe.</summary>
     public sealed class CoverageManifest
     {
+        public RunMetadataEntry? Metadata { get; init; }
+
         public IReadOnlyList<AssemblyManifestEntry> Assemblies { get; init; } = new AssemblyManifestEntry[0];
 
         public IReadOnlyList<ManifestEntry> Members { get; init; } = new ManifestEntry[0];
@@ -78,11 +88,15 @@ namespace BehaviorDiff.Contracts
     public static class ManifestNdjson
     {
         public const string KindField = "kind";
+        public const string RunKind = "run";
         public const string AssemblyKind = "assembly";
         public const string MemberKind = "member";
         public const string DigestKind = "digest";
         public const string UnruledKind = "unruled";
         public const string WriterKind = "writer";
+
+        public const string SchemaField = "schema";
+        public const string LanguageField = "language";
 
         public const string EnqueuedField = "enqueued";
         public const string WrittenField = "written";
@@ -109,6 +123,8 @@ namespace BehaviorDiff.Contracts
         public const string ScannedField = "scanned";
         public const string InstrumentedField = "instrumented";
         public const string PatchedMembersField = "patchedMembers";
+        public const string DiscoveredMembersField = "discoveredMembers";
+        public const string SkippedMembersField = "skippedMembers";
         public const string PatchFailedMembersField = "patchFailedMembers";
         public const string QueuedAtMsField = "queuedAtMs";
         public const string PatchedAtMsField = "patchedAtMs";
@@ -120,6 +136,21 @@ namespace BehaviorDiff.Contracts
         public const string SourceRuleAppliedField = "sourceRule";
         public const string IsTestAssemblyField = "isTestAssembly";
         public const string TestFrameworkReferenceField = "testFrameworkReference";
+
+        public static string ToLine(RunMetadataEntry entry)
+        {
+            if (entry is null)
+            {
+                throw new ArgumentNullException(nameof(entry));
+            }
+
+            var builder = new StringBuilder(96);
+            builder.Append('{');
+            AppendString(builder, KindField, RunKind, first: true);
+            AppendString(builder, SchemaField, entry.Schema, first: false);
+            AppendString(builder, LanguageField, entry.Language, first: false);
+            return builder.Append('}').ToString();
+        }
 
         public static string ToLine(ManifestEntry entry)
         {
@@ -218,6 +249,8 @@ namespace BehaviorDiff.Contracts
             AppendBoolean(builder, ScannedField, entry.Scanned, first: false);
             AppendBoolean(builder, InstrumentedField, entry.Instrumented, first: false);
             AppendNumber(builder, PatchedMembersField, entry.PatchedMembers, first: false);
+            AppendNumber(builder, DiscoveredMembersField, entry.DiscoveredMembers, first: false);
+            AppendNumber(builder, SkippedMembersField, entry.SkippedMembers, first: false);
             AppendNumber(builder, PatchFailedMembersField, entry.PatchFailedMembers, first: false);
             AppendNumber(builder, QueuedAtMsField, entry.QueuedAtMs, first: false);
 
@@ -272,11 +305,33 @@ namespace BehaviorDiff.Contracts
             out WriterStatsEntry? writerStats,
             out string? error)
         {
+            return TryParseLine(
+                line,
+                out member,
+                out assemblyEntry,
+                out digestStats,
+                out unruled,
+                out writerStats,
+                out RunMetadataEntry? _,
+                out error);
+        }
+
+        public static bool TryParseLine(
+            string line,
+            out ManifestEntry? member,
+            out AssemblyManifestEntry? assemblyEntry,
+            out DigestStatsEntry? digestStats,
+            out UnruledEnumerableEntry? unruled,
+            out WriterStatsEntry? writerStats,
+            out RunMetadataEntry? metadata,
+            out string? error)
+        {
             member = null;
             assemblyEntry = null;
             digestStats = null;
             unruled = null;
             writerStats = null;
+            metadata = null;
             error = null;
 
             if (line is null)
@@ -299,6 +354,17 @@ namespace BehaviorDiff.Contracts
 
             switch (kind)
             {
+                case RunKind:
+                    string? schema = GetString(fields, SchemaField);
+                    string? language = GetString(fields, LanguageField);
+                    if (string.IsNullOrEmpty(schema) || string.IsNullOrEmpty(language))
+                    {
+                        error = "'" + SchemaField + "' and '" + LanguageField + "' are required and must be non-empty";
+                        return false;
+                    }
+
+                    metadata = new RunMetadataEntry { Schema = schema!, Language = language! };
+                    return true;
                 case MemberKind:
                     return TryBuildMember(fields, out member, out error);
                 case AssemblyKind:
@@ -430,6 +496,8 @@ namespace BehaviorDiff.Contracts
                 Scanned = GetBoolean(fields, ScannedField),
                 Instrumented = GetBoolean(fields, InstrumentedField),
                 PatchedMembers = (int)(GetInt64(fields, PatchedMembersField) ?? 0),
+                DiscoveredMembers = (int)(GetInt64(fields, DiscoveredMembersField) ?? 0),
+                SkippedMembers = (int)(GetInt64(fields, SkippedMembersField) ?? 0),
                 PatchFailedMembers = (int)(GetInt64(fields, PatchFailedMembersField) ?? 0),
                 QueuedAtMs = GetInt64(fields, QueuedAtMsField) ?? 0,
                 PatchedAtMs = GetInt64(fields, PatchedAtMsField),
@@ -608,6 +676,11 @@ namespace BehaviorDiff.Contracts
             using var stream = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.Read);
             using var writer = new StreamWriter(stream, Utf8NoBom) { NewLine = TraceEventNdjson.LineTerminator };
 
+            if (manifest.Metadata != null)
+            {
+                writer.WriteLine(ManifestNdjson.ToLine(manifest.Metadata));
+            }
+
             foreach (AssemblyManifestEntry entry in manifest.Assemblies)
             {
                 writer.WriteLine(ManifestNdjson.ToLine(entry));
@@ -642,6 +715,7 @@ namespace BehaviorDiff.Contracts
             var unruledEntries = new List<UnruledEnumerableEntry>();
             DigestStatsEntry? stats = null;
             WriterStatsEntry? writer = null;
+            RunMetadataEntry? metadata = null;
             long lineNumber = 0;
 
             using var reader = new StreamReader(
@@ -665,6 +739,7 @@ namespace BehaviorDiff.Contracts
                         out DigestStatsEntry? digestStats,
                         out UnruledEnumerableEntry? unruled,
                         out WriterStatsEntry? writerStats,
+                        out RunMetadataEntry? runMetadata,
                         out string? error))
                 {
                     throw new FormatException(path + "(" + lineNumber + "): " + error);
@@ -690,10 +765,20 @@ namespace BehaviorDiff.Contracts
                 {
                     writer = writerStats;
                 }
+                else if (runMetadata != null)
+                {
+                    if (metadata != null)
+                    {
+                        throw new FormatException(path + "(" + lineNumber + "): duplicate run metadata record");
+                    }
+
+                    metadata = runMetadata;
+                }
             }
 
             return new CoverageManifest
             {
+                Metadata = metadata,
                 Assemblies = assemblies,
                 Members = members,
                 UnruledEnumerables = unruledEntries,

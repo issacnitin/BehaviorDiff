@@ -40,6 +40,9 @@ namespace BehaviorDiff.Contracts
         /// <summary>Identifier of this call, unique within a single trace file.</summary>
         public long CallId { get; init; }
 
+        /// <summary>Zero-based entry order within this event's (TestId, MethodFullName) key.</summary>
+        public int Ordinal { get; init; }
+
         /// <summary>Hash of the canonical rendering of the arguments, or null when not captured.</summary>
         public string? ArgsDigest { get; init; }
 

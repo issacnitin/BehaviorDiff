@@ -25,6 +25,9 @@ namespace BehaviorDiff.Tracer
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> s_testRootInvocations =
             new System.Collections.Concurrent.ConcurrentDictionary<string, int>(StringComparer.Ordinal);
 
+        private static readonly ConcurrentDictionary<string, int> s_callOrdinals =
+            new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+
         // Guards against a traced method being re-entered by the tracer itself, e.g. through argument rendering.
         [ThreadStatic]
         private static bool t_inTracer;
@@ -231,11 +234,15 @@ namespace BehaviorDiff.Tracer
             }
 
             CallFrame? parent = s_currentFrame.Value;
+            string testId = s_testId.Value ?? NoTestId;
+            string ordinalKey = testId + "\0" + info.FullName;
+            int ordinal = s_callOrdinals.AddOrUpdate(ordinalKey, 0, (_, current) => checked(current + 1));
             var frame = new CallFrame(
                 Interlocked.Increment(ref s_nextCallId),
+                ordinal,
                 parent,
                 info,
-                s_testId.Value ?? NoTestId,
+                testId,
                 ValueRenderer.RenderArguments(info.ParameterNames, args, s_options.MaxDigestLength),
                 Environment.CurrentManagedThreadId);
 
@@ -375,6 +382,7 @@ namespace BehaviorDiff.Tracer
                 CallDepth = frame.Depth,
                 ParentCallId = frame.Parent?.CallId,
                 CallId = frame.CallId,
+                Ordinal = frame.Ordinal,
                 ArgsDigest = frame.Args?.Hash,
                 ArgsRendered = frame.Args?.Rendered,
                 ReturnDigest = result?.Hash,

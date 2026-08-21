@@ -49,8 +49,15 @@ Write-Host "trace    : $($traceFile.Name)"
 Write-Host "manifest : $($manifestFile.Name)"
 
 $records = Get-Content $manifestFile.FullName | ForEach-Object { $_ | ConvertFrom-Json }
+$runMetadata = $records | Where-Object { $_.kind -eq 'run' }
 $assemblies = $records | Where-Object { $_.kind -eq 'assembly' }
 $members = $records | Where-Object { $_.kind -eq 'member' }
+
+if ($runMetadata.Count -ne 1 `
+    -or $runMetadata.schema -ne 'behaviordiff.trace/1' `
+    -or $runMetadata.language -ne 'dotnet') {
+    throw 'run metadata is missing, duplicated, or invalid'
+}
 
 Write-Host ''
 Write-Host '=== assembly provenance ===' -ForegroundColor Cyan
@@ -110,6 +117,16 @@ $sum = $patched + $skipped.Count + $failed + $enumFailed
 Write-Host ("  sum of statuses      : {0}" -f $sum)
 Write-Host ("  reconciles           : {0}" -f ($sum -eq $discovered))
 if ($sum -ne $discovered) { throw "manifest counts do not reconcile: $sum vs $discovered" }
+
+foreach ($assembly in $assemblies) {
+    $moduleRecords = @($members | Where-Object { $_.assembly -eq $assembly.assembly }).Count
+    $moduleSum = $assembly.patchedMembers + $assembly.skippedMembers
+    if ($assembly.discoveredMembers -ne $moduleSum `
+        -or $assembly.discoveredMembers -ne $moduleRecords `
+        -or $assembly.patchFailedMembers -ne 0) {
+        throw "module $($assembly.assembly) does not reconcile: discovered=$($assembly.discoveredMembers) instrumented=$($assembly.patchedMembers) skipped=$($assembly.skippedMembers) records=$moduleRecords failed=$($assembly.patchFailedMembers)"
+    }
+}
 
 Write-Host ''
 Write-Host '=== patched vs traced ===' -ForegroundColor Cyan

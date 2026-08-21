@@ -28,6 +28,9 @@ namespace BehaviorDiff.Weaver
         /// <summary>Null when the member is to be woven; otherwise the reason it is not.</summary>
         internal string? SkipReason { get; set; }
 
+        /// <summary>Backend-specific reason retained for diagnostics.</summary>
+        internal string? SkipDetail { get; set; }
+
         /// <summary>Assigned only to woven members, dense and zero-based.</summary>
         internal int WeaveIndex { get; set; } = -1;
     }
@@ -75,7 +78,8 @@ namespace BehaviorDiff.Weaver
                         FullName = MethodSelector.BuildFullName(member, parameters),
                         ReturnKind = MethodSelector.ClassifyReturn(member),
                         IsTestRoot = MethodSelector.IsTestRoot(member, options.TestAttributeNames),
-                        SkipReason = reason == SkipReason.None ? null : reason.ToString(),
+                        SkipReason = reason == SkipReason.None ? null : NeutralReason(reason),
+                        SkipDetail = reason == SkipReason.None ? null : ".NET: " + reason.ToString(),
                     };
 
                     var names = new string[parameters.Length];
@@ -96,6 +100,25 @@ namespace BehaviorDiff.Weaver
             }
 
             return plans;
+        }
+
+        private static string NeutralReason(SkipReason reason)
+        {
+            return reason switch
+            {
+                SkipReason.CompilerGeneratedType => NeutralSkipReason.CompilerGenerated,
+                SkipReason.StateMachineType => NeutralSkipReason.Unobservable,
+                SkipReason.ExcludedNamespace => NeutralSkipReason.ExcludedByScope,
+                SkipReason.CompilerGenerated => NeutralSkipReason.CompilerGenerated,
+                SkipReason.PropertyOrOperator => NeutralSkipReason.ExcludedByScope,
+                SkipReason.NoBody => NeutralSkipReason.DeclaredExternally,
+                SkipReason.ByRefOrPointer => NeutralSkipReason.UnsupportedShape,
+                SkipReason.TypeInitializer => NeutralSkipReason.Unobservable,
+                SkipReason.DeclaredOnSystemType => NeutralSkipReason.DeclaredExternally,
+                SkipReason.GenericTypeDefinition => NeutralSkipReason.UnsupportedShape,
+                SkipReason.GenericDefinition => NeutralSkipReason.UnsupportedShape,
+                _ => NeutralSkipReason.UnsupportedShape,
+            };
         }
     }
 }

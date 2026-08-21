@@ -66,9 +66,10 @@ namespace BehaviorDiff.Tracer
     {
         private int _emitted;
 
-        internal CallFrame(long callId, CallFrame? parent, MethodTraceInfo info, string testId, DigestResult? args, int threadId)
+        internal CallFrame(long callId, int ordinal, CallFrame? parent, MethodTraceInfo info, string testId, DigestResult? args, int threadId)
         {
             CallId = callId;
+            Ordinal = ordinal;
             Parent = parent;
             Depth = parent is null ? 0 : parent.Depth + 1;
             Info = info;
@@ -78,6 +79,8 @@ namespace BehaviorDiff.Tracer
         }
 
         internal long CallId { get; }
+
+        internal int Ordinal { get; }
 
         internal CallFrame? Parent { get; }
 

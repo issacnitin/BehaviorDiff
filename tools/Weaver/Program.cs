@@ -506,6 +506,7 @@ module.Write(outputPath + ".woven", new WriterParameters { WriteSymbols = File.E
                     Emit(Instruction.Create(OpCodes.Ldsfld, baseField));
                     Emit(Instruction.Create(OpCodes.Ldstr, plan.FullName));
                     Emit(Instruction.Create(OpCodes.Ldstr, plan.SkipReason));
+                    Emit(Instruction.Create(OpCodes.Ldstr, plan.SkipDetail));
                     Emit(Instruction.Create(OpCodes.Ldstr, plan.ReturnKind.ToString()));
                     Emit(Instruction.Create(plan.IsTestRoot ? OpCodes.Ldc_I4_1 : OpCodes.Ldc_I4_0));
                     Emit(Instruction.Create(OpCodes.Ldstr, plan.SourceResolution));

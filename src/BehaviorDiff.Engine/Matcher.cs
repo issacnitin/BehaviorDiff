@@ -115,13 +115,12 @@ namespace BehaviorDiff.Engine
         private static readonly string[] PartialMarkerPrefixes = { "<skipped:", "<depth:", "<error:", "<truncated>" };
 
         /// <summary>
-        /// Groups a run's events by (TestId, MethodFullName) with an ordinal per key.
+        /// Groups a run's events by (TestId, MethodFullName), ordered by the entry-assigned ordinal.
         /// </summary>
         /// <remarks>
-        /// Ordinal is position in file order within one process. A test runs in a single process, so a key
-        /// never spans processes; ordering by (process, line) keeps it deterministic when several
-        /// processes are merged. Harness events are indexed too - the call tree needs them as roots - and
-        /// are filtered out of candidacy separately.
+        /// Events are emitted at exit, so file order is completion order and cannot define call order.
+        /// Harness events are indexed too - the call tree needs them as roots - and are filtered out of
+        /// candidacy separately.
         /// </remarks>
         internal static Dictionary<CallKey, List<CallRecord>> Index(RunData run)
         {
@@ -138,7 +137,12 @@ namespace BehaviorDiff.Engine
                     index[key] = calls;
                 }
 
-                calls.Add(new CallRecord(loaded, calls.Count));
+                calls.Add(new CallRecord(loaded, loaded.Event.Ordinal));
+            }
+
+            foreach (List<CallRecord> calls in index.Values)
+            {
+                calls.Sort((left, right) => left.Ordinal.CompareTo(right.Ordinal));
             }
 
             return index;

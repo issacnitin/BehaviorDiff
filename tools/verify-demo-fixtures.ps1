@@ -231,7 +231,8 @@ foreach ($case in $cases) {
             $_.methodFullName -like 'Infrastructure.Collections.SortingExtensions.ByPriority*'
         })
         if ($skipped.Count -ne 1 `
-            -or $skipped[0].skipReason -ne 'ExcludedNamespace' `
+            -or $skipped[0].skipReason -ne 'ExcludedByScope' `
+            -or $skipped[0].detail -ne '.NET: ExcludedNamespace' `
             -or $skipped[0].status -ne 'Skipped') {
             throw 'sort: edited helper was not skipped by the repository-owned infrastructure exclusion'
         }

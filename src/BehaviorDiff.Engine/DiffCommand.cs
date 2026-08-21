@@ -73,6 +73,24 @@ namespace BehaviorDiff.Engine
 
             WriteLoad(pr, prReport);
 
+            string[] languages = baseRuns.Concat(new[] { pr })
+                .Select(run => run.Language)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            Console.WriteLine("  trace language          : " + string.Join(", ", languages));
+            if (languages.Length != 1)
+            {
+                refusals.Add("STEP 0: traces from different languages cannot be compared ("
+                    + string.Join(" vs ", languages) + "). Digests are only comparable within one language.");
+            }
+
+            int malformed = base1Report.MalformedLines + base2Report.MalformedLines
+                + base3Report.MalformedLines + prReport.MalformedLines;
+            if (malformed > 0)
+            {
+                refusals.Add("STEP 0: " + malformed + " malformed trace line(s) were found. Missing events can look like removed behavior.");
+            }
+
             int absoluteRemaining = base1Report.AbsolutePathsRemaining + base2Report.AbsolutePathsRemaining
                 + base3Report.AbsolutePathsRemaining + prReport.AbsolutePathsRemaining;
             Console.WriteLine("  absolute paths remaining : " + absoluteRemaining + " (must be 0)");
@@ -537,6 +555,7 @@ namespace BehaviorDiff.Engine
                         assembly = m.Assembly,
                         status = m.Status.ToString(),
                         skipReason = m.SkipReason,
+                        detail = m.Detail,
                         sourceResolution = m.SourceResolution,
                         isTestRoot = m.IsTestRoot,
                     }).ToArray(),
@@ -565,6 +584,8 @@ namespace BehaviorDiff.Engine
         private static object Describe(RunData run) => new
         {
             name = run.Name,
+            schema = run.Schema,
+            language = run.Language,
             root = run.Root,
             traceFiles = run.TraceFiles.Count,
             events = run.Events.Count,
@@ -574,17 +595,13 @@ namespace BehaviorDiff.Engine
 
         private static object[] DescribeCallTree(RunData run)
         {
-            Dictionary<LoadedEvent, int> ordinals = Matcher.Index(run)
-                .SelectMany(pair => pair.Value)
-                .ToDictionary(call => call.Loaded, call => call.Ordinal);
-
             return run.Events.Select(e => (object)new
             {
                 callId = e.Event.CallId,
                 parentCallId = e.Event.ParentCallId,
                 testId = e.Event.TestId,
                 methodFullName = e.Event.MethodFullName,
-                ordinal = ordinals[e],
+                ordinal = e.Event.Ordinal,
                 isHarness = e.Event.IsHarness,
                 filePath = e.RelativePath,
                 line = e.Event.Line,

@@ -151,6 +151,7 @@ namespace BehaviorDiff.Tracer
             int baseOffset,
             string fullName,
             string skipReason,
+            string detail,
             string returnKind,
             bool isTestRoot,
             string sourceResolution)
@@ -162,12 +163,15 @@ namespace BehaviorDiff.Tracer
                     throw new ArgumentOutOfRangeException(nameof(baseOffset));
                 }
 
+                coverage.NoteSkippedMember();
+
                 s_members.Add(new ManifestEntry
                 {
                     Assembly = coverage.Name,
                     MethodFullName = fullName,
                     Status = PatchStatus.Skipped,
                     SkipReason = skipReason,
+                    Detail = detail,
                     ReturnKind = returnKind,
                     IsTestRoot = isTestRoot,
                     SourceResolution = sourceResolution,
@@ -207,6 +211,11 @@ namespace BehaviorDiff.Tracer
 
                 manifest = new CoverageManifest
                 {
+                    Metadata = new RunMetadataEntry
+                    {
+                        Schema = TraceFormat.Schema,
+                        Language = TraceFormat.DotNetLanguage,
+                    },
                     Assemblies = assemblies,
                     Members = new System.Collections.Generic.List<ManifestEntry>(s_members),
                     UnruledEnumerables = unruled,
