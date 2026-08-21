@@ -31,6 +31,12 @@ Every process manifest begins with exactly one run record:
 
 All process manifests merged into one run MUST agree on `schema` and `language`. Base samples and the proposed run MUST have the same language. The engine refuses a cross-language comparison because digest equality is defined only within one language.
 
+## Scope and callable identity
+
+Include and exclude scopes are language-owned strings, but their matching semantics are shared. A prefix matches an exact namespace, package, or repository path segment and its descendants. It does not match a longer sibling segment: `Acme.Cart` matches `Acme.Cart.Checkout` but not `Acme.Carts`, and `src/cart` matches `src/cart/item.js` but not `src/cart-old/item.js`. Exclude scope wins over include scope. A member excluded after discovery still receives a `Skipped` manifest record with `skipReason:"ExcludedByScope"`; otherwise a configuration difference can masquerade as removed behavior.
+
+Callable identity MUST include a stable module/source identity and the language's stable callable signature. Languages with declared parameter types include them. JavaScript, which has no runtime overload signature, uses the repository-relative module path plus lexical callable identity; anonymous callables include their original source line and column as a discriminator. Generated output positions are never used when a source map establishes an original position. Build-specific absolute roots, generated symbol numbers, and runtime object identities are forbidden in `methodFullName`.
+
 ## Trace events
 
 Each event describes one completed call. The event is enqueued only when the call completes normally, throws an escaping exception, or its asynchronous result settles. A call that never completes because of process termination, a hang, or stack exhaustion has no event.
@@ -42,7 +48,7 @@ Each event describes one completed call. The event is enqueued only when the cal
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `testId` | non-empty string | yes | Stable identity of the test extent containing the call. A test invocation, including a parameterized case, has one identity. Calls outside a test use `(no-test)` and cannot support normal comparison. |
-| `methodFullName` | non-empty string | yes | Tracer-defined canonical member identity. It MUST be stable across processes and builds when the source-level callable is unchanged, include the declaring module/type and parameter types, and exactly match the manifest member key. Canonicalization is language-specific. |
+| `methodFullName` | non-empty string | yes | Tracer-defined canonical member identity. It MUST be stable across processes and builds when the source-level callable is unchanged, follow the callable-identity rules above, and exactly match the manifest member key. Canonicalization is language-specific. |
 | `filePath` | string | no | Source file declared by debug metadata, preferably repository-relative. Omitted only when unresolved. Never guess from a type or package name. |
 | `filePathResolution` | string | yes | One of the resolution states below. |
 | `line` | 32-bit integer | yes | One-based declaration/executable source line; `0` when the selected resolution does not establish a line. |
@@ -79,19 +85,23 @@ Every non-root event MUST resolve `parentCallId` to an event in the same process
 
 A framework-independent tracer SHOULD derive correlation structurally: one `isTestRoot` member invocation opens a test extent, and every event in its logical subtree receives that root's `testId`.
 
+When a framework invokes user tests through callbacks rather than an attributable test method, a language adapter MAY open the root immediately around that callback. The adapter is responsible only for opening and closing the root; descendant correlation still derives from the logical call tree. Conformance MUST compare the number of opened root invocations with the runner's own executed-test count, including parameterized cases.
+
 ## Source resolution
 
 `filePathResolution` records what the path asserts. Version 1 defines these language-neutral values:
 
 | Value | `filePath` | `line` | Assertion |
 | --- | --- | --- | --- |
-| `debugInfo` | required | positive | The callable's own debug table/source map establishes this exact source position. |
+| `debugInfo` | required | positive | The callable's own debug table/source map, or a parser reading the original ungenerated source directly, establishes this exact source position. |
 | `generatedState` | required | positive | Debug metadata on a generated async/iterator state body establishes the source position for its source-level kickoff callable. |
 | `declaringType` | required | `0` | A sibling member's debug metadata establishes the declaring source file, but no exact line. |
 | `debugInfoMissing` | omitted | `0` | The module has no usable debug table/source map. |
 | `unresolved` | omitted | `0` | Debug information exists but does not establish a source file for this member. |
 
 The .NET v1 emitter uses wire aliases `sequencePoints`, `stateMachine`, `declaringType`, `noPdb`, and `unresolved`, respectively. Readers MUST treat those aliases as the corresponding states above during the v1 migration.
+
+For JavaScript loaded directly from its repository source, the parser's original location is `debugInfo`. For generated JavaScript with a valid source map, only the mapped original path and position are `debugInfo`; the generated `.js` position is not an attribution fallback. If generated output has no usable map, emit `debugInfoMissing` with no path. If a map exists but is malformed, names no matching source, or cannot map the callable position, emit `unresolved` with no path. TypeScript positions therefore resolve to `.ts`/`.tsx` sources or remain explicitly unusable; a tracer never guesses by replacing a `.js` extension.
 
 Usable attribution requires `debugInfo`, `generatedState`, or `declaringType`. Exact source statistics count only `debugInfo` and `generatedState`. An unresolved state is evidence, not permission to infer a path. Guessing makes every changed path miss and can invert an unexpected change into a clean result.
 
