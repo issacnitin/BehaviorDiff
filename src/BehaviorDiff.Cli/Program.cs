@@ -18,6 +18,7 @@ namespace BehaviorDiff.Cli
                     LanguageDetection detection = LanguageDetector.Detect(args[1]);
                     Console.WriteLine(detection.Language.ToString().ToLowerInvariant());
                     Console.WriteLine(detection.Evidence);
+                    Console.WriteLine(detection.EntryPoint);
                     return ExitCodes.NoUnexpected;
                 }
                 catch (CliException ex)
@@ -225,6 +226,26 @@ namespace BehaviorDiff.Cli
                 Console.WriteLine("=== 1. worktrees ===");
                 Shell.Git(_repo, "worktree", "add", "--detach", baseTree, refs.BaseSha);
                 Shell.Git(_repo, "worktree", "add", "--detach", prTree, refs.PrSha);
+
+                LanguageDetection baseDetection = LanguageDetector.Detect(baseTree);
+                LanguageDetection prDetection = LanguageDetector.Detect(prTree);
+                AssertLanguageSymmetry(baseDetection, prDetection);
+                Console.WriteLine("  language   : " + baseDetection.Language.ToString().ToLowerInvariant());
+                Console.WriteLine("  entry point: " + baseDetection.Evidence);
+
+                if (baseDetection.Language != RepositoryLanguage.DotNet)
+                {
+                    int removed = CrossLanguageExecution.StripBuildOutput(baseTree)
+                        + CrossLanguageExecution.StripBuildOutput(prTree);
+                    Console.WriteLine("  stale target/node_modules/dist removed: " + removed);
+                    CrossLanguageRunSet runs = new CrossLanguageExecution(_work).Run(
+                        baseDetection,
+                        prDetection,
+                        baseTree,
+                        prTree);
+                    return Analyze(refs, baseTree, prTree, runs.Base1, runs.Base2, runs.Base3, runs.Pr);
+                }
+
                 Console.WriteLine("  stale bin/obj removed: " + (StripBuildOutput(baseTree) + StripBuildOutput(prTree)));
 
                 Console.WriteLine();
@@ -287,77 +308,7 @@ namespace BehaviorDiff.Cli
                 string pr = RunTests("pr_run", prTree, prProjects, scope);
 
                 AssertTestIdsPresent(base1);
-
-                Console.WriteLine();
-                Console.WriteLine("=== 8. changed files ===");
-                string changedList = WriteChangedFiles(refs);
-
-                Console.WriteLine();
-                Console.WriteLine("=== 9. engine part 1 ===");
-                string divergenceSet = Path.Combine(_work, "divergence-set.json");
-                var diffOptions = new DiffOptions
-                {
-                    Base1 = base1,
-                    Base2 = base2,
-                    Base3 = base3,
-                    Pr = pr,
-                    BaseRoot = baseTree,
-                    PrRoot = prTree,
-                    ChangedFiles = changedList,
-                    Output = divergenceSet,
-                };
-                if (DiffCommand.Run(diffOptions) != 0)
-                {
-                    string reason = diffOptions.RefusalReason ?? "The comparison was refused before a DivergenceSet was produced.";
-                    FindingsCommand.WriteInvalid(
-                        _findings,
-                        "refused",
-                        ExitCodes.RunInvalid,
-                        reason,
-                        refs.BaseSha,
-                        refs.PrSha,
-                        refs.MergeBaseSha);
-                    Console.WriteLine();
-                    Console.WriteLine("RESULT: COULD NOT ANALYZE. The comparison was refused before any finding was produced;");
-                    Console.WriteLine("        this is not a statement that the PR is clean.");
-                    return ExitCodes.RunInvalid;
-                }
-
-                Console.WriteLine();
-                Console.WriteLine("=== 10. engine part 2 ===");
-                string report = Path.Combine(_work, "frontier-report.json");
-                var frontierOptions = new FrontierOptions
-                {
-                    Input = divergenceSet,
-                    ChangedFiles = changedList,
-                    Output = report,
-                };
-                if (FrontierCommand.Run(frontierOptions) != 0)
-                {
-                    string reason = frontierOptions.RefusalReason ?? "Frontier detection was refused before a report was produced.";
-                    FindingsCommand.WriteInvalid(
-                        _findings,
-                        "refused",
-                        ExitCodes.RunInvalid,
-                        reason,
-                        refs.BaseSha,
-                        refs.PrSha,
-                        refs.MergeBaseSha);
-                    Console.WriteLine();
-                    Console.WriteLine("RESULT: COULD NOT ANALYZE. Frontier detection was refused; no verdict was produced.");
-                    return ExitCodes.RunInvalid;
-                }
-
-                int exitCode = Summarize(report);
-                FindingsCommand.WriteAnalyzed(
-                    divergenceSet,
-                    report,
-                    _findings,
-                    exitCode,
-                    refs.BaseSha,
-                    refs.PrSha,
-                    refs.MergeBaseSha);
-                return exitCode;
+                return Analyze(refs, baseTree, prTree, base1, base2, base3, pr);
             }
             finally
             {
@@ -372,6 +323,107 @@ namespace BehaviorDiff.Cli
                     Cleanup(prTree);
                 }
             }
+        }
+
+        private static void AssertLanguageSymmetry(LanguageDetection baseDetection, LanguageDetection prDetection)
+        {
+            if (baseDetection.Language != prDetection.Language)
+            {
+                throw new CliException(
+                    "Base language is " + baseDetection.Language.ToString().ToLowerInvariant()
+                    + " but PR language is " + prDetection.Language.ToString().ToLowerInvariant()
+                    + ". Cross-language comparison is not supported.",
+                    ExitCodes.RunInvalid);
+            }
+
+            if (!string.Equals(baseDetection.Evidence, prDetection.Evidence, StringComparison.Ordinal))
+            {
+                throw new CliException(
+                    "Base build entry point is " + baseDetection.Evidence + " but PR build entry point is "
+                    + prDetection.Evidence + ". The same relative entry point is required on both sides.",
+                    ExitCodes.RunInvalid);
+            }
+        }
+
+        private int Analyze(
+            ResolvedRefs refs,
+            string baseTree,
+            string prTree,
+            string base1,
+            string base2,
+            string base3,
+            string pr)
+        {
+            Console.WriteLine();
+            Console.WriteLine("=== 8. changed files ===");
+            string changedList = WriteChangedFiles(refs);
+
+            Console.WriteLine();
+            Console.WriteLine("=== 9. engine part 1 ===");
+            string divergenceSet = Path.Combine(_work, "divergence-set.json");
+            var diffOptions = new DiffOptions
+            {
+                Base1 = base1,
+                Base2 = base2,
+                Base3 = base3,
+                Pr = pr,
+                BaseRoot = baseTree,
+                PrRoot = prTree,
+                ChangedFiles = changedList,
+                Output = divergenceSet,
+            };
+            if (DiffCommand.Run(diffOptions) != 0)
+            {
+                string reason = diffOptions.RefusalReason ?? "The comparison was refused before a DivergenceSet was produced.";
+                FindingsCommand.WriteInvalid(
+                    _findings,
+                    "refused",
+                    ExitCodes.RunInvalid,
+                    reason,
+                    refs.BaseSha,
+                    refs.PrSha,
+                    refs.MergeBaseSha);
+                Console.WriteLine();
+                Console.WriteLine("RESULT: COULD NOT ANALYZE. The comparison was refused before any finding was produced;");
+                Console.WriteLine("        this is not a statement that the PR is clean.");
+                return ExitCodes.RunInvalid;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("=== 10. engine part 2 ===");
+            string report = Path.Combine(_work, "frontier-report.json");
+            var frontierOptions = new FrontierOptions
+            {
+                Input = divergenceSet,
+                ChangedFiles = changedList,
+                Output = report,
+            };
+            if (FrontierCommand.Run(frontierOptions) != 0)
+            {
+                string reason = frontierOptions.RefusalReason ?? "Frontier detection was refused before a report was produced.";
+                FindingsCommand.WriteInvalid(
+                    _findings,
+                    "refused",
+                    ExitCodes.RunInvalid,
+                    reason,
+                    refs.BaseSha,
+                    refs.PrSha,
+                    refs.MergeBaseSha);
+                Console.WriteLine();
+                Console.WriteLine("RESULT: COULD NOT ANALYZE. Frontier detection was refused; no verdict was produced.");
+                return ExitCodes.RunInvalid;
+            }
+
+            int exitCode = Summarize(report);
+            FindingsCommand.WriteAnalyzed(
+                divergenceSet,
+                report,
+                _findings,
+                exitCode,
+                refs.BaseSha,
+                refs.PrSha,
+                refs.MergeBaseSha);
+            return exitCode;
         }
 
         private static void ReportScan(RepoScanResult scan)
@@ -763,7 +815,7 @@ namespace BehaviorDiff.Cli
         /// Distinct from the no-events case on purpose. "Nothing ran" and "things ran but are unlabelled"
         /// live in different layers, and a guard that names the wrong one sends you to the wrong code.
         /// </summary>
-        private static void AssertTestIdsPresent(string runDirectory)
+        internal static void AssertTestIdsPresent(string runDirectory)
         {
             int withTestId = 0;
             int total = 0;
@@ -795,8 +847,8 @@ namespace BehaviorDiff.Cli
                 throw new CliException(
                     "UNLABELLED EVENTS: " + total + " events were produced but only "
                     + share.ToString("F1", CultureInfo.InvariantCulture) + "% carry a TestId. Instrumentation "
-                    + "worked; test identity did not. The assembly-level [TraceTest] registration is not being "
-                    + "honoured by this repo's xunit version, so events cannot be correlated across runs.",
+                    + "worked; test identity did not. The test-framework correlation adapter is not labeling "
+                    + "enough events, so observations cannot be correlated across runs.",
                     ExitCodes.RunInvalid);
             }
         }

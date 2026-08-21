@@ -16,6 +16,8 @@ namespace BehaviorDiff.Cli
     {
         internal RepositoryLanguage Language { get; init; }
 
+        internal string EntryPoint { get; init; } = string.Empty;
+
         internal string Evidence { get; init; } = string.Empty;
     }
 
@@ -50,6 +52,7 @@ namespace BehaviorDiff.Cli
             return new LanguageDetection
             {
                 Language = languages[0],
+                EntryPoint = candidates[0].EntryPoint,
                 Evidence = string.Join(", ", candidates
                     .Where(candidate => candidate.Language == languages[0])
                     .Select(candidate => candidate.Evidence)
@@ -60,28 +63,29 @@ namespace BehaviorDiff.Cli
         private static List<LanguageDetection> RootCandidates(string root)
         {
             var candidates = new List<LanguageDetection>();
-            AddDotNet(candidates, Directory.EnumerateFiles(root, "*.sln", SearchOption.TopDirectoryOnly)
+            AddDotNet(candidates, root, Directory.EnumerateFiles(root, "*.sln", SearchOption.TopDirectoryOnly)
                 .Concat(Directory.EnumerateFiles(root, "*.csproj", SearchOption.TopDirectoryOnly)));
-            Add(candidates, RepositoryLanguage.Java, Existing(root, "pom.xml", "mvnw", "mvnw.cmd"));
-            Add(candidates, RepositoryLanguage.Node, Existing(root, "package.json"));
+            Add(candidates, root, RepositoryLanguage.Java, Existing(root, "pom.xml"));
+            Add(candidates, root, RepositoryLanguage.Node, Existing(root, "package.json"));
             return candidates;
         }
 
         private static List<LanguageDetection> RecursiveCandidates(string root)
         {
             var candidates = new List<LanguageDetection>();
-            AddDotNet(candidates, Find(root, "*.sln").Concat(Find(root, "*.csproj")));
-            Add(candidates, RepositoryLanguage.Java, Find(root, "pom.xml"));
-            Add(candidates, RepositoryLanguage.Node, Find(root, "package.json")
+            AddDotNet(candidates, root, Find(root, "*.sln").Concat(Find(root, "*.csproj")));
+            Add(candidates, root, RepositoryLanguage.Java, Find(root, "pom.xml"));
+            Add(candidates, root, RepositoryLanguage.Node, Find(root, "package.json")
                 .Where(path => !IsBuildOutput(path)));
             return candidates;
         }
 
-        private static void AddDotNet(List<LanguageDetection> candidates, IEnumerable<string> paths) =>
-            Add(candidates, RepositoryLanguage.DotNet, paths);
+        private static void AddDotNet(List<LanguageDetection> candidates, string root, IEnumerable<string> paths) =>
+            Add(candidates, root, RepositoryLanguage.DotNet, paths);
 
         private static void Add(
             List<LanguageDetection> candidates,
+            string root,
             RepositoryLanguage language,
             IEnumerable<string> paths)
         {
@@ -91,7 +95,8 @@ namespace BehaviorDiff.Cli
                 candidates.Add(new LanguageDetection
                 {
                     Language = language,
-                    Evidence = Path.GetFileName(evidence),
+                    EntryPoint = Path.GetFullPath(evidence),
+                    Evidence = Path.GetRelativePath(root, evidence).Replace('\\', '/'),
                 });
             }
         }
