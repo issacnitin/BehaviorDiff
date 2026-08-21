@@ -9,13 +9,36 @@ $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
     Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-java-attribution-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
-$changedFile = 'samples/JavaReference/src/main/java/io/behaviordiff/reference/Subject.java'
+$changedFile = 'samples/JavaReference/src/main/java/io/behaviordiff/reference/config/OffsetConfig.java'
 
 function Copy-ReferenceTree([string]$destination) {
     $sample = Join-Path $destination 'samples/JavaReference'
     New-Item -ItemType Directory -Path (Split-Path -Parent $sample) -Force | Out-Null
     Copy-Item (Join-Path $repo 'samples/JavaReference') $sample -Recurse -Force
     Remove-Item (Join-Path $sample 'target') -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+function Add-OffsetConfig([string]$tree, [int]$offset) {
+    $config = Join-Path $tree $changedFile
+    New-Item -ItemType Directory -Path (Split-Path -Parent $config) -Force | Out-Null
+    [IO.File]::WriteAllText($config, @"
+package io.behaviordiff.reference.config;
+
+public final class OffsetConfig {
+    private OffsetConfig() { }
+    public static int offset() { return $offset; }
+}
+"@)
+
+    $subjectPath = Join-Path $tree 'samples/JavaReference/src/main/java/io/behaviordiff/reference/Subject.java'
+    $subject = Get-Content $subjectPath -Raw
+    $subject = $subject.Replace(
+        'import java.util.concurrent.CompletableFuture;',
+        "import java.util.concurrent.CompletableFuture;`r`nimport io.behaviordiff.reference.config.OffsetConfig;")
+    $subject = $subject.Replace(
+        'public static int observe(int value) { return value * 2 + 1; }',
+        'public static int observe(int value) { return value * 2 + OffsetConfig.offset(); }')
+    Set-Content $subjectPath $subject -NoNewline
 }
 
 function Run-Reference(
@@ -28,14 +51,18 @@ function Run-Reference(
     $trace = Join-Path $runDirectory 'run.ndjson'
     $argLine = "--add-opens java.base/java.util=ALL-UNNAMED -javaagent:$agent=include=io.behaviordiff.reference;trace=$trace"
     $previousRepositoryRoot = [Environment]::GetEnvironmentVariable('BEHAVIORDIFF_REPOSITORY_ROOT', 'Process')
+    $previousExcludes = [Environment]::GetEnvironmentVariable('BEHAVIORDIFF_EXCLUDE_NAMESPACES', 'Process')
     try {
         $env:BEHAVIORDIFF_REPOSITORY_ROOT = $tree
+        $env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = 'io.behaviordiff.reference.config'
         & mvn -f (Join-Path $tree 'samples/JavaReference/pom.xml') test "-DargLine=$argLine" |
             ForEach-Object { Write-Host $_ }
         $exitCode = $LASTEXITCODE
     } finally {
         [Environment]::SetEnvironmentVariable(
             'BEHAVIORDIFF_REPOSITORY_ROOT', $previousRepositoryRoot, 'Process')
+        [Environment]::SetEnvironmentVariable(
+            'BEHAVIORDIFF_EXCLUDE_NAMESPACES', $previousExcludes, 'Process')
     }
 
     if ($expectSuccess -and $exitCode -ne 0) {
@@ -71,15 +98,8 @@ try {
     $prTree = Join-Path $work 'pr'
     Copy-ReferenceTree $baseTree
     Copy-ReferenceTree $prTree
-
-    $prSubject = Join-Path $prTree $changedFile
-    $source = Get-Content $prSubject -Raw
-    $before = 'public static int observe(int value) { return value * 2 + 1; }'
-    $after = 'public static int observe(int value) { return value * 2 + 2; }'
-    if ($source.IndexOf($before, [StringComparison]::Ordinal) -lt 0) {
-        throw 'Subject.observe mutation anchor was not found'
-    }
-    Set-Content $prSubject ($source.Replace($before, $after)) -NoNewline
+    Add-OffsetConfig $baseTree 1
+    Add-OffsetConfig $prTree 2
 
     Write-Host '=== Java agent build ===' -ForegroundColor Cyan
     & mvn -f (Join-Path $repo 'src/BehaviorDiff.Java.Agent/pom.xml') clean package
@@ -118,11 +138,13 @@ try {
     if ($inputFiles.Count -ne 1 -or $inputFiles[0] -cne $changedFile) {
         throw "Expected exactly changed file '$changedFile', got '$($inputFiles -join ', ')'"
     }
-    if ($frontier.counts.expected -lt 1 -or $frontier.counts.unexpected -ne 0) {
+    if ($frontier.counts.unexpected -lt 1) {
         throw "Attribution mismatch: expected=$($frontier.counts.expected) unexpected=$($frontier.counts.unexpected)"
     }
-    if ($coverage.Count -ne 1 -or -not [bool]$coverage[0].exercised) {
-        throw "Changed-file coverage did not exercise '$changedFile'"
+    if ($coverage.Count -ne 1 -or [bool]$coverage[0].exercised `
+        -or $frontier.attributionInputs.changedPathsMatchingATracedFile -ne 0 `
+        -or $frontier.attributionInputs.changedPathsInTracePathNamespace -ne 1) {
+        throw "Excluded changed-file coverage was not represented honestly for '$changedFile'"
     }
 
     $findingsPath = Join-Path $work 'findings.json'
@@ -131,8 +153,21 @@ try {
         --base-sha java-proof-base --pr-sha java-proof-pr --merge-base java-proof-base
     if ($LASTEXITCODE -ne 0) { throw "Java attribution findings failed: $LASTEXITCODE" }
     $findings = Get-Content $findingsPath -Raw | ConvertFrom-Json
-    if ($findings.summary.expectedMembers -lt 1 -or $findings.summary.unexpectedMembers -ne 0) {
+    if ($findings.summary.unexpectedMembers -ne 1) {
         throw "Findings attribution mismatch: expected=$($findings.summary.expectedMembers) unexpected=$($findings.summary.unexpectedMembers)"
+    }
+
+    $commentPath = Join-Path $work 'comment.md'
+    $comment = & dotnet run --project (Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+        -c Release -- $findingsPath
+    if ($LASTEXITCODE -ne 0) { throw "Java comment rendering failed: $LASTEXITCODE" }
+    $commentText = $comment -join "`n"
+    $commentText | Set-Content $commentPath
+    if ($commentText -notmatch 'io\.behaviordiff\.reference\.Subject\.observe\(I\)I' `
+        -or $commentText -notmatch 'BehaviorDiff: 1 test-covered behavior change outside this diff' `
+        -or $commentText -notmatch 'ReferenceTests\.volume\(I\)V' `
+        -or $commentText -match 'SampleApp') {
+        throw 'Java comment rendering retained a .NET-shaped assumption or lost the Java member'
     }
 
     Write-Host '=== Java attribution proof ===' -ForegroundColor Green
@@ -141,8 +176,9 @@ try {
     Write-Host "  exact source events       : $($base1.ExactSourceEvents + $base2.ExactSourceEvents + $pr.ExactSourceEvents)"
     Write-Host "  remaining divergences     : $($frontier.counts.divergedKeys)"
     Write-Host "  expected / unexpected     : $($frontier.counts.expected) / $($frontier.counts.unexpected)"
-    Write-Host "  exercised edited files    : $($frontier.changedFileCoverage.summary.exercisedEditedFiles) / $($frontier.changedFileCoverage.summary.editedFiles)"
-    Write-Host "  findings expected members : $($findings.summary.expectedMembers)"
+    Write-Host "  exercised edited files    : $($frontier.changedFileCoverage.summary.exercisedEditedFiles) / $($frontier.changedFileCoverage.summary.editedFiles) (excluded helper)"
+    Write-Host "  findings unexpected members: $($findings.summary.unexpectedMembers)"
+    Write-Host "  rendered comment member   : io.behaviordiff.reference.Subject.observe(I)I"
     Write-Host 'verify-java-attribution: PASS' -ForegroundColor Green
 } finally {
     if ($ownsWork -and -not $KeepWork) { Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue }
