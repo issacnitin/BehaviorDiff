@@ -1,4 +1,5 @@
 'use strict';
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const vm = require('node:vm');
@@ -6,18 +7,38 @@ const { transform } = require('../src/transform.cjs');
 
 function execute(source) {
   const events = [];
+  const registrations = [];
   const context = { module: { exports: {} }, exports: {}, Symbol, Promise, setTimeout };
   context.globalThis = context;
   context[Symbol.for('behaviordiff.runtime')] = {
-    enter(metadata, args) { return { metadata, args }; },
-    exit(frame, value, error) { events.push({ frame, value, error }); }
+    registerModule(module) { registrations.push(module); },
+    runSync(metadata, args, callback) {
+      try {
+        const value = callback();
+        events.push({ metadata, args, value });
+        return value;
+      } catch (error) {
+        events.push({ metadata, args, error });
+        throw error;
+      }
+    },
+    async runAsync(metadata, args, callback) {
+      try {
+        const value = await callback();
+        events.push({ metadata, args, value });
+        return value;
+      } catch (error) {
+        events.push({ metadata, args, error });
+        throw error;
+      }
+    }
   };
   const output = transform(source, 'src/example.js');
   vm.runInNewContext(output.code, context);
-  return { exports: context.module.exports, events, output };
+  return { exports: context.module.exports, events, registrations, output };
 }
 
-test('emits once for returns, fallthrough, and throws', () => {
+test('uses runtime wrappers once for returns, fallthrough, and throws', () => {
   const run = execute('function add(a,b){return a+b} function empty(){} function fail(){throw new TypeError("bad")} module.exports={add,empty,fail};');
   assert.equal(run.exports.add(2, 3), 5);
   assert.equal(run.exports.empty(), undefined);
@@ -25,13 +46,29 @@ test('emits once for returns, fallthrough, and throws', () => {
   assert.equal(run.events.length, 3);
   assert.equal(run.events[0].value, 5);
   assert.equal(run.events[2].error.name, 'TypeError');
+  assert.equal(run.registrations.length, 1);
+  assert.equal(run.registrations[0].members.length, 3);
+  assert.deepEqual(run.output.members.map(member => member.methodFullName), [
+    'src/example.js#add', 'src/example.js#empty', 'src/example.js#fail'
+  ]);
 });
 
-test('supports arrows and class methods', () => {
-  const run = execute('const twice=value=>value*2; class Counter{next(value){return value+1}} module.exports={twice,Counter};');
+test('preserves arrows, this, arguments, and lexical super', () => {
+  const run = execute(`
+    const twice=value=>value*2;
+    const defaulted=(value=3)=>value;
+    class Base { next(value) { return value + 1; } }
+    class Counter extends Base { next(value) { return super.next(value) + this.offset; } }
+    function first(){ return arguments[0]; }
+    module.exports={twice,defaulted,Counter,first};
+  `);
+  const counter = new run.exports.Counter();
+  counter.offset = 2;
   assert.equal(run.exports.twice(4), 8);
-  assert.equal(new run.exports.Counter().next(4), 5);
-  assert.equal(run.events.length, 2);
+  assert.equal(run.exports.defaulted(), 3);
+  assert.equal(counter.next(4), 7);
+  assert.equal(run.exports.first('value'), 'value');
+  assert.equal(run.events.length, 5);
 });
 
 test('async functions emit only after settlement', async () => {
@@ -46,7 +83,40 @@ test('async functions emit only after settlement', async () => {
   assert.equal(run.events[0].value, 'done');
 });
 
-test('records generators and destructured arrows as unsupported', () => {
-  const output = transform('function* values(){yield 1} const pick=({value})=>value;', 'src/shapes.js');
-  assert.deepEqual(output.unsupported.map(item => item.detail), ['Node: GeneratorFunction', 'Node: DestructuredArrowParameters']);
+test('returns manifest metadata for unsupported shapes and leaves them runnable', () => {
+  const output = transform(
+    'function* values(){yield 1} const pick=({value})=>value; class Child extends Object { constructor(){super()} }',
+    'src/shapes.js'
+  );
+  assert.deepEqual(output.members.map(member => [member.status, member.skipReason, member.detail]), [
+    ['Skipped', 'UnsupportedShape', 'Node: GeneratorFunction'],
+    ['Skipped', 'UnsupportedShape', 'Node: DestructuredArrowParameters'],
+    ['Skipped', 'UnsupportedShape', 'Node: DerivedConstructor']
+  ]);
+  assert.deepEqual(output.members.map(member => member.line), [1, 1, 1]);
+  assert.ok(output.members.every(member => member.column >= 0));
+});
+
+test('anonymous identities include original line and column and bootstrap imports precede registration', () => {
+  const output = transform('export default [1].map(function (value) { return value; });', 'src/module.mjs', {
+    bootstrapImport: 'file:///runtime/bootstrap.mjs'
+  });
+  assert.match(output.members[0].methodFullName, /^src\/module\.mjs#<anonymous@1:\d+>$/);
+  assert.match(output.code, /^import "file:\/\/\/runtime\/bootstrap\.mjs";/);
+  assert.ok(output.code.indexOf('registerModule') < output.code.indexOf('export default'));
+});
+
+test('lexical identities distinguish object owners and retain nested ancestry', () => {
+  const output = transform(`
+    const left = { run() {} };
+    const right = { run: () => {} };
+    function outer() { return function middle() { return () => 1; }; }
+  `, 'src/identities.js');
+  assert.deepEqual(output.members.map(member => member.methodFullName), [
+    'src/identities.js#left.run',
+    'src/identities.js#right.run',
+    'src/identities.js#outer.middle.<anonymous@4:57>',
+    'src/identities.js#outer.middle',
+    'src/identities.js#outer'
+  ]);
 });

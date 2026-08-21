@@ -29,6 +29,7 @@ function createScope(options = {}, environment = process.env) {
   return {
     includes,
     excludes,
+    normalize,
     isIncluded(filename) {
       const value = normalize(filename);
       return includes.some(prefix => segmentMatch(value, prefix));
