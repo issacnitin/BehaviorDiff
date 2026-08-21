@@ -533,8 +533,20 @@ namespace BehaviorDiff.Engine
 
             return path!.Contains("/obj/", StringComparison.Ordinal)
                 || path.StartsWith("obj/", StringComparison.Ordinal)
+                || path.Contains("/target/generated-sources/", StringComparison.Ordinal)
+                || path.StartsWith("target/generated-sources/", StringComparison.Ordinal)
+                || path.Contains("/target/generated-test-sources/", StringComparison.Ordinal)
+                || path.StartsWith("target/generated-test-sources/", StringComparison.Ordinal)
+                || path.Contains("/generated/", StringComparison.Ordinal)
+                || path.StartsWith("generated/", StringComparison.Ordinal)
                 || path.EndsWith(".g.cs", StringComparison.Ordinal)
-                || path.EndsWith(".generated.cs", StringComparison.Ordinal);
+                || path.EndsWith(".generated.cs", StringComparison.Ordinal)
+                || path.EndsWith(".g.java", StringComparison.Ordinal)
+                || path.EndsWith(".generated.java", StringComparison.Ordinal)
+                || path.EndsWith(".g.js", StringComparison.Ordinal)
+                || path.EndsWith(".generated.js", StringComparison.Ordinal)
+                || path.EndsWith(".g.ts", StringComparison.Ordinal)
+                || path.EndsWith(".generated.ts", StringComparison.Ordinal);
         }
 
         /// <summary>"11 member(s), across 2962 call site(s)" - members are the finding, call sites the evidence.</summary>
