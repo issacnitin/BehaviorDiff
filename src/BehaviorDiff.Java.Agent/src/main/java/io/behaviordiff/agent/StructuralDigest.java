@@ -24,6 +24,7 @@ public final class StructuralDigest {
     private static final int RENDERED_CAP = 2000;
     private static final LongAdder VALUES_DIGESTED = new LongAdder();
     private static final LongAdder DEPTH_LIMITED = new LongAdder();
+    private static final LongAdder BLOCKLISTED = new LongAdder();
     private static final LongAdder ERRORED = new LongAdder();
     private static final LongAdder RENDERED_TRUNCATED = new LongAdder();
 
@@ -53,6 +54,12 @@ public final class StructuralDigest {
 
         Class<?> type = value.getClass();
         if (writeScalar(value, type, output)) {
+            return;
+        }
+
+        if (isBlocklisted(type)) {
+            BLOCKLISTED.increment();
+            output.append("<skipped:").append(type.getName()).append('>');
             return;
         }
 
@@ -107,6 +114,18 @@ public final class StructuralDigest {
             return true;
         }
         return false;
+    }
+
+    private static boolean isBlocklisted(Class<?> type) {
+        return ClassLoader.class.isAssignableFrom(type)
+            || Thread.class.isAssignableFrom(type)
+            || java.io.InputStream.class.isAssignableFrom(type)
+            || java.io.OutputStream.class.isAssignableFrom(type)
+            || java.util.concurrent.Future.class.isAssignableFrom(type)
+            || java.util.concurrent.Executor.class.isAssignableFrom(type)
+            || Class.class.isAssignableFrom(type)
+            || java.lang.reflect.Member.class.isAssignableFrom(type)
+            || java.lang.reflect.Proxy.class.isAssignableFrom(type);
     }
 
     private static void writeArray(Object value, StringBuilder output, Context context, int depth, int reference) {
@@ -280,6 +299,10 @@ public final class StructuralDigest {
 
     static long depthLimited() {
         return DEPTH_LIMITED.sum();
+    }
+
+    static long blocklisted() {
+        return BLOCKLISTED.sum();
     }
 
     static long errored() {

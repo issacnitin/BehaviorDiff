@@ -233,7 +233,8 @@ final class TraceSession {
                     }
                 }
                 writeLine(manifest, "{\"kind\":\"digest\",\"valuesDigested\":" + StructuralDigest.valuesDigested()
-                    + ",\"depthLimited\":" + StructuralDigest.depthLimited() + ",\"blocklisted\":0,\"errored\":"
+                    + ",\"depthLimited\":" + StructuralDigest.depthLimited() + ",\"blocklisted\":"
+                    + StructuralDigest.blocklisted() + ",\"errored\":"
                     + StructuralDigest.errored() + ",\"renderedTruncated\":" + StructuralDigest.renderedTruncated() + "}");
                 long count = written.sum();
                 writeLine(manifest, "{\"kind\":\"writer\",\"enqueued\":" + count + ",\"written\":" + count

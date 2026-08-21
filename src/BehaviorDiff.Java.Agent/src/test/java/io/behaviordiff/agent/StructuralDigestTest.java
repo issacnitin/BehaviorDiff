@@ -75,6 +75,16 @@ final class StructuralDigestTest {
     }
 
     @Test
+    void blocklistsRuntimeShapesBeforeRecursion() {
+        RuntimeHolder holder = new RuntimeHolder();
+
+        DigestResult result = StructuralDigest.compute(holder);
+
+        assertTrue(result.rendered().contains("<skipped:java.lang.Thread>"));
+        assertTrue(result.rendered().contains("<skipped:java.util.concurrent.CompletableFuture>"));
+    }
+
+    @Test
     void truncationDoesNotChangeDigestInput() {
         String first = "a".repeat(3000) + "x";
         String second = "a".repeat(3000) + "y";
@@ -145,5 +155,10 @@ final class StructuralDigestTest {
             this.left = left;
             this.right = right;
         }
+    }
+
+    private static final class RuntimeHolder {
+        private final Thread thread = Thread.currentThread();
+        private final java.util.concurrent.CompletableFuture<String> future = new java.util.concurrent.CompletableFuture<>();
     }
 }
