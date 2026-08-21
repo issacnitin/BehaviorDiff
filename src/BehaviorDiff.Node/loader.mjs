@@ -4,6 +4,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createScope } = require('./src/scope.cjs');
+const { createSourceResolver } = require('./src/source-map.cjs');
 const { transform } = require('./src/transform.cjs');
 const scope = createScope();
 const bootstrapImport = pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), 'bootstrap.mjs')).href;
@@ -21,5 +22,6 @@ export async function load(url, context, nextLoad) {
     return loaded;
   }
   const source = typeof loaded.source === 'string' ? loaded.source : Buffer.from(loaded.source).toString('utf8');
-  return { ...loaded, source: transform(source, filename, { bootstrapImport }).code };
+  const sourceResolver = createSourceResolver(source, filename);
+  return { ...loaded, source: transform(source, filename, { bootstrapImport, sourceResolver }).code };
 }

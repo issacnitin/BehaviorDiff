@@ -1,9 +1,11 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const { transform } = require('../src/transform.cjs');
+const { createSourceResolver } = require('../src/source-map.cjs');
 
 function execute(source) {
   const events = [];
@@ -119,4 +121,46 @@ test('lexical identities distinguish object owners and retain nested ancestry', 
     'src/identities.js#outer.middle',
     'src/identities.js#outer'
   ]);
+});
+
+test('mapped functions use original paths and coordinates for identity and registration', () => {
+  const filename = path.join(process.cwd(), 'dist', 'compiled.js');
+  const source = 'const first = function () {};\nconst second = () => {};\n';
+  const map = {
+    version: 3,
+    sources: ['../source/first.ts', '../source/second.ts'],
+    names: [],
+    mappings: 'AAGE;ACAA'
+  };
+  const inline = `data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString('base64')}`;
+  const mappedSource = `${source}//# sourceMappingURL=${inline}`;
+  const output = transform(mappedSource, filename, {
+    sourceResolver: createSourceResolver(mappedSource, filename)
+  });
+
+  assert.deepEqual(output.members.map(member => ({
+    methodFullName: member.methodFullName,
+    sourceResolution: member.sourceResolution,
+    line: member.line,
+    column: member.column
+  })), [{
+    methodFullName: 'source/first.ts#first', sourceResolution: 'debugInfo', line: 4, column: 2
+  }, {
+    methodFullName: 'source/second.ts#second', sourceResolution: 'debugInfo', line: 4, column: 2
+  }]);
+  assert.deepEqual(output.modules.map(module => module.assembly), ['source/first.ts', 'source/second.ts']);
+  assert.equal(output.code.match(/registerModule/g).length, 2);
+});
+
+test('unresolved maps omit source paths and use zero coordinates', () => {
+  const filename = path.join(process.cwd(), 'dist', 'compiled.js');
+  const source = 'const work = () => {};\n//# sourceMappingURL=missing.js.map';
+  const output = transform(source, filename, {
+    sourceResolver: createSourceResolver(source, filename)
+  });
+
+  assert.equal(output.members[0].sourceResolution, 'unresolved');
+  assert.equal(output.members[0].line, 0);
+  assert.doesNotMatch(output.code, /filePath:/);
+  assert.match(output.members[0].methodFullName, /^dist\/compiled\.js#work$/);
 });

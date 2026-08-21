@@ -5,6 +5,7 @@ const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 const generate = require('@babel/generator').default;
 const t = require('@babel/types');
+const { createSourceResolver } = require('./source-map.cjs');
 
 function runtimeMember(name) {
   return t.memberExpression(t.memberExpression(t.identifier('globalThis'), t.callExpression(
@@ -80,14 +81,19 @@ function localCallableName(functionPath) {
   return null;
 }
 
-function callableIdentity(functionPath) {
+function originalLocation(functionPath, sourceResolver) {
   const location = functionPath.node.loc?.start;
-  const parts = [localCallableName(functionPath) ?? `<anonymous@${location?.line ?? 0}:${location?.column ?? 0}>`];
+  return sourceResolver.resolve(location?.line ?? 0, location?.column ?? 0);
+}
+
+function callableIdentity(functionPath, sourceResolver) {
+  const location = originalLocation(functionPath, sourceResolver);
+  const parts = [localCallableName(functionPath) ?? `<anonymous@${location.line}:${location.column}>`];
   let parentFunction = functionPath.findParent(parent => parent.isFunction());
   while (parentFunction) {
-    const parentLocation = parentFunction.node.loc?.start;
+    const parentLocation = originalLocation(parentFunction, sourceResolver);
     parts.unshift(localCallableName(parentFunction)
-      ?? `<anonymous@${parentLocation?.line ?? 0}:${parentLocation?.column ?? 0}>`);
+      ?? `<anonymous@${parentLocation.line}:${parentLocation.column}>`);
     parentFunction = parentFunction.findParent(parent => parent.isFunction());
   }
   return parts.join('.');
@@ -114,19 +120,20 @@ function isDerivedConstructor(functionPath) {
   return Boolean(owner?.node.superClass);
 }
 
-function memberFor(functionPath, modulePath, decision) {
-  const location = functionPath.node.loc?.start;
+function memberFor(functionPath, generatedModulePath, decision, sourceResolver) {
+  const location = originalLocation(functionPath, sourceResolver);
+  const modulePath = location.filePath ?? generatedModulePath;
   const member = {
-    methodFullName: `${modulePath}#${callableIdentity(functionPath)}`,
+    methodFullName: `${modulePath}#${callableIdentity(functionPath, sourceResolver)}`,
     status: decision.status,
     returnKind: functionPath.node.generator ? 'Generator' : functionPath.node.async ? 'Async' : 'Sync',
-    sourceResolution: 'debugInfo',
-    line: location?.line ?? 0,
-    column: location?.column ?? 0
+    sourceResolution: location.resolution,
+    line: location.line,
+    column: location.column
   };
   if (decision.skipReason) member.skipReason = decision.skipReason;
   if (decision.detail) member.detail = decision.detail;
-  return member;
+  return { member, location, modulePath };
 }
 
 function skipDecision(functionPath, options, arrowArgs) {
@@ -154,19 +161,29 @@ function skipDecision(functionPath, options, arrowArgs) {
 
 function transform(source, filename, options = {}) {
   const modulePath = relativeSourcePath(filename, options.repositoryRoot);
+  const sourceResolver = options.sourceResolver
+    ?? createSourceResolver(source, filename, { repositoryRoot: options.repositoryRoot });
   const ast = parser.parse(source, {
     sourceType: 'unambiguous',
     sourceFilename: modulePath,
     plugins: ['typescript', 'jsx', 'classProperties', 'classPrivateProperties', 'topLevelAwait']
   });
   const members = [];
+  const moduleGroups = new Map();
 
   traverse(ast, { Function: { exit(functionPath) {
     const node = functionPath.node;
     const arrowArgs = functionPath.isArrowFunctionExpression() ? arrowArguments(node) : undefined;
     const decision = skipDecision(functionPath, options, arrowArgs);
-    const member = memberFor(functionPath, modulePath, decision);
+    const resolved = memberFor(functionPath, modulePath, decision, sourceResolver);
+    const { member } = resolved;
     members.push(member);
+    let group = moduleGroups.get(resolved.modulePath);
+    if (!group) {
+      group = { assembly: resolved.modulePath, members: [] };
+      moduleGroups.set(resolved.modulePath, group);
+    }
+    group.members.push(member);
     if (decision.status !== 'Patched') return;
 
     if (!t.isBlockStatement(node.body)) {
@@ -181,26 +198,30 @@ function transform(source, filename, options = {}) {
     const args = functionPath.isArrowFunctionExpression()
       ? arrowArgs
       : t.callExpression(t.memberExpression(t.identifier('Array'), t.identifier('from')), [t.identifier('arguments')]);
-    const metadata = t.valueToNode({
-      assembly: modulePath,
+    const metadataValue = {
+      assembly: resolved.modulePath,
       methodFullName: member.methodFullName,
-      filePath: modulePath,
-      filePathResolution: 'debugInfo',
+      filePathResolution: member.sourceResolution,
       line: member.line,
       column: member.column
-    });
+    };
+    if (resolved.location.filePath !== undefined) metadataValue.filePath = resolved.location.filePath;
+    const metadata = t.valueToNode(metadataValue);
     node.body = t.blockStatement([
       t.returnStatement(t.callExpression(runtimeMember(node.async ? 'runAsync' : 'runSync'), [metadata, args, callback]))
     ], originalBody.directives);
   } } });
 
+  const modules = moduleGroups.size > 0
+    ? [...moduleGroups.values()]
+    : [{ assembly: modulePath, members }];
   if (options.instrument !== false) {
-    const registration = t.expressionStatement(t.callExpression(runtimeMember('registerModule'), [
-      t.valueToNode({ assembly: modulePath, members })
-    ]));
+    const registrations = modules.map(module => t.expressionStatement(
+      t.callExpression(runtimeMember('registerModule'), [t.valueToNode(module)])
+    ));
     const additions = options.bootstrapImport
-      ? [t.importDeclaration([], t.stringLiteral(options.bootstrapImport)), registration]
-      : [registration];
+      ? [t.importDeclaration([], t.stringLiteral(options.bootstrapImport)), ...registrations]
+      : registrations;
     let insertion = 0;
     while (insertion < ast.program.body.length && t.isImportDeclaration(ast.program.body[insertion])) insertion++;
     ast.program.body.splice(insertion, 0, ...additions);
@@ -209,6 +230,7 @@ function transform(source, filename, options = {}) {
   return {
     code: generate(ast, { sourceMaps: options.sourceMaps ?? false, sourceFileName: modulePath }, source).code,
     modulePath,
+    modules,
     members,
     unsupported: members.filter(member => member.status === 'Skipped')
   };
