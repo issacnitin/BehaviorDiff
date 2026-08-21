@@ -1,0 +1,18 @@
+{
+  "name": "behaviordiff-node-test-frameworks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "npm run jest && npm run vitest",
+    "jest": "jest --runInBand",
+    "vitest": "vitest run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "jest": "30.4.2",
+    "vitest": "4.1.10"
+  }
+}
