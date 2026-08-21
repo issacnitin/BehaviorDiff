@@ -33,9 +33,16 @@ function Run-Reference([string]$tree, [string]$agent, [string]$runDirectory) {
     New-Item -ItemType Directory -Path $runDirectory | Out-Null
     $trace = Join-Path $runDirectory 'run.ndjson'
     $argLine = "--add-opens java.base/java.util=ALL-UNNAMED -javaagent:$agent=include=io.behaviordiff.reference;trace=$trace"
-    & mvn -f (Join-Path $tree 'samples/JavaReference/pom.xml') test "-DargLine=$argLine" |
-        ForEach-Object { Write-Host $_ }
-    if ($LASTEXITCODE -ne 0) { throw "Java reference tests failed with $agent" }
+    $previousRepositoryRoot = [Environment]::GetEnvironmentVariable('BEHAVIORDIFF_REPOSITORY_ROOT', 'Process')
+    try {
+        $env:BEHAVIORDIFF_REPOSITORY_ROOT = $tree
+        & mvn -f (Join-Path $tree 'samples/JavaReference/pom.xml') test "-DargLine=$argLine" |
+            ForEach-Object { Write-Host $_ }
+        if ($LASTEXITCODE -ne 0) { throw "Java reference tests failed with $agent" }
+    } finally {
+        [Environment]::SetEnvironmentVariable(
+            'BEHAVIORDIFF_REPOSITORY_ROOT', $previousRepositoryRoot, 'Process')
+    }
 
     $runnerCount = (Get-ChildItem (Join-Path $tree 'samples/JavaReference/target/surefire-reports') -Filter 'TEST-*.xml' |
         ForEach-Object { [int]([xml](Get-Content $_.FullName -Raw)).testsuite.tests } | Measure-Object -Sum).Sum
@@ -47,6 +54,29 @@ function Run-Reference([string]$tree, [string]$agent, [string]$runDirectory) {
     } | ForEach-Object method)
     $events = @(Get-ChildItem $runDirectory -Filter '*.ndjson' | Where-Object Name -NotLike '*.manifest.ndjson' |
         ForEach-Object { Get-Content $_.FullName | ForEach-Object { $_ | ConvertFrom-Json } })
+    $subjectEvents = @($events | Where-Object {
+        $null -eq $_.PSObject.Properties['isHarness'] -or -not [bool]$_.isHarness
+    })
+    $harnessEvents = @($events | Where-Object {
+        $null -ne $_.PSObject.Properties['isHarness'] -and [bool]$_.isHarness
+    })
+    $exactSourceEvents = @($events | Where-Object { $_.filePathResolution -eq 'debugInfo' })
+    $unresolvedSourceEvents = @($events | Where-Object {
+        $_.filePathResolution -ne 'debugInfo' -or [string]::IsNullOrWhiteSpace([string]$_.filePath)
+    })
+    $packageOnlyEvents = @($events | Where-Object {
+        [string]$_.filePath -match '^io/behaviordiff/reference/.+\.java$'
+    })
+    $wrongSubjectPaths = @($subjectEvents | Where-Object {
+        [string]$_.filePath -notmatch '^samples/JavaReference/src/main/java/io/behaviordiff/reference/.+\.java$'
+    })
+    $wrongHarnessPaths = @($harnessEvents | Where-Object {
+        [string]$_.filePath -notmatch '^samples/JavaReference/src/test/java/io/behaviordiff/reference/.+\.java$'
+    })
+    if ($unresolvedSourceEvents.Count -ne 0 -or $packageOnlyEvents.Count -ne 0 `
+        -or $wrongSubjectPaths.Count -ne 0 -or $wrongHarnessPaths.Count -ne 0) {
+        throw "Java source attribution failed: exact=$($exactSourceEvents.Count) unresolved=$($unresolvedSourceEvents.Count) packageOnly=$($packageOnlyEvents.Count) wrongSubject=$($wrongSubjectPaths.Count) wrongHarness=$($wrongHarnessPaths.Count)"
+    }
     $digest = $records | Where-Object kind -eq 'digest' | Select-Object -First 1
     foreach ($counter in @('depthLimited', 'blocklisted', 'errored', 'renderedTruncated')) {
         if ([long]$digest.$counter -le 0) { throw "Java digest counter was not exercised: $counter" }
@@ -58,7 +88,15 @@ function Run-Reference([string]$tree, [string]$agent, [string]$runDirectory) {
     if ($runnerCount -ne $derivedCount) {
         throw "Java test count mismatch: runner=$runnerCount derived=$derivedCount"
     }
-    return [pscustomobject]@{ Runner = [int]$runnerCount; Derived = [int]$derivedCount }
+    return [pscustomobject]@{
+        Runner = [int]$runnerCount
+        Derived = [int]$derivedCount
+        ExactSourceEvents = $exactSourceEvents.Count
+        UnresolvedSourceEvents = $unresolvedSourceEvents.Count
+        PackageOnlyEvents = $packageOnlyEvents.Count
+        SubjectMainEvents = $subjectEvents.Count
+        HarnessTestEvents = $harnessEvents.Count
+    }
 }
 
 function Events([object]$run, [string]$method) {
@@ -105,7 +143,8 @@ try {
 
     $guard = Assert-BehaviorDiffConformanceRuns -FirstRun $run1 -SecondRun $run2 -MinimumMatchedKeys 100 `
         -UsableSourceResolutions @('debugInfo', 'generatedState', 'declaringType') `
-        -ReferenceSourcePathPatterns @('^io/behaviordiff/reference/.+\.java$') -DigestProofEvaluator $digestEvaluator
+        -ReferenceSourcePathPatterns @('^samples/JavaReference/src/(main|test)/java/.+\.java$') `
+        -DigestProofEvaluator $digestEvaluator
     $engineProject = Join-Path $repo 'src/BehaviorDiff.Engine/BehaviorDiff.Engine.csproj'
     & dotnet build $engineProject -c Release --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw 'Engine build failed' }
@@ -113,6 +152,11 @@ try {
 
     Write-Host '=== Java conformance report ===' -ForegroundColor Green
     Write-Host "  runner tests / derived roots: $($count1.Runner) / $($count1.Derived)"
+    Write-Host "  exact source events/run    : $($count1.ExactSourceEvents) / $($count2.ExactSourceEvents)"
+    Write-Host "  subject main events/run    : $($count1.SubjectMainEvents) / $($count2.SubjectMainEvents)"
+    Write-Host "  harness test events/run    : $($count1.HarnessTestEvents) / $($count2.HarnessTestEvents)"
+    Write-Host "  unresolved source events   : $($count1.UnresolvedSourceEvents + $count2.UnresolvedSourceEvents)"
+    Write-Host "  package-only source events : $($count1.PackageOnlyEvents + $count2.PackageOnlyEvents)"
     Write-Host "  matched keys              : $($guard.MatchedKeys)"
     Write-Host "  identical subject methods : $($guard.SubjectMethods)"
     Write-Host "  subject events per run     : $($guard.FirstSubjectEvents) / $($guard.SecondSubjectEvents)"

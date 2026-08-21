@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -16,8 +18,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 final class ClassRewriterTest {
+    @TempDir
+    Path repositoryRoot;
+
     @AfterEach
     void resetSink() {
         RuntimeHooks.setSink(null);
@@ -98,6 +104,45 @@ final class ClassRewriterTest {
     }
 
     @Test
+    void configuredRepositoryRootEmitsResolvedTestSource() throws Exception {
+        Path output = repositoryRoot.resolve("module/target/test-classes");
+        Path source = repositoryRoot.resolve(
+            "module/src/test/java/io/behaviordiff/agent/RewriteFixture.java");
+        Files.createDirectories(output);
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "class RewriteFixture {}");
+
+        List<Completion> completions = new ArrayList<>();
+        RuntimeHooks.setSink((frame, returnValue, throwable) ->
+            completions.add(new Completion(frame, returnValue, throwable)));
+        Object fixture = loadRewritten(
+            RewriteFixture.class, output, new JavaSourceResolver(repositoryRoot));
+        completions.clear();
+
+        assertEquals(4, invoke(fixture, "normal", new Class<?>[] { int.class }, 3));
+        assertEquals(
+            "module/src/test/java/io/behaviordiff/agent/RewriteFixture.java",
+            completions.get(0).frame.filePath());
+        assertEquals("debugInfo", completions.get(0).frame.filePathResolution());
+    }
+
+    @Test
+    void configuredRepositoryRootLeavesMissingSourceUnresolved() throws Exception {
+        Path output = repositoryRoot.resolve("module/target/test-classes");
+        Files.createDirectories(output);
+        List<Completion> completions = new ArrayList<>();
+        RuntimeHooks.setSink((frame, returnValue, throwable) ->
+            completions.add(new Completion(frame, returnValue, throwable)));
+        Object fixture = loadRewritten(
+            RewriteFixture.class, output, new JavaSourceResolver(repositoryRoot));
+        completions.clear();
+
+        assertEquals(4, invoke(fixture, "normal", new Class<?>[] { int.class }, 3));
+        assertNull(completions.get(0).frame.filePath());
+        assertEquals("unresolved", completions.get(0).frame.filePathResolution());
+    }
+
+    @Test
     void emitsCompletableFutureOnlyAfterSettlement() throws Exception {
         List<Completion> completions = new java.util.concurrent.CopyOnWriteArrayList<>();
         CountDownLatch settled = new CountDownLatch(2);
@@ -145,6 +190,13 @@ final class ClassRewriterTest {
     }
 
     private static Object loadRewritten(Class<?> fixtureClass) throws Exception {
+        return loadRewritten(fixtureClass, null, null);
+    }
+
+    private static Object loadRewritten(
+        Class<?> fixtureClass,
+        Path outputLocation,
+        JavaSourceResolver sourceResolver) throws Exception {
         String name = fixtureClass.getName();
         String resource = "/" + name.replace('.', '/') + ".class";
         byte[] original;
@@ -155,8 +207,15 @@ final class ClassRewriterTest {
             original = stream.readAllBytes();
         }
 
-        byte[] rewritten = new ClassRewriter().rewrite(
-            name.replace('.', '/'), original, fixtureClass.getClassLoader());
+        byte[] rewritten = sourceResolver == null
+            ? new ClassRewriter().rewrite(name.replace('.', '/'), original, fixtureClass.getClassLoader())
+            : new ClassRewriter().rewrite(
+                name.replace('.', '/'),
+                original,
+                fixtureClass.getClassLoader(),
+                "test-classes",
+                outputLocation,
+                sourceResolver);
         ClassLoader loader = new ClassLoader(fixtureClass.getClassLoader()) {
             @Override
             protected Class<?> loadClass(String requestedName, boolean resolve) throws ClassNotFoundException {

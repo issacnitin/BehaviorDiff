@@ -3,6 +3,7 @@ package io.behaviordiff.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -24,13 +25,15 @@ final class AgentOptionsTest {
     void agentArgumentsOverrideEnvironment() {
         Map<String, String> environment = Map.of(
             AgentOptions.INCLUDE_ENVIRONMENT, "ignored",
-            AgentOptions.EXCLUDE_ENVIRONMENT, "ignored.internal");
+            AgentOptions.EXCLUDE_ENVIRONMENT, "ignored.internal",
+            AgentOptions.REPOSITORY_ROOT_ENVIRONMENT, "ignored-root");
 
         AgentOptions options = AgentOptions.parse(
-            "include=com.example,org.acme;exclude=com.example.generated", environment);
+            "include=com.example,org.acme;exclude=com.example.generated;repositoryRoot=repo", environment);
 
         assertEquals(java.util.List.of("com.example", "org.acme"), options.includes());
         assertEquals(java.util.List.of("com.example.generated"), options.excludes());
+        assertEquals(Paths.get("repo").toAbsolutePath().normalize(), options.repositoryRoot());
     }
 
     @Test

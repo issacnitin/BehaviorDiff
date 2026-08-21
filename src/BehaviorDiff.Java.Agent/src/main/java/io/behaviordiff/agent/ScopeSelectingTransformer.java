@@ -2,21 +2,29 @@ package io.behaviordiff.agent;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.IllegalClassFormatException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.ProtectionDomain;
 
 final class ScopeSelectingTransformer implements ClassFileTransformer {
     private final PackageScope scope;
     private final ClassRewriter rewriter;
     private final TraceSession traceSession;
+    private final JavaSourceResolver sourceResolver;
 
     ScopeSelectingTransformer(PackageScope scope) {
-        this(scope, TraceSession.disabled());
+        this(scope, TraceSession.disabled(), new JavaSourceResolver(null));
     }
 
     ScopeSelectingTransformer(PackageScope scope, TraceSession traceSession) {
+        this(scope, traceSession, new JavaSourceResolver(null));
+    }
+
+    ScopeSelectingTransformer(PackageScope scope, TraceSession traceSession, JavaSourceResolver sourceResolver) {
         this.scope = scope;
         rewriter = new ClassRewriter();
         this.traceSession = traceSession;
+        this.sourceResolver = sourceResolver;
     }
 
     @Override
@@ -30,28 +38,35 @@ final class ScopeSelectingTransformer implements ClassFileTransformer {
             return null;
         }
 
-        String module = moduleName(protectionDomain);
+        Path outputLocation = outputLocation(protectionDomain);
+        String module = moduleName(outputLocation);
         if (scope.isExcluded(className)) {
-            traceSession.registerClass(module, className, classfileBuffer, true);
+            traceSession.registerClass(
+                module, className, classfileBuffer, true, outputLocation, sourceResolver);
             return null;
         }
 
-        byte[] rewritten = rewriter.rewrite(className, classfileBuffer, loader, module);
-        traceSession.registerClass(module, className, classfileBuffer, false);
+        byte[] rewritten = rewriter.rewrite(
+            className, classfileBuffer, loader, module, outputLocation, sourceResolver);
+        traceSession.registerClass(
+            module, className, classfileBuffer, false, outputLocation, sourceResolver);
         return rewritten;
     }
 
-    private static String moduleName(ProtectionDomain protectionDomain) {
+    private static Path outputLocation(ProtectionDomain protectionDomain) {
         if (protectionDomain == null || protectionDomain.getCodeSource() == null
             || protectionDomain.getCodeSource().getLocation() == null) {
-            return "unnamed";
+            return null;
         }
         try {
-            java.nio.file.Path path = java.nio.file.Paths.get(protectionDomain.getCodeSource().getLocation().toURI());
-            java.nio.file.Path name = path.getFileName();
-            return name == null ? "unnamed" : name.toString();
-        } catch (java.net.URISyntaxException exception) {
-            return "unnamed";
+            return Paths.get(protectionDomain.getCodeSource().getLocation().toURI());
+        } catch (java.net.URISyntaxException | IllegalArgumentException exception) {
+            return null;
         }
+    }
+
+    private static String moduleName(Path outputLocation) {
+        Path name = outputLocation == null ? null : outputLocation.getFileName();
+        return name == null ? "unnamed" : name.toString();
     }
 }

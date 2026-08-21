@@ -5,20 +5,25 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 final class AgentOptions {
     static final String INCLUDE_ENVIRONMENT = "BEHAVIORDIFF_NAMESPACES";
     static final String EXCLUDE_ENVIRONMENT = "BEHAVIORDIFF_EXCLUDE_NAMESPACES";
     static final String TRACE_ENVIRONMENT = "BEHAVIORDIFF_TRACE";
+    static final String REPOSITORY_ROOT_ENVIRONMENT = "BEHAVIORDIFF_REPOSITORY_ROOT";
 
     private final List<String> includes;
     private final List<String> excludes;
     private final String tracePath;
+    private final Path repositoryRoot;
 
-    private AgentOptions(List<String> includes, List<String> excludes, String tracePath) {
+    private AgentOptions(List<String> includes, List<String> excludes, String tracePath, Path repositoryRoot) {
         this.includes = includes;
         this.excludes = excludes;
         this.tracePath = tracePath;
+        this.repositoryRoot = repositoryRoot;
     }
 
     static AgentOptions parse(String agentArguments, Map<String, String> environment) {
@@ -34,7 +39,8 @@ final class AgentOptions {
         return new AgentOptions(
             includes,
             parsePrefixes(excludeText),
-            arguments.getOrDefault("trace", environment.get(TRACE_ENVIRONMENT)));
+            arguments.getOrDefault("trace", environment.get(TRACE_ENVIRONMENT)),
+            parsePath(arguments.getOrDefault("repositoryRoot", environment.get(REPOSITORY_ROOT_ENVIRONMENT))));
     }
 
     static AgentOptions fromProcess(String agentArguments) {
@@ -53,6 +59,10 @@ final class AgentOptions {
         return tracePath;
     }
 
+    Path repositoryRoot() {
+        return repositoryRoot;
+    }
+
     private static Map<String, String> parseArguments(String text) {
         if (text == null || text.trim().isEmpty()) {
             return Collections.emptyMap();
@@ -67,7 +77,8 @@ final class AgentOptions {
 
             String name = part.substring(0, separator).trim();
             String value = part.substring(separator + 1).trim();
-            if (!name.equals("include") && !name.equals("exclude") && !name.equals("trace")) {
+            if (!name.equals("include") && !name.equals("exclude") && !name.equals("trace")
+                && !name.equals("repositoryRoot")) {
                 throw new IllegalArgumentException("Unknown BehaviorDiff agent option: " + name);
             }
 
@@ -77,6 +88,12 @@ final class AgentOptions {
         }
 
         return values;
+    }
+
+    private static Path parsePath(String text) {
+        return text == null || text.trim().isEmpty()
+            ? null
+            : Paths.get(text.trim()).toAbsolutePath().normalize();
     }
 
     private static List<String> parsePrefixes(String text) {

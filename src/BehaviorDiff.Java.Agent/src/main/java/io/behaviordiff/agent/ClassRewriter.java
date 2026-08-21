@@ -3,6 +3,7 @@ package io.behaviordiff.agent;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.instrument.IllegalClassFormatException;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import org.objectweb.asm.ClassReader;
@@ -48,11 +49,30 @@ final class ClassRewriter {
 
     byte[] rewrite(String className, byte[] original, ClassLoader loader, String module)
         throws IllegalClassFormatException {
+        return rewrite(className, original, loader, module, null, null);
+    }
+
+    byte[] rewrite(
+        String className,
+        byte[] original,
+        ClassLoader loader,
+        String module,
+        Path outputLocation,
+        JavaSourceResolver sourceResolver) throws IllegalClassFormatException {
         try {
             ClassReader reader = new ClassReader(original);
             SourceMetadata sourceMetadata = SourceMetadata.read(reader);
+            String resolvedSourcePath = sourceResolver == null
+                ? null
+                : sourceResolver.resolve(outputLocation, reader.getClassName(), sourceMetadata.sourceFile);
             ClassWriter writer = new LoaderAwareClassWriter(reader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS, loader);
-            ClassVisitor visitor = new RewritingClassVisitor(writer, reader.getClassName(), sourceMetadata, module);
+            ClassVisitor visitor = new RewritingClassVisitor(
+                writer,
+                reader.getClassName(),
+                sourceMetadata,
+                module,
+                resolvedSourcePath,
+                sourceResolver == null);
             reader.accept(visitor, ClassReader.EXPAND_FRAMES);
             byte[] rewritten = writer.toByteArray();
             verify(className, rewritten, loader);
@@ -86,12 +106,22 @@ final class ClassRewriter {
         private final String owner;
         private final SourceMetadata sourceMetadata;
         private final String module;
+        private final String resolvedSourcePath;
+        private final boolean allowPackageRelativeFallback;
 
-        RewritingClassVisitor(ClassVisitor delegate, String owner, SourceMetadata sourceMetadata, String module) {
+        RewritingClassVisitor(
+            ClassVisitor delegate,
+            String owner,
+            SourceMetadata sourceMetadata,
+            String module,
+            String resolvedSourcePath,
+            boolean allowPackageRelativeFallback) {
             super(Opcodes.ASM9, delegate);
             this.owner = owner;
             this.sourceMetadata = sourceMetadata;
             this.module = module;
+            this.resolvedSourcePath = resolvedSourcePath;
+            this.allowPackageRelativeFallback = allowPackageRelativeFallback;
         }
 
         @Override
@@ -114,7 +144,8 @@ final class ClassRewriter {
                 name,
                 descriptor,
                 owner,
-                sourceMetadata.location(owner, name, descriptor),
+                sourceMetadata.location(
+                    owner, name, descriptor, resolvedSourcePath, allowPackageRelativeFallback),
                 sourceMetadata.isHarness(),
                 sourceMetadata.isTestRoot(name, descriptor),
                 module);
@@ -284,15 +315,24 @@ final class ClassRewriter {
                 || descriptor.equals("Lorg/testng/annotations/Test;");
         }
 
-        SourceLocation location(String owner, String name, String descriptor) {
+        SourceLocation location(
+            String owner,
+            String name,
+            String descriptor,
+            String resolvedSourcePath,
+            boolean allowPackageRelativeFallback) {
             Integer firstLine = firstLines.get(name + descriptor);
-            if (sourceFile != null && firstLine != null) {
-                return new SourceLocation(sourcePath(owner, sourceFile), "debugInfo", firstLine);
+            String path = resolvedSourcePath;
+            if (path == null && allowPackageRelativeFallback && sourceFile != null) {
+                path = sourcePath(owner, sourceFile);
             }
-            if (sourceFile != null && hasLineNumbers) {
-                return new SourceLocation(sourcePath(owner, sourceFile), "declaringType", 0);
+            if (path != null && firstLine != null) {
+                return new SourceLocation(path, "debugInfo", firstLine);
             }
-            if (!hasLineNumbers) {
+            if (path != null && hasLineNumbers) {
+                return new SourceLocation(path, "declaringType", 0);
+            }
+            if (sourceFile == null || !hasLineNumbers) {
                 return new SourceLocation(null, "debugInfoMissing", 0);
             }
             return new SourceLocation(null, "unresolved", 0);

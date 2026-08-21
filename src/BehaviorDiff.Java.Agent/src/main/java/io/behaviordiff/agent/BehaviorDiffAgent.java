@@ -12,7 +12,10 @@ public final class BehaviorDiffAgent {
         TraceSession traceSession = TraceSession.start(options.tracePath());
         RuntimeHooks.initialize(traceSession);
         instrumentation.addTransformer(
-            new ScopeSelectingTransformer(new PackageScope(options), traceSession),
+            new ScopeSelectingTransformer(
+                new PackageScope(options),
+                traceSession,
+                new JavaSourceResolver(options.repositoryRoot())),
             false);
     }
 }

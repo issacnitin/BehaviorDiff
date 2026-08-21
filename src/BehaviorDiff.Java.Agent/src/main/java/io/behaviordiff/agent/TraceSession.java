@@ -117,7 +117,13 @@ final class TraceSession {
         }
     }
 
-    void registerClass(String moduleName, String className, byte[] classBytes, boolean excluded) {
+    void registerClass(
+        String moduleName,
+        String className,
+        byte[] classBytes,
+        boolean excluded,
+        Path outputLocation,
+        JavaSourceResolver sourceResolver) {
         if (!enabled) {
             return;
         }
@@ -163,9 +169,13 @@ final class TraceSession {
                         boolean noBody = (access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0;
                         boolean initializer = name.equals("<clinit>");
                         boolean skipped = excluded || noBody || initializer;
-                        String resolution = sourceFile == null
+                        String resolvedSourcePath = sourceResolver.resolve(
+                            outputLocation, className, sourceFile);
+                        String resolution = sourceFile == null || lines.isEmpty()
                             ? "debugInfoMissing"
-                            : lines.containsKey(key) ? "debugInfo" : "declaringType";
+                            : resolvedSourcePath == null
+                                ? "unresolved"
+                                : lines.containsKey(key) ? "debugInfo" : "declaringType";
                         String returnKind = Type.getReturnType(descriptor).equals(Type.VOID_TYPE)
                             ? "Void"
                             : Type.getReturnType(descriptor).equals(Type.getType(java.util.concurrent.CompletableFuture.class))
