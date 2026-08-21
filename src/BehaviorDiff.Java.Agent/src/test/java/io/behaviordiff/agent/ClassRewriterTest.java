@@ -59,11 +59,50 @@ final class ClassRewriterTest {
         assertEquals(true, completions.get(0).frame.line() > 0);
     }
 
+    @Test
+    void derivesTestCorrelationFromRootSubtrees() throws Exception {
+        List<Completion> completions = new ArrayList<>();
+        RuntimeHooks.setSink((frame, returnValue, throwable) ->
+            completions.add(new Completion(frame, returnValue, throwable)));
+        Object fixture = loadRewritten(CorrelationFixture.class);
+        completions.clear();
+
+        assertEquals(5, invoke(fixture, "first", new Class<?>[0]));
+        assertEquals(7, invoke(fixture, "second", new Class<?>[0]));
+
+        long runnerCount = java.util.Arrays.stream(CorrelationFixture.class.getDeclaredMethods())
+            .filter(method -> method.isAnnotationPresent(Test.class))
+            .count();
+        List<CallFrame> roots = completions.stream()
+            .map(completion -> completion.frame)
+            .filter(CallFrame::isTestRoot)
+            .collect(java.util.stream.Collectors.toList());
+        assertEquals(runnerCount, roots.size());
+        assertEquals(2, roots.stream().map(CallFrame::testId).distinct().count());
+
+        for (Completion completion : completions) {
+            CallFrame frame = completion.frame;
+            assertEquals(true, frame.isHarness());
+            assertEquals(true, frame.testId().contains("first") || frame.testId().contains("second"));
+            if (frame.isTestRoot()) {
+                assertEquals(0, frame.callDepth());
+                assertEquals(0, frame.parentCallId());
+            } else {
+                assertEquals(true, frame.callDepth() > 0);
+                assertEquals(true, frame.parentCallId() > 0);
+            }
+        }
+    }
+
     private static Object loadRewrittenFixture() throws Exception {
-        String name = RewriteFixture.class.getName();
+        return loadRewritten(RewriteFixture.class);
+    }
+
+    private static Object loadRewritten(Class<?> fixtureClass) throws Exception {
+        String name = fixtureClass.getName();
         String resource = "/" + name.replace('.', '/') + ".class";
         byte[] original;
-        try (InputStream stream = RewriteFixture.class.getResourceAsStream(resource)) {
+        try (InputStream stream = fixtureClass.getResourceAsStream(resource)) {
             if (stream == null) {
                 throw new IOException("missing fixture class bytes");
             }
@@ -71,8 +110,8 @@ final class ClassRewriterTest {
         }
 
         byte[] rewritten = new ClassRewriter().rewrite(
-            name.replace('.', '/'), original, RewriteFixture.class.getClassLoader());
-        ClassLoader loader = new ClassLoader(RewriteFixture.class.getClassLoader()) {
+            name.replace('.', '/'), original, fixtureClass.getClassLoader());
+        ClassLoader loader = new ClassLoader(fixtureClass.getClassLoader()) {
             @Override
             protected Class<?> loadClass(String requestedName, boolean resolve) throws ClassNotFoundException {
                 if (!requestedName.equals(name)) {

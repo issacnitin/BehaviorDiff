@@ -28,7 +28,9 @@ final class ClassRewriter {
             Type.getType(Object[].class),
             Type.getType(String.class),
             Type.getType(String.class),
-            Type.INT_TYPE
+            Type.INT_TYPE,
+            Type.BOOLEAN_TYPE,
+            Type.BOOLEAN_TYPE
         });
     private static final Method EXIT_METHOD = new Method(
         "exit", Type.VOID_TYPE, new Type[] { FRAME_TYPE, Type.getType(Object.class), THROWABLE_TYPE });
@@ -98,7 +100,9 @@ final class ClassRewriter {
                 name,
                 descriptor,
                 owner,
-                sourceMetadata.location(owner, name, descriptor));
+                sourceMetadata.location(owner, name, descriptor),
+                sourceMetadata.isHarness(),
+                sourceMetadata.isTestRoot(name, descriptor));
         }
     }
 
@@ -106,6 +110,8 @@ final class ClassRewriter {
         private final String methodFullName;
         private final Type returnType;
         private final SourceLocation sourceLocation;
+        private final boolean harness;
+        private final boolean testRoot;
         private final Label bodyStart = new Label();
         private final Label bodyEnd = new Label();
         private final Label exceptionHandler = new Label();
@@ -118,11 +124,15 @@ final class ClassRewriter {
             String name,
             String descriptor,
             String owner,
-            SourceLocation sourceLocation) {
+            SourceLocation sourceLocation,
+            boolean harness,
+            boolean testRoot) {
             super(Opcodes.ASM9, delegate, access, name, descriptor);
             methodFullName = owner.replace('/', '.') + "." + name + descriptor;
             returnType = Type.getReturnType(descriptor);
             this.sourceLocation = sourceLocation;
+            this.harness = harness;
+            this.testRoot = testRoot;
         }
 
         @Override
@@ -136,6 +146,8 @@ final class ClassRewriter {
             }
             push(sourceLocation.resolution);
             push(sourceLocation.line);
+            push(harness);
+            push(testRoot);
             invokeStatic(HOOKS_TYPE, ENTER_METHOD);
             frameLocal = newLocal(FRAME_TYPE);
             storeLocal(frameLocal);
@@ -191,6 +203,7 @@ final class ClassRewriter {
         private String sourceFile;
         private boolean hasLineNumbers;
         private final Map<String, Integer> firstLines = new HashMap<>();
+        private final Map<String, Boolean> testRoots = new HashMap<>();
 
         static SourceMetadata read(ClassReader reader) {
             SourceMetadata metadata = new SourceMetadata();
@@ -207,16 +220,40 @@ final class ClassRewriter {
                     String descriptor,
                     String signature,
                     String[] exceptions) {
+                    String key = name + descriptor;
                     return new MethodVisitor(Opcodes.ASM9) {
                         @Override
                         public void visitLineNumber(int line, Label start) {
                             metadata.hasLineNumbers = true;
-                            metadata.firstLines.merge(name + descriptor, line, Math::min);
+                            metadata.firstLines.merge(key, line, Math::min);
+                        }
+
+                        @Override
+                        public org.objectweb.asm.AnnotationVisitor visitAnnotation(String annotation, boolean visible) {
+                            if (isTestAnnotation(annotation)) {
+                                metadata.testRoots.put(key, true);
+                            }
+                            return null;
                         }
                     };
                 }
             }, ClassReader.SKIP_FRAMES);
             return metadata;
+        }
+
+        boolean isHarness() {
+            return !testRoots.isEmpty();
+        }
+
+        boolean isTestRoot(String name, String descriptor) {
+            return testRoots.getOrDefault(name + descriptor, false);
+        }
+
+        private static boolean isTestAnnotation(String descriptor) {
+            return descriptor.equals("Lorg/junit/Test;")
+                || descriptor.equals("Lorg/junit/jupiter/api/Test;")
+                || descriptor.equals("Lorg/junit/jupiter/params/ParameterizedTest;")
+                || descriptor.equals("Lorg/testng/annotations/Test;");
         }
 
         SourceLocation location(String owner, String name, String descriptor) {
