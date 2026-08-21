@@ -1,0 +1,12 @@
+{
+  "name": "behaviordiff-node-sort-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node test/run.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

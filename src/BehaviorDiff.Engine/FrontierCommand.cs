@@ -393,16 +393,8 @@ namespace BehaviorDiff.Engine
                 var reasons = new List<string>();
                 foreach (string file in changed)
                 {
-                    string stem = Path.GetFileNameWithoutExtension(file);
-                    if (stem.Length == 0)
-                    {
-                        continue;
-                    }
-
-                    string[] why = set.Coverage.Members
-                        .Where(m => m.MethodFullName != null
-                            && !string.IsNullOrEmpty(m.SkipReason)
-                            && string.Equals(DeclaringTypeSimpleName(m.MethodFullName!), stem, StringComparison.Ordinal))
+                    string[] why = MembersForChangedFile(set, file)
+                        .Where(m => !string.IsNullOrEmpty(m.SkipReason))
                         .GroupBy(m => m.SkipReason!, StringComparer.Ordinal)
                         .OrderByDescending(g => g.Count())
                         .Select(g => g.Key + " x" + g.Count())
@@ -617,14 +609,7 @@ namespace BehaviorDiff.Engine
 
             foreach (string file in changedFiles)
             {
-                string stem = Path.GetFileNameWithoutExtension(file);
-                CoverageMemberDto[] members = set.Coverage.Members
-                    .Where(member => member.MethodFullName != null
-                        && string.Equals(
-                            DeclaringTypeSimpleName(member.MethodFullName!),
-                            stem,
-                            StringComparison.Ordinal))
-                    .ToArray();
+                CoverageMemberDto[] members = MembersForChangedFile(set, file);
                 if (members.Length == 0 || members.Any(member => member.Status != "Skipped"
                     || (member.SkipReason != NeutralSkipReason.ExcludedByScope
                         && member.SkipReason != NeutralSkipReason.Unobservable)))
@@ -634,6 +619,20 @@ namespace BehaviorDiff.Engine
             }
 
             return true;
+        }
+
+        private static CoverageMemberDto[] MembersForChangedFile(DivergenceSetFile set, string file)
+        {
+            string stem = Path.GetFileNameWithoutExtension(file);
+            return set.Coverage.Members
+                .Where(member => string.Equals(member.Assembly, file, StringComparison.Ordinal)
+                    || (stem.Length > 0
+                        && member.MethodFullName != null
+                        && string.Equals(
+                            DeclaringTypeSimpleName(member.MethodFullName),
+                            stem,
+                            StringComparison.Ordinal)))
+                .ToArray();
         }
 
         internal static HashSet<string> LoadChangedFiles(string path)
