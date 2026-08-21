@@ -794,11 +794,25 @@ namespace BehaviorDiff.Cli
 
             JsonElement fallback = evidence.FirstOrDefault(item =>
                 !string.Equals(NullableString(item, "baseReturn"), NullableString(item, "prReturn"), StringComparison.Ordinal));
-            return fallback.ValueKind == JsonValueKind.Undefined
+            string lead = fallback.ValueKind == JsonValueKind.Undefined
                 ? "Its observed runtime behavior changed."
                 : ShortMember(name) + " changed from "
                     + RenderValue(NullableString(fallback, "baseReturn"), NullableString(fallback, "baseException"))
                     + " to " + RenderValue(NullableString(fallback, "prReturn"), NullableString(fallback, "prException")) + ".";
+            if (member.TryGetProperty("consequences", out JsonElement genericConsequences)
+                && genericConsequences.ValueKind == JsonValueKind.Array)
+            {
+                JsonElement consequence = genericConsequences.EnumerateArray().FirstOrDefault();
+                if (consequence.ValueKind != JsonValueKind.Undefined
+                    && consequence.TryGetProperty("evidence", out JsonElement consequenceEvidence))
+                {
+                    lead += " " + ShortMember(String(consequence, "memberName")) + " changed from "
+                        + RenderValue(NullableString(consequenceEvidence, "baseReturn"), NullableString(consequenceEvidence, "baseException"))
+                        + " to " + RenderValue(NullableString(consequenceEvidence, "prReturn"), NullableString(consequenceEvidence, "prException")) + ".";
+                }
+            }
+
+            return lead;
         }
 
         private static string UntestedLead(JsonElement member)
