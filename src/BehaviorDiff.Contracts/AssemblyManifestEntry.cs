@@ -17,6 +17,9 @@ namespace BehaviorDiff.Contracts
 
         /// <summary>JavaScript or TypeScript transformed through a CommonJS or ESM loader hook.</summary>
         NodeAstTransform,
+
+        /// <summary>Go source transformed through the module-aware AST rewriter.</summary>
+        GoAstRewrite,
     }
 
     /// <summary>

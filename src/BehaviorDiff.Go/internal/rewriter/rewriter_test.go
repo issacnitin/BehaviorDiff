@@ -34,8 +34,9 @@ func TestRewriteFixture(t *testing.T) {
 	}
 
 	expectedMetrics := Metrics{
-		Packages: 2, Files: 2, Functions: 22, Methods: 4, Companions: 26,
-		DirectCalls: 15, GoStatements: 8, Boundaries: 4,
+		Packages: 2, Files: 3, Functions: 26, Methods: 4, Companions: 30,
+		TestRoots: 4, Patched: 30, Skipped: 4,
+		DirectCalls: 30, GoStatements: 8, Boundaries: 4,
 	}
 	if report.Metrics != expectedMetrics {
 		t.Fatalf("metrics mismatch: got %+v, want %+v", report.Metrics, expectedMetrics)
@@ -93,6 +94,244 @@ func TestRejectsOutputInsideSource(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "must not be inside source") {
 		t.Fatalf("expected inside-source rejection, got %v", err)
 	}
+}
+
+type emittedEvent struct {
+	TestID           string  `json:"testId"`
+	Method           string  `json:"methodFullName"`
+	File             string  `json:"filePath"`
+	SourceResolution string  `json:"filePathResolution"`
+	Line             int     `json:"line"`
+	Depth            int     `json:"callDepth"`
+	ParentCallID     *uint64 `json:"parentCallId"`
+	CallID           uint64  `json:"callId"`
+	Ordinal          int     `json:"ordinal"`
+	ArgsDigest       string  `json:"argsDigest"`
+	ReturnDigest     *string `json:"returnDigest"`
+	ExceptionType    *string `json:"exceptionType"`
+	Harness          bool    `json:"isHarness"`
+}
+
+type emittedManifestRecord struct {
+	Kind                string `json:"kind"`
+	Schema              string `json:"schema"`
+	Language            string `json:"language"`
+	Assembly            string `json:"assembly"`
+	Discovery           string `json:"discovery"`
+	Method              string `json:"method"`
+	Status              string `json:"status"`
+	SkipReason          string `json:"skipReason"`
+	IsTestRoot          bool   `json:"isTestRoot"`
+	PatchedMembers      int    `json:"patchedMembers"`
+	DiscoveredMembers   int    `json:"discoveredMembers"`
+	SkippedMembers      int    `json:"skippedMembers"`
+	PatchFailedMembers  int    `json:"patchFailedMembers"`
+	TracedCalls         int    `json:"tracedCalls"`
+	ValuesDigested      int    `json:"valuesDigested"`
+	UnreadableFields    int    `json:"unreadableFields"`
+	AmbiguousMapEntries int    `json:"ambiguousMapEntries"`
+	Enqueued            int    `json:"enqueued"`
+	Written             int    `json:"written"`
+	Dropped             int    `json:"dropped"`
+	Capacity            int    `json:"capacity"`
+}
+
+func TestEmitterFixture(t *testing.T) {
+	source := filepath.Join("..", "..", "testdata", "rewrite")
+	out := filepath.Join(t.TempDir(), "rewrite-cache")
+	if _, err := Rewrite(Options{Source: source, Out: out}); err != nil {
+		t.Fatalf("Rewrite failed: %v", err)
+	}
+	traceDirectory := os.Getenv("BEHAVIORDIFF_GO_EMITTER_OUTPUT")
+	if traceDirectory == "" {
+		traceDirectory = t.TempDir()
+	} else if err := os.MkdirAll(traceDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	traceBase := filepath.Join(traceDirectory, "run.ndjson")
+	command := exec.Command("go", "test", "-count=1", "./...")
+	command.Dir = out
+	command.Env = append(os.Environ(), "BEHAVIORDIFF_TRACE="+traceBase)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("traced go test failed: %v\n%s", err, output)
+	}
+
+	tracePaths, err := filepath.Glob(strings.TrimSuffix(traceBase, ".ndjson") + ".*.ndjson")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPaths, err := filepath.Glob(strings.TrimSuffix(traceBase, ".ndjson") + ".*.manifest.ndjson")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracePaths = filterManifestPaths(tracePaths)
+	if len(tracePaths) != 1 || len(manifestPaths) != 1 {
+		t.Fatalf("process-decorated output mismatch: traces=%v manifests=%v", tracePaths, manifestPaths)
+	}
+	events := readNDJSON[emittedEvent](t, tracePaths[0])
+	records := readNDJSON[emittedManifestRecord](t, manifestPaths[0])
+	verifyEmittedEvents(t, events)
+	verifyEmittedManifest(t, records, events)
+}
+
+func verifyEmittedEvents(t *testing.T, events []emittedEvent) {
+	t.Helper()
+	byCallID := make(map[uint64]emittedEvent, len(events))
+	ordinals := make(map[string][]int)
+	rootCount := 0
+	returnCaptured := false
+	panicCaptured := false
+	recoveredTestPassed := false
+	goroutineParent := false
+	for _, event := range events {
+		if event.CallID == 0 || byCallID[event.CallID].CallID != 0 {
+			t.Fatalf("invalid or duplicate call id %d", event.CallID)
+		}
+		byCallID[event.CallID] = event
+		if event.File == "" || strings.Contains(event.File, "\\") || !strings.HasSuffix(event.File, ".go") || event.Line <= 0 || event.SourceResolution != "debugInfo" {
+			t.Fatalf("invalid source metadata: %+v", event)
+		}
+		if event.ArgsDigest == "" {
+			t.Fatalf("missing args digest: %+v", event)
+		}
+		ordinals[event.TestID+"\x00"+event.Method] = append(ordinals[event.TestID+"\x00"+event.Method], event.Ordinal)
+		if event.Harness {
+			rootCount++
+			if event.Depth != 0 || event.ParentCallID != nil || !event.IsTestMethod() {
+				t.Fatalf("invalid test root: %+v", event)
+			}
+			if strings.Contains(event.Method, ".TestPanicRecover(") && event.ExceptionType == nil {
+				recoveredTestPassed = true
+			}
+		}
+		if strings.Contains(event.Method, ".One(") && event.ReturnDigest != nil {
+			returnCaptured = true
+		}
+		if strings.Contains(event.Method, ".panicNow(") {
+			panicCaptured = event.ExceptionType != nil && event.ReturnDigest == nil
+		}
+		if strings.Contains(event.Method, ".sendValue(") && event.TestID == "TestGoroutines" && event.ParentCallID != nil && event.Depth > 1 {
+			goroutineParent = true
+		}
+	}
+	for _, event := range events {
+		if event.ParentCallID != nil {
+			if _, found := byCallID[*event.ParentCallID]; !found {
+				t.Fatalf("orphan parent %d for call %d", *event.ParentCallID, event.CallID)
+			}
+		} else if event.Depth != 0 {
+			t.Fatalf("non-root call has no parent: %+v", event)
+		}
+	}
+	for key, values := range ordinals {
+		sort.Ints(values)
+		for expected, actual := range values {
+			if actual != expected {
+				t.Fatalf("ordinal gap for %q: %v", key, values)
+			}
+		}
+	}
+	if rootCount != 4 || !returnCaptured || !panicCaptured || !recoveredTestPassed || !goroutineParent {
+		t.Fatalf("event proof failed: roots=%d return=%t panic=%t recovered=%t goroutineParent=%t", rootCount, returnCaptured, panicCaptured, recoveredTestPassed, goroutineParent)
+	}
+}
+
+func (event emittedEvent) IsTestMethod() bool {
+	return strings.Contains(event.Method, ".Test")
+}
+
+func verifyEmittedManifest(t *testing.T, records []emittedManifestRecord, events []emittedEvent) {
+	t.Helper()
+	modules := make(map[string]emittedManifestRecord)
+	members := make(map[string]emittedManifestRecord)
+	var run, digest, writer emittedManifestRecord
+	for _, record := range records {
+		switch record.Kind {
+		case "run":
+			run = record
+		case "assembly":
+			modules[record.Assembly] = record
+		case "member":
+			members[record.Method] = record
+		case "digest":
+			digest = record
+		case "writer":
+			writer = record
+		default:
+			t.Fatalf("unknown manifest kind %q", record.Kind)
+		}
+	}
+	if run.Schema != "behaviordiff.trace/1" || run.Language != "go" {
+		t.Fatalf("run metadata mismatch: %+v", run)
+	}
+	patched, skipped, traced := 0, 0, 0
+	for _, module := range modules {
+		if module.Discovery != "GoAstRewrite" || module.PatchFailedMembers != 0 || module.DiscoveredMembers != module.PatchedMembers+module.SkippedMembers {
+			t.Fatalf("module reconciliation failed: %+v", module)
+		}
+		patched += module.PatchedMembers
+		skipped += module.SkippedMembers
+		traced += module.TracedCalls
+	}
+	if len(modules) != 2 || len(members) != 34 || patched != 30 || skipped != 4 || traced != len(events) {
+		t.Fatalf("manifest totals mismatch: modules=%d members=%d patched=%d skipped=%d traced=%d events=%d", len(modules), len(members), patched, skipped, traced, len(events))
+	}
+	testRoots := 0
+	for _, member := range members {
+		if member.IsTestRoot {
+			testRoots++
+		}
+		if member.Status == "Skipped" && member.SkipReason != "UnsupportedShape" && member.SkipReason != "DeclaredExternally" {
+			t.Fatalf("non-neutral boundary skip: %+v", member)
+		}
+	}
+	for _, event := range events {
+		member, found := members[event.Method]
+		if !found || member.Status != "Patched" {
+			t.Fatalf("event/member join failed for %q", event.Method)
+		}
+	}
+	if testRoots != 4 || digest.ValuesDigested <= 0 || digest.UnreadableFields <= 0 || writer.Enqueued != len(events) || writer.Written != len(events) || writer.Dropped != 0 || writer.Capacity <= 0 {
+		t.Fatalf("counter proof failed: roots=%d values=%d unreadable=%d writer=%+v events=%d", testRoots, digest.ValuesDigested, digest.UnreadableFields, writer, len(events))
+	}
+	t.Logf("GO_EMITTER_SUMMARY events=%d members=%d modules=%d patched=%d skipped=%d roots=%d values=%d unreadableFields=%d ambiguousMapEntries=%d enqueued=%d written=%d dropped=%d",
+		len(events), len(members), len(modules), patched, skipped, testRoots, digest.ValuesDigested, digest.UnreadableFields, digest.AmbiguousMapEntries, writer.Enqueued, writer.Written, writer.Dropped)
+}
+
+func filterManifestPaths(paths []string) []string {
+	filtered := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !strings.HasSuffix(path, ".manifest.ndjson") {
+			filtered = append(filtered, path)
+		}
+	}
+	return filtered
+}
+
+func readNDJSON[T any](t *testing.T, path string) []T {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	values := make([]T, 0)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		if scanner.Text() == "" {
+			continue
+		}
+		var value T
+		if err := json.Unmarshal(scanner.Bytes(), &value); err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		values = append(values, value)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return values
 }
 
 func hashTree(t *testing.T, root string) map[string]string {

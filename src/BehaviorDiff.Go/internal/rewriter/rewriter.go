@@ -22,6 +22,9 @@ type Metrics struct {
 	Functions    int `json:"functions"`
 	Methods      int `json:"methods"`
 	Companions   int `json:"companions"`
+	TestRoots    int `json:"testRoots"`
+	Patched      int `json:"patched"`
+	Skipped      int `json:"skipped"`
 	DirectCalls  int `json:"directCalls"`
 	GoStatements int `json:"goStatements"`
 	Boundaries   int `json:"boundaries"`

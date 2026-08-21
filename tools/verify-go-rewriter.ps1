@@ -101,11 +101,14 @@ try {
     $report = Get-Content -Path $reportPath -Raw | ConvertFrom-Json
     $expected = [ordered]@{
         packages = 2
-        files = 2
-        functions = 22
+        files = 3
+        functions = 26
         methods = 4
-        companions = 26
-        directCalls = 15
+        companions = 30
+        testRoots = 4
+        patched = 30
+        skipped = 4
+        directCalls = 30
         goStatements = 8
         boundaries = 4
     }
@@ -121,14 +124,14 @@ try {
         throw "Boundary kinds mismatch: $($actualBoundaryKinds -join ',')"
     }
 
-    $expectedSummary = 'GO_REWRITE_SUMMARY methods=4 companions=26 direct=15 go=8 boundaries=4 report=behaviordiff-rewrite-report.json'
+    $expectedSummary = 'GO_REWRITE_SUMMARY methods=4 companions=30 roots=4 patched=30 skipped=4 direct=30 go=8 boundaries=4 report=behaviordiff-rewrite-report.json'
     if (-not (($rewriteOutput -join "`n").Contains($expectedSummary, [StringComparison]::Ordinal))) {
         throw "Required CLI summary was not found: $expectedSummary"
     }
 
     Write-Host 'GO_REWRITER_SOURCE unchanged=true files=5' -ForegroundColor Green
     Write-Host 'GO_REWRITER_CACHE go_test=passed parseable=true formatted=true' -ForegroundColor Green
-    Write-Host 'GO_REWRITER_SUMMARY methods=4 companions=26 direct=15 go=8 boundaries=4' -ForegroundColor Green
+    Write-Host 'GO_REWRITER_SUMMARY methods=4 companions=30 roots=4 patched=30 skipped=4 direct=30 go=8 boundaries=4' -ForegroundColor Green
     Write-Host "GO_REWRITER_BOUNDARIES kinds=$($actualBoundaryKinds -join ',')" -ForegroundColor Green
 } finally {
     Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

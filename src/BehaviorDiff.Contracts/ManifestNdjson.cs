@@ -27,6 +27,12 @@ namespace BehaviorDiff.Contracts
 
         /// <summary>Values whose rendered text was capped. The hash still covers the full text.</summary>
         public long RenderedTruncated { get; init; }
+
+        /// <summary>Struct fields identified but unreadable without violating language access rules.</summary>
+        public long UnreadableFields { get; init; }
+
+        /// <summary>Map entries replaced by a deterministic ambiguity marker because their sort probes tied.</summary>
+        public long AmbiguousMapEntries { get; init; }
     }
 
     /// <summary>
@@ -108,6 +114,8 @@ namespace BehaviorDiff.Contracts
         public const string BlocklistedField = "blocklisted";
         public const string ErroredField = "errored";
         public const string RenderedTruncatedField = "renderedTruncated";
+        public const string UnreadableFieldsField = "unreadableFields";
+        public const string AmbiguousMapEntriesField = "ambiguousMapEntries";
         public const string TypeNameField = "typeName";
         public const string CountField = "count";
 
@@ -209,6 +217,16 @@ namespace BehaviorDiff.Contracts
             AppendNumber(builder, BlocklistedField, entry.Blocklisted, first: false);
             AppendNumber(builder, ErroredField, entry.Errored, first: false);
             AppendNumber(builder, RenderedTruncatedField, entry.RenderedTruncated, first: false);
+            if (entry.UnreadableFields != 0)
+            {
+                AppendNumber(builder, UnreadableFieldsField, entry.UnreadableFields, first: false);
+            }
+
+            if (entry.AmbiguousMapEntries != 0)
+            {
+                AppendNumber(builder, AmbiguousMapEntriesField, entry.AmbiguousMapEntries, first: false);
+            }
+
             return builder.Append('}').ToString();
         }
 
@@ -377,6 +395,8 @@ namespace BehaviorDiff.Contracts
                         Blocklisted = GetInt64(fields, BlocklistedField) ?? 0,
                         Errored = GetInt64(fields, ErroredField) ?? 0,
                         RenderedTruncated = GetInt64(fields, RenderedTruncatedField) ?? 0,
+                        UnreadableFields = GetInt64(fields, UnreadableFieldsField) ?? 0,
+                        AmbiguousMapEntries = GetInt64(fields, AmbiguousMapEntriesField) ?? 0,
                     };
                     return true;
                 case UnruledKind:
@@ -478,6 +498,9 @@ namespace BehaviorDiff.Contracts
                     break;
                 case nameof(AssemblyDiscovery.NodeAstTransform):
                     discovery = AssemblyDiscovery.NodeAstTransform;
+                    break;
+                case nameof(AssemblyDiscovery.GoAstRewrite):
+                    discovery = AssemblyDiscovery.GoAstRewrite;
                     break;
                 default:
                     // StartupEnumeration and AssemblyLoadEvent were the runtime patcher's; a manifest still

@@ -10,6 +10,8 @@ namespace BehaviorDiff.Contracts
         public const string JavaLanguage = "java";
 
         public const string NodeLanguage = "node";
+
+        public const string GoLanguage = "go";
     }
 
     /// <summary>Language-neutral reasons a discovered member was not instrumented.</summary>

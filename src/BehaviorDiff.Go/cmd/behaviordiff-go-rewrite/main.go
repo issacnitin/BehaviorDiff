@@ -25,9 +25,12 @@ func main() {
 	}
 
 	fmt.Printf(
-		"GO_REWRITE_SUMMARY methods=%d companions=%d direct=%d go=%d boundaries=%d report=%s\n",
+		"GO_REWRITE_SUMMARY methods=%d companions=%d roots=%d patched=%d skipped=%d direct=%d go=%d boundaries=%d report=%s\n",
 		report.Metrics.Methods,
 		report.Metrics.Companions,
+		report.Metrics.TestRoots,
+		report.Metrics.Patched,
+		report.Metrics.Skipped,
 		report.Metrics.DirectCalls,
 		report.Metrics.GoStatements,
 		report.Metrics.Boundaries,

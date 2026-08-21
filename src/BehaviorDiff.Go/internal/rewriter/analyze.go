@@ -9,7 +9,6 @@ import (
 	"go/types"
 	"io/fs"
 	"path/filepath"
-	"strings"
 )
 
 type moduleModel struct {
@@ -49,7 +48,7 @@ func analyzeModule(source, modulePath string) (*moduleModel, error) {
 			}
 			return nil
 		}
-		if filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+		if filepath.Ext(path) != ".go" {
 			return nil
 		}
 		parsed, err := parser.ParseFile(model.fset, path, nil, parser.ParseComments)

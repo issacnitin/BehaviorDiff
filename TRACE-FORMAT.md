@@ -27,7 +27,7 @@ Every process manifest begins with exactly one run record:
 | --- | --- | --- | --- |
 | `kind` | string | yes | Always `run`. |
 | `schema` | string | yes | Exactly `behaviordiff.trace/1`. An unsupported value is refused. |
-| `language` | string | yes | Digest/canonicalizer domain. Version 1 reserves `dotnet`, `java`, and `node`. |
+| `language` | string | yes | Digest/canonicalizer domain. Version 1 reserves `dotnet`, `java`, `node`, and `go`. |
 
 All process manifests merged into one run MUST agree on `schema` and `language`. Base samples and the proposed run MUST have the same language. The engine refuses a cross-language comparison because digest equality is defined only within one language.
 
@@ -115,13 +115,13 @@ The manifest is a snapshot written after registration and completed after the ev
 
 ### Module record
 
-The historical wire discriminator and identifier are `kind:"assembly"` and `assembly`; in version 1 their normative meaning is language module. Java uses a class-loader/module unit and Node uses an instrumented source module or package unit.
+The historical wire discriminator and identifier are `kind:"assembly"` and `assembly`; in version 1 their normative meaning is language module. Java uses a class-loader/module unit, Node uses an instrumented source module or package unit, and Go uses an import package.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `kind` | string | yes | `assembly`. |
 | `assembly` | non-empty string | yes | Stable module identity within the run. |
-| `discovery` | string | yes | Instrumentation mechanism: `BuildTimeWeave`, `JavaAgentTransform`, or `NodeAstTransform`. |
+| `discovery` | string | yes | Instrumentation mechanism: `BuildTimeWeave`, `JavaAgentTransform`, `NodeAstTransform`, or `GoAstRewrite`. |
 | `scanned` | boolean | yes | Member discovery completed for this module. |
 | `instrumented` | boolean | yes | At least one member was instrumented. |
 | `patchedMembers` | non-negative integer | yes | Number of instrumented members. The historical name means `instrumentedMembers`. |
@@ -198,6 +198,8 @@ One `kind:"digest"` record summarizes the process canonicalizer:
 | `blocklisted` | non-negative integer | yes | Values deliberately not traversed. |
 | `errored` | non-negative integer | yes | Field/internal reads represented by an error marker. |
 | `renderedTruncated` | non-negative integer | yes | Renderings capped after hashing their full canonical text. |
+| `unreadableFields` | non-negative integer | no | Identified struct fields represented by an unreadable marker because language access rules prohibit reading them. |
+| `ambiguousMapEntries` | non-negative integer | no | Map entries represented by deterministic ambiguity markers because canonical sort probes tied. |
 
 Optional `kind:"unruled"` records contain `typeName` (string) and `count` (non-negative integer). They identify collection/enumerable shapes that fell back to field digestion and may expose incidental storage state.
 

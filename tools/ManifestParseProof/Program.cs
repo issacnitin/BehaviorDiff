@@ -1,54 +1,64 @@
 using System;
-using System.Collections.Generic;
+using System.Linq;
 using BehaviorDiff.Contracts;
 
 internal static class Program
 {
-    private static int Main()
+    private static int Main(string[] args)
     {
-        // A real line taken from the manifest the sample run just produced, plus two mutations.
-        const string old1 = "{\"kind\":\"assembly\",\"assembly\":\"SampleApp\",\"discovery\":\"StartupEnumeration\",\"tracedCalls\":5}";
-        const string old2 = "{\"kind\":\"assembly\",\"assembly\":\"SampleApp\",\"discovery\":\"AssemblyLoadEvent\",\"latePatched\":true,\"tracedCalls\":5}";
-        const string woven = "{\"kind\":\"assembly\",\"assembly\":\"SampleApp\",\"discovery\":\"BuildTimeWeave\",\"latePatched\":false,\"tracedCalls\":5}";
-        const string bogus = "{\"kind\":\"assembly\",\"assembly\":\"SampleApp\",\"discovery\":\"SomeFutureMechanism\",\"tracedCalls\":5}";
-        const string contra = "{\"kind\":\"assembly\",\"assembly\":\"SampleApp\",\"discovery\":\"BuildTimeWeave\",\"latePatched\":true,\"tracedCalls\":5}";
-
-        var cases = new List<(string Name, string Line, bool ExpectOk)>
+        if (args.Length != 1)
         {
-            ("pre-change StartupEnumeration", old1, true),
-            ("pre-change AssemblyLoadEvent+late", old2, true),
-            ("new BuildTimeWeave", woven, true),
-            ("unknown discovery value", bogus, false),
-            ("BuildTimeWeave + latePatched", contra, false),
-        };
-
-        int failures = 0;
-        foreach ((string name, string line, bool expectOk) in cases)
-        {
-            bool ok = ManifestNdjson.TryParseLine(
-                line,
-                out ManifestEntry? _,
-                out AssemblyManifestEntry? asm,
-                out DigestStatsEntry? _,
-                out UnruledEnumerableEntry? _,
-                out WriterStatsEntry? _,
-                out string? error);
-
-            string got = ok
-                ? "OK discovery=" + (asm is null ? "<null>" : asm.Discovery.ToString())
-                  + " latePatched=" + (asm is null ? "?" : asm.LatePatched.ToString())
-                : "REJECTED: " + error;
-
-            bool pass = ok == expectOk;
-            if (!pass)
-            {
-                failures++;
-            }
-
-            Console.WriteLine((pass ? "  pass  " : "  FAIL  ") + name.PadRight(32) + got);
+            Console.Error.WriteLine("usage: manifest-parse-proof <manifest.ndjson>");
+            return 2;
         }
 
-        Console.WriteLine(failures == 0 ? "ALL PARSE CASES BEHAVED AS SPECIFIED" : failures + " CASE(S) WRONG");
-        return failures == 0 ? 0 : 1;
+        CoverageManifest manifest;
+        try
+        {
+            manifest = ManifestFile.Read(args[0]);
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine(error.Message);
+            return 1;
+        }
+
+        int patched = manifest.Assemblies.Sum(module => module.PatchedMembers);
+        int skipped = manifest.Assemblies.Sum(module => module.SkippedMembers);
+        bool reconciled = manifest.Assemblies.All(module =>
+            module.Discovery == AssemblyDiscovery.GoAstRewrite
+            && module.PatchFailedMembers == 0
+            && module.DiscoveredMembers == module.PatchedMembers + module.SkippedMembers
+            && module.DiscoveredMembers == manifest.Members.Count(member => member.Assembly == module.Assembly));
+        DigestStatsEntry? digest = manifest.DigestStats;
+        WriterStatsEntry? writer = manifest.WriterStats;
+
+        if (manifest.Metadata?.Schema != TraceFormat.Schema
+            || manifest.Metadata.Language != TraceFormat.GoLanguage
+            || manifest.Assemblies.Count != 2
+            || manifest.Members.Count != 34
+            || patched != 30
+            || skipped != 4
+            || !reconciled
+            || digest is null
+            || digest.UnreadableFields <= 0
+            || writer is null
+            || writer.Enqueued != writer.Written
+            || writer.Dropped != 0)
+        {
+            Console.Error.WriteLine("Go manifest did not satisfy the shared contract.");
+            return 1;
+        }
+
+        Console.WriteLine(
+            "GO_MANIFEST_PARSE modules={0} members={1} patched={2} skipped={3} unreadableFields={4} ambiguousMapEntries={5} written={6}",
+            manifest.Assemblies.Count,
+            manifest.Members.Count,
+            patched,
+            skipped,
+            digest.UnreadableFields,
+            digest.AmbiguousMapEntries,
+            writer.Written);
+        return 0;
     }
 }
