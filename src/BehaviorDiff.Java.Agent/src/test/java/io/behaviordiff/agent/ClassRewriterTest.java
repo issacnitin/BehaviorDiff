@@ -54,6 +54,9 @@ final class ClassRewriterTest {
         assertNull(completions.get(5).returnValue);
         assertInstanceOf(NullPointerException.class, completions.get(5).throwable);
         assertEquals(3, completions.get(0).frame.arguments()[0]);
+        assertEquals("io/behaviordiff/agent/RewriteFixture.java", completions.get(0).frame.filePath());
+        assertEquals("debugInfo", completions.get(0).frame.filePathResolution());
+        assertEquals(true, completions.get(0).frame.line() > 0);
     }
 
     private static Object loadRewrittenFixture() throws Exception {

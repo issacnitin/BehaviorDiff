@@ -13,8 +13,19 @@ public final class RuntimeHooks {
     private RuntimeHooks() {
     }
 
-    public static CallFrame enter(String methodFullName, Object[] arguments) {
-        return new CallFrame(NEXT_CALL_ID.incrementAndGet(), methodFullName, arguments);
+    public static CallFrame enter(
+        String methodFullName,
+        Object[] arguments,
+        String filePath,
+        String filePathResolution,
+        int line) {
+        return new CallFrame(
+            NEXT_CALL_ID.incrementAndGet(),
+            methodFullName,
+            arguments,
+            filePath,
+            filePathResolution,
+            line);
     }
 
     public static void exit(CallFrame frame, Object returnValue, Throwable throwable) {
