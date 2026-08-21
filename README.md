@@ -6,11 +6,11 @@
 
 BehaviorDiff finds **runtime behavior changes that ordinary source review misses**.
 
-It builds two Git revisions, instruments their .NET assemblies, runs the repository's xUnit tests three times on the base and once on the proposed change, filters nondeterministic observations, and reports the first changed behavior in each call tree.
+It builds two Git revisions, instruments their .NET, Java, or Node code, runs the repository's tests three times on the base and once on the proposed change, filters nondeterministic observations, and reports the first changed behavior in each call tree.
 
 A source diff tells you what was edited. BehaviorDiff tells you what the edit did.
 
-> Status: early preview. The current release targets .NET 8 repositories using xUnit and portable PDBs.
+> Status: early preview. The CLI detects .NET, Maven Java, and npm Node repositories from their root build entry points.
 
 ## Why use it?
 
@@ -44,7 +44,7 @@ The edited helper is in `Infrastructure.Collections`; the observed effect is in 
 
 ## Five-minute demo
 
-Prerequisites: Git, .NET 8 SDK, and PowerShell 7.
+Prerequisites for this .NET demo: Git, .NET 8 SDK, and PowerShell 7. Java analysis additionally requires a JDK and Maven; Node analysis requires Node.js and npm.
 
 ```powershell
 git clone https://github.com/issacnitin/BehaviorDiff.git
@@ -215,7 +215,7 @@ Do not expose a persistent model credential to a job that builds untrusted pull-
 ```mermaid
 flowchart LR
     A[Resolve base and proposed refs] --> B[Create isolated worktrees]
-    B --> C[Build and weave assemblies]
+  B --> C[Build and instrument code]
     C --> D[Run base three times]
     C --> E[Run proposed change once]
     D --> F[Learn nondeterministic keys]
@@ -226,7 +226,7 @@ flowchart LR
     I --> J[findings.json and PR comments]
 ```
 
-1. **Build-time weaving**: Mono.Cecil inserts tracing hooks before the JIT sees the code.
+1. **Language instrumentation**: Mono.Cecil weaves .NET IL, a `java.lang.instrument` agent rewrites JVM bytecode with ASM, and Node load hooks transform CommonJS/ESM functions with Babel.
 2. **Runtime capture**: arguments, return values, exceptions, call order, source locations, and test roots are recorded as NDJSON.
 3. **Noise baseline**: differences found among base runs are excluded from proposed-change evidence.
 4. **Frontier analysis**: changed callers are collapsed onto the first changed behavior in each call tree.
@@ -237,19 +237,24 @@ flowchart LR
 
 Current preview support:
 
-- .NET 8 SDK-style repositories;
-- xUnit test projects using `Microsoft.NET.Test.Sdk`;
-- portable PDBs;
+- .NET 8 SDK-style repositories using xUnit, `Microsoft.NET.Test.Sdk`, and portable PDBs;
+- Maven Java repositories using JUnit or TestNG annotations, JVM line tables, and conventional `src/main/java` / `src/test/java` source roots;
+- npm repositories with `package-lock.json`, a test script, CommonJS or ESM source, and optional JavaScript source maps for TypeScript;
 - Git refs available in the local clone;
 - GitHub Actions and Azure Pipelines pull-request contexts.
+
+Java and Node test correlation is structural. Java test annotations open roots automatically. Node test callbacks must be wrapped with the included Jest or Vitest adapter, or otherwise call the tracer's `withTestRoot`; the CLI refuses runs whose events are not sufficiently correlated. TypeScript attribution uses valid source maps and never guesses `.ts` paths from generated `.js` names.
 
 BehaviorDiff analyzes only executed code. It complements static analysis and code review; it does not replace either.
 
 Known limitations:
 
 - unexecuted methods have no runtime evidence;
-- type initializers are skipped to avoid CLR initialization-lock deadlocks;
-- properties, events, and operators are skipped by the current scope policy;
+- .NET type initializers are skipped to avoid CLR initialization-lock deadlocks;
+- .NET properties, events, and operators are skipped by the current scope policy;
+- Java static initializers and Node generators or unsupported callable shapes are recorded as skipped coverage boundaries;
+- Node worker threads are out of scope in version 1 and are recorded as `UnsupportedShape` boundaries rather than silently omitted;
+- Node `Map` and `Set` internals cannot be read without iteration, so they are represented by explicit partial markers;
 - source-generated files cannot be attributed through normal Git paths;
 - three base runs sample nondeterminism but cannot characterize every possible schedule;
 - traces can contain application values and should be handled as sensitive build artifacts;
@@ -264,6 +269,8 @@ See [evidence/FINDINGS.md](evidence/FINDINGS.md) for measured instrumentation an
 | `src/BehaviorDiff.Cli` | Repository orchestration and PR providers |
 | `src/BehaviorDiff.Engine` | Matching, noise filtering, frontier analysis, findings |
 | `src/BehaviorDiff.Tracer` | Runtime hooks, value rendering, coverage manifests |
+| `src/BehaviorDiff.Java.Agent` | Java agent, ASM rewriting, JVM canonicalizer |
+| `src/BehaviorDiff.Node` | CommonJS/ESM hooks, Babel rewriting, Node canonicalizer and test adapters |
 | `src/BehaviorDiff.Contracts` | Trace and manifest wire formats |
 | `src/BehaviorDiff.Mcp` | Optional MCP server over completed runs |
 | `tools/Weaver` | Mono.Cecil build-time instrumentation |
