@@ -7,6 +7,7 @@ public final class BehaviorDiffAgent {
     }
 
     public static void premain(String agentArguments, Instrumentation instrumentation) {
+        CollectionInternals.requireAccess();
         AgentOptions options = AgentOptions.fromProcess(agentArguments);
         instrumentation.addTransformer(
             new ScopeSelectingTransformer(new PackageScope(options)),
