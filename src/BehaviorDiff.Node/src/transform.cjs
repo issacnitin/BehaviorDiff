@@ -170,8 +170,21 @@ function transform(source, filename, options = {}) {
   });
   const members = [];
   const moduleGroups = new Map();
+  let workerBoundary = false;
 
-  traverse(ast, { Function: { exit(functionPath) {
+  traverse(ast, {
+    ImportDeclaration(importPath) {
+      if (['node:worker_threads', 'worker_threads'].includes(importPath.node.source.value)) workerBoundary = true;
+    },
+    CallExpression(callPath) {
+      const argument = callPath.node.arguments[0];
+      if (t.isIdentifier(callPath.node.callee, { name: 'require' }) && t.isStringLiteral(argument)
+          && ['node:worker_threads', 'worker_threads'].includes(argument.value)) workerBoundary = true;
+    },
+    NewExpression(newPath) {
+      if (t.isIdentifier(newPath.node.callee, { name: 'Worker' })) workerBoundary = true;
+    },
+    Function: { exit(functionPath) {
     const node = functionPath.node;
     const arrowArgs = functionPath.isArrowFunctionExpression() ? arrowArguments(node) : undefined;
     const decision = skipDecision(functionPath, options, arrowArgs);
@@ -210,7 +223,30 @@ function transform(source, filename, options = {}) {
     node.body = t.blockStatement([
       t.returnStatement(t.callExpression(runtimeMember(node.async ? 'runAsync' : 'runSync'), [metadata, args, callback]))
     ], originalBody.directives);
-  } } });
+    } }
+  });
+
+  if (workerBoundary) {
+    const location = sourceResolver.resolve(1, 0);
+    const assembly = location.filePath ?? modulePath;
+    const member = {
+      methodFullName: `${assembly}#<worker_threads>`,
+      status: 'Skipped',
+      returnKind: 'Worker',
+      sourceResolution: location.resolution,
+      line: location.line,
+      column: location.column,
+      skipReason: 'UnsupportedShape',
+      detail: 'Node: WorkerThreadsOutOfScope'
+    };
+    members.push(member);
+    let group = moduleGroups.get(assembly);
+    if (!group) {
+      group = { assembly, members: [] };
+      moduleGroups.set(assembly, group);
+    }
+    group.members.push(member);
+  }
 
   const modules = moduleGroups.size > 0
     ? [...moduleGroups.values()]

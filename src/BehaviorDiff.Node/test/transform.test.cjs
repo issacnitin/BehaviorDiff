@@ -99,6 +99,14 @@ test('returns manifest metadata for unsupported shapes and leaves them runnable'
   assert.ok(output.members.every(member => member.column >= 0));
 });
 
+test('records worker threads as an unsupported coverage boundary', () => {
+  const output = transform("const { Worker } = require('node:worker_threads'); new Worker('./job.js');", 'src/workers.js');
+  const worker = output.members.find(member => member.methodFullName.endsWith('#<worker_threads>'));
+  assert.equal(worker.status, 'Skipped');
+  assert.equal(worker.skipReason, 'UnsupportedShape');
+  assert.equal(worker.detail, 'Node: WorkerThreadsOutOfScope');
+});
+
 test('anonymous identities include original line and column and bootstrap imports precede registration', () => {
   const output = transform('export default [1].map(function (value) { return value; });', 'src/module.mjs', {
     bootstrapImport: 'file:///runtime/bootstrap.mjs'
