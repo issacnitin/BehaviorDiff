@@ -13,6 +13,18 @@ Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Conformance.psm1') -Force
 
 $referenceRelativePath = 'samples/NodeReference.TypeScript'
 $subjectSourcePattern = '^samples/NodeReference\.TypeScript/src/.+\.ts$'
+$expandedSubjectMethods = @(
+    'BaseFormatter.constructor', 'BaseFormatter.describe', 'BaseFormatter.decorate',
+    'DerivedFormatter.describe', 'dispatchFormatter',
+    'ValueBox.constructor', 'ValueBox.current', 'ValueBox.scale', 'ValueBox.create', 'dispatchValueBox',
+    'arrowIncrement', 'arrowMultiply', 'arrowLabel', 'dispatchArrows',
+    'objectPipeline.normalize', 'objectPipeline.decorate', 'objectPipeline.summarize', 'dispatchObjectPipeline',
+    'createClosurePipeline', 'createClosurePipeline.addOffset', 'createClosurePipeline.multiply',
+    'createClosurePipeline.apply', 'dispatchClosurePipeline',
+    'requireNonNegative', 'isEven', 'doubleReading', 'processReadings',
+    'AsyncSettlement.constructor', 'AsyncSettlement.settle', 'incrementPromise', 'labelPromise',
+    'promiseWorkflow', 'promiseWorkflow.settleValue'
+)
 
 function Copy-TracerSource([string]$destination) {
     Remove-Item $destination -Recurse -Force -ErrorAction SilentlyContinue
@@ -63,6 +75,18 @@ function Get-ManifestStats([object]$run, [string]$label) {
     }
 
     return [pscustomobject]@{ Digest = $digest; Writer = $writer }
+}
+
+function Get-ExpandedMethodStats([object]$run, [string]$label) {
+    $source = 'samples/NodeReference.TypeScript/src/subject.ts'
+    $expected = @($expandedSubjectMethods | ForEach-Object { "$source#$_" })
+    $observed = @($run.Events | ForEach-Object methodFullName |
+        Where-Object { $_ -in $expected } | Sort-Object -Unique)
+    $missing = @($expected | Where-Object { $_ -notin $observed })
+    if ($missing.Count -ne 0) {
+        throw "TypeScript expanded method coverage failed ($label): observed=$($observed.Count)/$($expected.Count) missing=$($missing -join ', ')"
+    }
+    return [pscustomobject]@{ Observed = $observed.Count; Expected = $expected.Count }
 }
 
 function Get-SourceStats([object]$run, [string]$label) {
@@ -150,7 +174,7 @@ function Run-Reference(
 
     if (-not (Test-Path $report -PathType Leaf)) { throw "Node runner report was not written ($label): $report" }
     $runnerTests = [int](Get-Content $report -Raw | ConvertFrom-Json).runnerTests
-    if ($runnerTests -ne 113) { throw "Node runner count mismatch ($label): expected=113 actual=$runnerTests" }
+    if ($runnerTests -ne 120) { throw "Node runner count mismatch ($label): expected=120 actual=$runnerTests" }
 
     $run = Read-BehaviorDiffConformanceRun $runDirectory
     $rootMethods = @($run.ManifestRecords | Where-Object {
@@ -163,11 +187,13 @@ function Run-Reference(
     }
 
     $manifest = Get-ManifestStats $run $label
+    $expanded = Get-ExpandedMethodStats $run $label
     $source = Get-SourceStats $run $label
     return [pscustomobject]@{
         Run = $run
         RunnerTests = $runnerTests
         DerivedTests = $derivedTests
+        ExpandedMethods = $expanded
         Digest = $manifest.Digest
         Writer = $manifest.Writer
         Source = $source
@@ -281,6 +307,7 @@ try {
     Write-Host "    matched keys              : $($guard.MatchedKeys)"
     Write-Host "    identical subject methods : $($guard.SubjectMethods)"
     Write-Host "    subject events per run     : $($guard.FirstSubjectEvents) / $($guard.SecondSubjectEvents)"
+    Write-Host "    expanded methods per run   : $($result1.ExpandedMethods.Observed) / $($result2.ExpandedMethods.Observed) (expected $($result1.ExpandedMethods.Expected))"
     Write-Host '  tripwires'
     Write-Host "    unusable/root/wrong        : $($guard.UnusableSourceEvents) / $($guard.SubjectRoots) / $($guard.WrongSourceEvents)"
     Write-Host "    member/event source errors : $($result1.Source.WrongResolution + $result2.Source.WrongResolution) / $($result1.Source.WrongPaths + $result2.Source.WrongPaths)"

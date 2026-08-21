@@ -152,7 +152,44 @@ async function main(): Promise<void> {
     assert.equal(await subject.future('settled'), 'settled');
   });
 
-  assert.equal(executed, 113);
+  await runCase('node-reference/inheritance', function inheritanceCase() {
+    const formatter = new subject.DerivedFormatter('base');
+    assert.ok(formatter instanceof subject.BaseFormatter);
+    assert.equal(subject.dispatchFormatter(formatter, 'item'), '[BASE:ITEM]');
+  });
+
+  await runCase('node-reference/class-factory', function classFactoryCase() {
+    const box = subject.ValueBox.create(5);
+    assert.ok(box instanceof subject.ValueBox);
+    assert.equal(box.current(), 5);
+    assert.equal(box.scale(4), 20);
+    assert.deepEqual(subject.dispatchValueBox(4), { current: 4, scaled: 12 });
+  });
+
+  await runCase('node-reference/named-arrows', function namedArrowsCase() {
+    assert.equal(subject.dispatchArrows(4), 'arrow:15');
+  });
+
+  await runCase('node-reference/object-methods', function objectMethodsCase() {
+    assert.deepEqual(subject.dispatchObjectPipeline('  MiXeD  '), { text: '<mixed>', length: 5 });
+  });
+
+  await runCase('node-reference/nested-closures', function nestedClosuresCase() {
+    assert.equal(subject.dispatchClosurePipeline(5, 2, 3), 21);
+  });
+
+  await runCase('node-reference/array-recovery', function arrayRecoveryCase() {
+    assert.deepEqual(subject.processReadings([-1, 1, 2, 3, 4, -5]), {
+      values: [4, 8],
+      recovered: 2
+    });
+  });
+
+  await runCase('node-reference/promise-chain', async function promiseChainCase() {
+    assert.equal(await subject.promiseWorkflow(6), 'settled=7:done');
+  });
+
+  assert.equal(executed, 120);
   const report = { runnerTests: executed };
   const serialized = `${JSON.stringify(report)}\n`;
   if (process.env.BEHAVIORDIFF_RUNNER_REPORT) {
