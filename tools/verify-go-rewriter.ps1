@@ -1,0 +1,135 @@
+#requires -Version 7.0
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$repo = Split-Path -Parent $PSScriptRoot
+$toolModule = Join-Path $repo 'src/BehaviorDiff.Go'
+$fixture = Join-Path $toolModule 'testdata/rewrite'
+
+if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA 'Programs/BehaviorDiffGo/go/bin'),
+        (Join-Path $HOME '.behaviordiff-tools/go/bin')
+    )
+    $localGoBin = $candidates | Where-Object { Test-Path (Join-Path $_ 'go.exe') -PathType Leaf } | Select-Object -First 1
+    if (-not $localGoBin) {
+        throw 'Go was not found on PATH or in a BehaviorDiff local tool directory.'
+    }
+    $env:PATH = "$localGoBin;$env:PATH"
+}
+
+function Get-TreeHashes {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Root
+    )
+
+    $hashes = [ordered]@{}
+    Get-ChildItem -Path $Root -File -Recurse | Sort-Object FullName | ForEach-Object {
+        $relative = [IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/')
+        $hashes[$relative] = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash
+    }
+    return $hashes
+}
+
+function Assert-HashesEqual {
+    param(
+        [Parameter(Mandatory)]
+        [System.Collections.IDictionary]$Expected,
+        [Parameter(Mandatory)]
+        [System.Collections.IDictionary]$Actual
+    )
+
+    if ($Expected.Count -ne $Actual.Count) {
+        throw "Source file count changed: expected $($Expected.Count), actual $($Actual.Count)"
+    }
+    foreach ($path in $Expected.Keys) {
+        if (-not $Actual.Contains($path) -or $Actual[$path] -ne $Expected[$path]) {
+            throw "Source hash changed: $path"
+        }
+    }
+}
+
+function Invoke-Go {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$Arguments
+    )
+
+    $output = @(& go @Arguments 2>&1)
+    $exitCode = $LASTEXITCODE
+    $output | ForEach-Object { Write-Host $_ }
+    if ($exitCode -ne 0) {
+        throw "go $($Arguments -join ' ') failed with exit code $exitCode"
+    }
+    return $output
+}
+
+$tempRoot = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-go-rewriter-$([guid]::NewGuid().ToString('N'))"
+$source = Join-Path $tempRoot 'source'
+$cache = Join-Path $tempRoot 'cache'
+
+try {
+    New-Item -ItemType Directory -Path $tempRoot | Out-Null
+    Copy-Item -Path $fixture -Destination $source -Recurse
+    $before = Get-TreeHashes -Root $source
+
+    Push-Location $toolModule
+    try {
+        Write-Host "Go toolchain: $(& go version)"
+        $rewriteOutput = Invoke-Go @('run', './cmd/behaviordiff-go-rewrite', '--source', $source, '--out', $cache)
+    } finally {
+        Pop-Location
+    }
+
+    $after = Get-TreeHashes -Root $source
+    Assert-HashesEqual -Expected $before -Actual $after
+
+    Push-Location $cache
+    try {
+        $null = Invoke-Go @('test', './...')
+    } finally {
+        Pop-Location
+    }
+
+    $reportPath = Join-Path $cache 'behaviordiff-rewrite-report.json'
+    if (-not (Test-Path $reportPath -PathType Leaf)) {
+        throw "Rewrite report was not created: $reportPath"
+    }
+    $report = Get-Content -Path $reportPath -Raw | ConvertFrom-Json
+    $expected = [ordered]@{
+        packages = 2
+        files = 2
+        functions = 22
+        methods = 4
+        companions = 26
+        directCalls = 15
+        goStatements = 8
+        boundaries = 4
+    }
+    foreach ($name in $expected.Keys) {
+        if ($report.metrics.$name -ne $expected[$name]) {
+            throw "Metric $name mismatch: expected $($expected[$name]), actual $($report.metrics.$name)"
+        }
+    }
+
+    $actualBoundaryKinds = @($report.boundaries.kind | Sort-Object)
+    $expectedBoundaryKinds = @('cross-package-call', 'function-value-call', 'function-value-go', 'interface-call')
+    if (($actualBoundaryKinds -join ',') -ne ($expectedBoundaryKinds -join ',')) {
+        throw "Boundary kinds mismatch: $($actualBoundaryKinds -join ',')"
+    }
+
+    $expectedSummary = 'GO_REWRITE_SUMMARY methods=4 companions=26 direct=15 go=8 boundaries=4 report=behaviordiff-rewrite-report.json'
+    if (-not (($rewriteOutput -join "`n").Contains($expectedSummary, [StringComparison]::Ordinal))) {
+        throw "Required CLI summary was not found: $expectedSummary"
+    }
+
+    Write-Host 'GO_REWRITER_SOURCE unchanged=true files=5' -ForegroundColor Green
+    Write-Host 'GO_REWRITER_CACHE go_test=passed parseable=true formatted=true' -ForegroundColor Green
+    Write-Host 'GO_REWRITER_SUMMARY methods=4 companions=26 direct=15 go=8 boundaries=4' -ForegroundColor Green
+    Write-Host "GO_REWRITER_BOUNDARIES kinds=$($actualBoundaryKinds -join ',')" -ForegroundColor Green
+} finally {
+    Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+}

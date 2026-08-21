@@ -1,0 +1,1 @@
+non-Go fixture content
