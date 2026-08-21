@@ -473,6 +473,12 @@ namespace BehaviorDiff.Contracts
                 case nameof(AssemblyDiscovery.BuildTimeWeave):
                     discovery = AssemblyDiscovery.BuildTimeWeave;
                     break;
+                case nameof(AssemblyDiscovery.JavaAgentTransform):
+                    discovery = AssemblyDiscovery.JavaAgentTransform;
+                    break;
+                case nameof(AssemblyDiscovery.NodeAstTransform):
+                    discovery = AssemblyDiscovery.NodeAstTransform;
+                    break;
                 default:
                     // StartupEnumeration and AssemblyLoadEvent were the runtime patcher's; a manifest still
                     // carrying them predates build-time weaving and its coverage claims do not transfer.
