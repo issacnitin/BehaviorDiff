@@ -6,11 +6,33 @@
 
 BehaviorDiff finds **runtime behavior changes that ordinary source review misses**.
 
-It builds two Git revisions, instruments their .NET, Java, or Node code, runs the repository's tests three times on the base and once on the proposed change, filters nondeterministic observations, and reports the first changed behavior in each call tree.
+It builds two Git revisions, observes their tests, learns a noise baseline from three base runs, and reports the first changed behavior in each call tree. A source diff tells you what was edited. BehaviorDiff tells you what the edit did, including effects in files the pull request never touched.
 
-A source diff tells you what was edited. BehaviorDiff tells you what the edit did.
+The architecture has one language-neutral engine and one tracer per runtime:
+
+```mermaid
+flowchart LR
+  D[.NET / Cecil] --> T[behaviordiff.trace/1]
+  J[Java / javaagent + ASM] --> T
+  N[Node / CJS + ESM + Babel] --> T
+  T --> E[Matching, noise, frontier, attribution]
+  E --> F[findings.json]
+  F --> P[GitHub, Azure DevOps, MCP]
+```
+
+[`TRACE-FORMAT.md`](TRACE-FORMAT.md) is the contract between tracers and the engine. Java and Node were implemented independently from that contract and pass the same conformance harness: identical method sets, per-key event counts and entry ordinals, source tripwires, digest proofs, and zero engine divergences.
 
 > Status: early preview. The CLI detects .NET, Maven Java, and npm Node repositories from their root build entry points.
+
+## Supported languages
+
+| Language | Instrumentation | Test/source integration | Current limits |
+| --- | --- | --- | --- |
+| .NET 8 | Mono.Cecil build-time IL weaving | xUnit and portable PDBs | Properties, events, operators, and type initializers are skipped by policy. |
+| Java | `java.lang.instrument` agent with ASM | Maven, JUnit/TestNG annotations, `src/main/java` and `src/test/java` | Conventional Maven roots are required; static initializers are skipped; collection shape rules require `java.util` module access. |
+| Node / TypeScript | CommonJS require hook and ESM loader with Babel | npm, direct JavaScript locations, TypeScript source maps, Jest/Vitest adapters | npm/package-lock only; workers are out of scope; generators and unsupported callables are skipped; source maps must resolve rather than be guessed. |
+
+Every tracer emits the same process-scoped NDJSON contract and a reconciled coverage manifest. A member reported instrumented must be capable of emitting, and every module must satisfy `discovered = instrumented + skipped` with zero patch failures.
 
 ## Why use it?
 
@@ -42,7 +64,7 @@ CheckoutTotals.Compute returned 60, now returns 85.
 
 The edited helper is in `Infrastructure.Collections`; the observed effect is in `Commerce.Pricing`. See the live [demo pull request](https://github.com/issacnitin/behaviordiff-live-verification/pull/4) and its [successful hosted run](https://github.com/issacnitin/behaviordiff-live-verification/actions/runs/32369192452).
 
-## Five-minute demo
+## Five-minute .NET demo
 
 Prerequisites for this .NET demo: Git, .NET 8 SDK, and PowerShell 7. Java analysis additionally requires a JDK and Maven; Node analysis requires Node.js and npm.
 
@@ -112,7 +134,7 @@ dotnet build src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj -c Release
 dotnet src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll --help
 ```
 
-## Analyze a repository
+## Run an analysis
 
 BehaviorDiff needs a repository path and two Git refs. The target repository must build in the current environment.
 
@@ -144,6 +166,32 @@ Exit codes:
 | 5 | The unmodified repository did not build in this environment |
 
 Exit `3` is deliberately different from clean. BehaviorDiff refuses when path attribution, source information, call-tree integrity, or coverage is insufficient.
+
+### .NET
+
+Prerequisites: .NET 8 SDK. The repository must contain an SDK-style solution/project and xUnit tests using `Microsoft.NET.Test.Sdk`.
+
+```powershell
+behaviordiff C:\src\dotnet-service --base origin/main --pr HEAD
+```
+
+### Java
+
+Prerequisites: a JDK and Maven (or a Maven wrapper). The CLI derives package scope, attaches the packaged Java agent, and maps class output to conventional Maven source roots.
+
+```powershell
+behaviordiff C:\src\java-service --base origin/main --pr HEAD
+```
+
+### Node and TypeScript
+
+Prerequisites: Node.js, npm, `package-lock.json`, and a test script. TypeScript must emit usable source maps. Jest/Vitest callbacks must use the included adapters so the tracer can open structural test roots; an insufficiently correlated run is refused.
+
+```powershell
+behaviordiff C:\src\node-service --base origin/main --pr HEAD
+```
+
+The command is intentionally the same for every language. `behaviordiff detect-language <repo>` shows the selected language and build entry point.
 
 ## Read the result
 
@@ -233,21 +281,9 @@ flowchart LR
 5. **Assertion reaction**: a changed test-root trace indicates that an assertion reacted; unchanged test roots identify partial or missing oracles.
 6. **Honest refusal**: incomplete evidence produces a non-verdict rather than a false clean result.
 
-## Supported surface
+## Honest limitations
 
-Current preview support:
-
-- .NET 8 SDK-style repositories using xUnit, `Microsoft.NET.Test.Sdk`, and portable PDBs;
-- Maven Java repositories using JUnit or TestNG annotations, JVM line tables, and conventional `src/main/java` / `src/test/java` source roots;
-- npm repositories with `package-lock.json`, a test script, CommonJS or ESM source, and optional JavaScript source maps for TypeScript;
-- Git refs available in the local clone;
-- GitHub Actions and Azure Pipelines pull-request contexts.
-
-Java and Node test correlation is structural. Java test annotations open roots automatically. Node test callbacks must be wrapped with the included Jest or Vitest adapter, or otherwise call the tracer's `withTestRoot`; the CLI refuses runs whose events are not sufficiently correlated. TypeScript attribution uses valid source maps and never guesses `.ts` paths from generated `.js` names.
-
-BehaviorDiff analyzes only executed code. It complements static analysis and code review; it does not replace either.
-
-Known limitations:
+BehaviorDiff analyzes executed behavior, not all possible behavior. It complements static analysis and review; it does not replace either.
 
 - unexecuted methods have no runtime evidence;
 - .NET type initializers are skipped to avoid CLR initialization-lock deadlocks;
@@ -255,8 +291,9 @@ Known limitations:
 - Java static initializers and Node generators or unsupported callable shapes are recorded as skipped coverage boundaries;
 - Node worker threads are out of scope in version 1 and are recorded as `UnsupportedShape` boundaries rather than silently omitted;
 - Node `Map` and `Set` internals cannot be read without iteration, so they are represented by explicit partial markers;
-- source-generated files cannot be attributed through normal Git paths;
-- three base runs sample nondeterminism but cannot characterize every possible schedule;
+- generated members without a real repository source path cannot be attributed through a normal Git diff;
+- three base runs sample nondeterminism; they do not characterize every possible schedule or external dependency;
+- identical partial digests do not prove equality inside skipped, depth-limited, errored, or truncated regions;
 - traces can contain application values and should be handled as sensitive build artifacts;
 - target tests execute with the permissions of the CI agent; BehaviorDiff is not a sandbox.
 
