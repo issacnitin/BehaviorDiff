@@ -1,6 +1,8 @@
 bin/
 obj/
 target/
+node_modules/
+coverage/
 artifacts/
 *.user
 .vs/
