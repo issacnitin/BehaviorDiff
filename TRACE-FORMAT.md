@@ -109,7 +109,7 @@ The historical wire discriminator and identifier are `kind:"assembly"` and `asse
 | --- | --- | --- | --- |
 | `kind` | string | yes | `assembly`. |
 | `assembly` | non-empty string | yes | Stable module identity within the run. |
-| `discovery` | string | yes | Instrumentation mechanism. `.NET` v1 is `BuildTimeWeave`; each language documents its own value. |
+| `discovery` | string | yes | Instrumentation mechanism: `BuildTimeWeave`, `JavaAgentTransform`, or `NodeAstTransform`. |
 | `scanned` | boolean | yes | Member discovery completed for this module. |
 | `instrumented` | boolean | yes | At least one member was instrumented. |
 | `patchedMembers` | non-negative integer | yes | Number of instrumented members. The historical name means `instrumentedMembers`. |

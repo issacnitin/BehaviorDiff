@@ -11,6 +11,12 @@ namespace BehaviorDiff.Contracts
         /// window between load and instrumentation: every call in the process was observable.
         /// </summary>
         BuildTimeWeave,
+
+        /// <summary>Java bytecode transformed by a java.lang.instrument agent during class definition.</summary>
+        JavaAgentTransform,
+
+        /// <summary>JavaScript or TypeScript transformed through a CommonJS or ESM loader hook.</summary>
+        NodeAstTransform,
     }
 
     /// <summary>
