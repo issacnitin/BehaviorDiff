@@ -24,6 +24,7 @@ public final class RuntimeHooks {
     public static CallFrame enter(
         String methodFullName,
         Object[] arguments,
+        String[] parameterNames,
         String filePath,
         String filePathResolution,
         int line,
@@ -52,7 +53,7 @@ public final class RuntimeHooks {
             testRoot,
             ordinal,
             Thread.currentThread().getId(),
-            StructuralDigest.compute(arguments),
+            StructuralDigest.computeArguments(arguments, filePath, parameterNames),
             returnsVoid,
             module);
         stack.push(frame);

@@ -102,7 +102,7 @@ function Invoke-LanguageProof([string]$language, [object]$reference, [string]$cl
     $runWork = Join-Path $work "$language-work"
     $findings = Join-Path $work "$language-findings.json"
     $output = @(& $cli $reference.Directory --base $reference.Base --pr $reference.Pr `
-        --work $runWork --findings $findings 2>&1)
+        --work $runWork --findings $findings --keep-traces 1d 2>&1)
     $exitCode = $LASTEXITCODE
     $output | ForEach-Object { Write-Host $_ }
     if ($exitCode -ne 0) { throw "$language installed CLI invocation failed with exit code $exitCode" }

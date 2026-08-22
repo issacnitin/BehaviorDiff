@@ -40,6 +40,7 @@ type Member struct {
 	Detail string
 	IsTestRoot bool
 	IsHarness bool
+	ParameterNames []string
 }
 
 type capture struct {
@@ -84,6 +85,11 @@ var state = struct {
 	ordinals: make(map[ordinalKey]uint64),
 	modules: make(map[string]*moduleState),
 }
+
+var defaultSensitiveNames = []string{"password", "token", "secret", "key", "ssn", "email", "auth", "credential"}
+var sensitiveNames = append(defaultSensitiveNames, configuredList("BEHAVIORDIFF_REDACT_NAMES")...)
+var digestOnlyTypes = configuredList("BEHAVIORDIFF_REDACT_TYPES")
+var digestOnlyPaths = configuredList("BEHAVIORDIFF_REDACT_PATHS")
 
 func init() {
 	configured := os.Getenv("BEHAVIORDIFF_TRACE")
@@ -222,7 +228,7 @@ func enter(parentCallID uint64, depth int, testID string, member Member, args []
 	ordinal := state.ordinals[key]
 	state.ordinals[key] = ordinal + 1
 	state.Unlock()
-	argsCapture := captureValue(args)
+	argsCapture := captureValue(args, member, member.ParameterNames)
 	return &Frame{
 		member: member,
 		testID: testID,
@@ -262,7 +268,7 @@ func Exit(frame *Frame, results []any, recovered any) {
 		if recovered != nil {
 			event["exceptionType"] = fmt.Sprintf("%T", recovered)
 		} else if len(results) > 0 {
-			if captured := captureValue(resultValues(results)); captured != nil {
+			if captured := captureValue(resultValues(results), frame.member, nil); captured != nil {
 				event["returnDigest"] = captured.digest
 				event["returnRendered"] = captured.rendered
 			}
@@ -298,8 +304,13 @@ func Go(parent *Frame, fn func(*Frame)) {
 	}()
 }
 
-func captureValue(value any) *capture {
-	result := Digest(value)
+func captureValue(value any, member Member, argumentNames []string) *capture {
+	result := DigestWithOptions(value, Options{
+		Redact: true,
+		SensitiveNames: sensitiveNames,
+		DigestOnlyTypes: digestOnlyTypes,
+		ArgumentNames: argumentNames,
+	})
 	state.Lock()
 	state.digest.Values += result.Counters.Values
 	state.digest.DepthLimited += result.Counters.DepthLimited
@@ -310,7 +321,33 @@ func captureValue(value any) *capture {
 	state.digest.RenderedTruncated += result.Counters.RenderedTruncated
 	state.digest.Unexported += result.Counters.Unexported
 	state.Unlock()
-	return &capture{digest: "sha256:" + result.SHA256, rendered: result.Canonical}
+	rendered := result.Canonical
+	if digestOnlyPath(member.File) {
+		rendered = "<redacted>"
+	}
+	return &capture{digest: "sha256:" + result.SHA256, rendered: rendered}
+}
+
+func configuredList(name string) []string {
+	var values []string
+	for _, value := range strings.FieldsFunc(os.Getenv(name), func(character rune) bool { return character == ';' || character == ',' }) {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
+}
+
+func digestOnlyPath(path string) bool {
+	normalized := strings.Trim(strings.ReplaceAll(path, "\\", "/"), "/")
+	for _, configured := range digestOnlyPaths {
+		prefix := strings.Trim(strings.ReplaceAll(configured, "\\", "/"), "/")
+		if normalized == prefix || strings.HasPrefix(normalized, prefix+"/") ||
+			strings.HasSuffix(normalized, "/"+prefix) || strings.Contains(normalized, "/"+prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func resultValues(results []any) any {

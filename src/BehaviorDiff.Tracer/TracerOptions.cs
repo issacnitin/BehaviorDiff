@@ -15,6 +15,9 @@ namespace BehaviorDiff.Tracer
         public const string TestAttributesVariable = "BEHAVIORDIFF_TEST_ATTRIBUTES";
         public const string MaxDigestVariable = "BEHAVIORDIFF_MAX_DIGEST";
         public const string VerboseVariable = "BEHAVIORDIFF_VERBOSE";
+        public const string RedactNamesVariable = "BEHAVIORDIFF_REDACT_NAMES";
+        public const string RedactTypesVariable = "BEHAVIORDIFF_REDACT_TYPES";
+        public const string RedactPathsVariable = "BEHAVIORDIFF_REDACT_PATHS";
 
         private static readonly char[] ListSeparators = { ';', ',' };
 
@@ -57,6 +60,8 @@ namespace BehaviorDiff.Tracer
 
         /// <summary>Emit per-member patch decisions to the diagnostic log.</summary>
         public bool Verbose { get; set; }
+
+        internal RedactionPolicy Redaction { get; set; } = RedactionPolicy.FromEnvironment();
 
         /// <summary>True when tracing is configured at all.</summary>
         public bool IsEnabled => IncludeNamespacePrefixes.Count > 0;

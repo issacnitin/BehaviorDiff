@@ -113,6 +113,17 @@ function arrowArguments(node) {
   return t.arrayExpression(values);
 }
 
+function parameterNames(node) {
+  const names = [];
+  for (const parameter of node.params) {
+    if (t.isIdentifier(parameter)) names.push(parameter.name);
+    else if (t.isAssignmentPattern(parameter) && t.isIdentifier(parameter.left)) names.push(parameter.left.name);
+    else if (t.isRestElement(parameter) && t.isIdentifier(parameter.argument)) names.push(parameter.argument.name);
+    else names.push('');
+  }
+  return names;
+}
+
 function isDerivedConstructor(functionPath) {
   if (!(functionPath.isClassMethod() || functionPath.isClassPrivateMethod())
       || functionPath.node.kind !== 'constructor') return false;
@@ -216,7 +227,8 @@ function transform(source, filename, options = {}) {
       methodFullName: member.methodFullName,
       filePathResolution: member.sourceResolution,
       line: member.line,
-      column: member.column
+      column: member.column,
+      parameterNames: parameterNames(node)
     };
     if (resolved.location.filePath !== undefined) metadataValue.filePath = resolved.location.filePath;
     const metadata = t.valueToNode(metadataValue);

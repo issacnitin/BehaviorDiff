@@ -57,9 +57,9 @@ Each event describes one completed call. The event is enqueued only when the cal
 | `callId` | positive 64-bit integer | yes | Unique within one process trace. Assigned at entry, never reused. |
 | `ordinal` | non-negative 32-bit integer | yes | Entry order within `(testId, methodFullName)` in this process: `0,1,2,...` without gaps or duplicates. It is assigned at entry because event/file order is completion order. |
 | `argsDigest` | string | no | Digest of the full canonical argument rendering captured at entry. Omitted when capture was not possible. |
-| `argsRendered` | string | no | Human-readable canonical argument rendering. It may be capped, but the digest covers the uncapped canonical text. Omitted with `argsDigest`. |
+| `argsRendered` | string | no | Human-readable rendering derived from the canonical arguments. Sensitive regions may be `<redacted>` and the text may be capped; neither operation changes `argsDigest`. Omitted with `argsDigest`. |
 | `returnDigest` | string | no | Digest of a normally completed non-void result. Omitted for void, throw, cancellation represented as an exception, or failed capture. |
-| `returnRendered` | string | no | Canonical result rendering corresponding to `returnDigest`. |
+| `returnRendered` | string | no | Human-readable rendering corresponding to `returnDigest`. Sensitive regions may be `<redacted>` without changing `returnDigest`. |
 | `exceptionType` | string | no | Canonical fully qualified type/name of the escaping exception. Omitted on normal completion. |
 | `threadId` | 32-bit integer | yes | Runtime thread/worker identity at call entry. It is diagnostic and not a matching key. |
 | `isHarness` | boolean | no | `true` for test-framework/harness code; omission means `false`. |
@@ -236,6 +236,16 @@ Canonicalization MUST:
 - cap recursion and collection breadth deterministically;
 - hash the complete canonical text before applying a display cap;
 - record every unread region with a marker rather than silently omitting it.
+
+### Redaction contract
+
+Rendering and comparison are deliberately separate operations. A conforming tracer MUST compute `argsDigest` and `returnDigest` over the complete real-value canonical text first, then apply redaction only to `argsRendered` and `returnRendered`. A changed secret therefore remains a digest difference even when both displayed values are exactly `<redacted>`. Hashing the redacted marker would collapse distinct secrets and is non-conforming.
+
+Redaction is enabled by default. Field and parameter names containing `password`, `token`, `secret`, `key`, `ssn`, `email`, `auth`, or `credential`, matched case-insensitively, render their value as `<redacted>`. Tracers MUST also redact strings matching common credential shapes, including JWTs, `AKIA`/`ASIA` AWS access-key IDs, PEM private-key or certificate headers, and long base64 runs. Implementations MAY add configurable name patterns, digest-only runtime types, and digest-only repository directory prefixes; these affect rendering only and form part of any trace-cache scope key.
+
+Parameter-name redaction applies when the language frontend can establish a name from source or compiler metadata. If metadata strips a parameter name, content, field, type, and path rules still apply; the tracer MUST NOT invent a name. A type configured as digest-only is fully canonicalized for its digest but renders as `<redacted>`. A callable whose source falls under a configured digest-only path likewise retains argument and return digests while both renderings are `<redacted>`.
+
+`<redacted>` is not a partial-observation marker. Unlike `<skipped:...>`, it means the complete value participated in the digest and only display text was withheld. The engine MUST NOT downgrade digest confidence merely because this marker is present.
 
 Version 1 digest strings use `sha256:<lowercase hex>` over UTF-8 canonical text. Canonical text grammar and shape rules are language-specific; agreement across languages is neither required nor meaningful.
 

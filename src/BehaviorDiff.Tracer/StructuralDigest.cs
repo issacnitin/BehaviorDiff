@@ -95,47 +95,61 @@ namespace BehaviorDiff.Tracer
 
         internal static DigestResult ComputeValue(object? value, DigestOptions options)
         {
-            var builder = new StringBuilder(128);
-            var context = new Context(options);
-            WriteTagged(builder, value, 0, context);
-            return Finish(builder, context);
+            var canonical = new StringBuilder(128);
+            WriteTagged(canonical, value, 0, new Context(options, redact: false));
+            var rendered = new StringBuilder(128);
+            WriteTagged(rendered, value, 0, new Context(options, redact: true));
+            return Finish(canonical, rendered);
         }
 
         internal static DigestResult ComputeArguments(string[] parameterNames, object[] args, DigestOptions options)
         {
-            var builder = new StringBuilder(160);
-            var context = new Context(options);
+            var canonical = new StringBuilder(160);
+            var canonicalContext = new Context(options, redact: false);
+            var rendered = new StringBuilder(160);
+            var renderedContext = new Context(options, redact: true);
 
             for (int i = 0; i < args.Length; i++)
             {
                 if (i > 0)
                 {
-                    builder.Append(", ");
+                    canonical.Append(", ");
+                    rendered.Append(", ");
                 }
 
                 if (i < parameterNames.Length)
                 {
-                    builder.Append(parameterNames[i]).Append('=');
+                    canonical.Append(parameterNames[i]).Append('=');
+                    rendered.Append(parameterNames[i]).Append('=');
                 }
 
-                WriteTagged(builder, args[i], 0, context);
+                WriteTagged(canonical, args[i], 0, canonicalContext);
+                if (i < parameterNames.Length && options.Redaction.IsSensitiveName(parameterNames[i]))
+                {
+                    rendered.Append("<redacted>");
+                }
+                else
+                {
+                    WriteTagged(rendered, args[i], 0, renderedContext);
+                }
             }
 
-            return Finish(builder, context);
+            return Finish(canonical, rendered);
         }
 
-        private static DigestResult Finish(StringBuilder builder, Context context)
+        private static DigestResult Finish(StringBuilder canonicalBuilder, StringBuilder renderedBuilder)
         {
-            string canonical = builder.ToString();
+            string canonical = canonicalBuilder.ToString();
             string hash = Hash(canonical);
+            string rendered = renderedBuilder.ToString();
 
-            if (canonical.Length <= RenderedCap)
+            if (rendered.Length <= RenderedCap)
             {
-                return new DigestResult(hash, canonical);
+                return new DigestResult(hash, rendered);
             }
 
             DigestStatistics.NoteRenderedTruncated();
-            return new DigestResult(hash, canonical.Substring(0, RenderedCap) + TruncationMarker);
+            return new DigestResult(hash, rendered.Substring(0, RenderedCap) + TruncationMarker);
         }
 
         private static string Hash(string canonical)
@@ -164,7 +178,7 @@ namespace BehaviorDiff.Tracer
 
         private static string Write(StringBuilder builder, object? value, int depth, Context context)
         {
-            DigestStatistics.NoteValue();
+            if (!context.Redact) DigestStatistics.NoteValue();
 
             if (builder.Length > context.CanonicalCap)
             {
@@ -179,19 +193,25 @@ namespace BehaviorDiff.Tracer
                 return "Primitive";
             }
 
+            Type type = value.GetType();
+            if (context.Redact && (context.Options.Redaction.IsDigestOnlyType(type)
+                || value is string text && RedactionPolicy.ContainsCredential(text)))
+            {
+                builder.Append("<redacted>");
+                return "Redacted";
+            }
+
             if (TryWriteScalar(builder, value))
             {
                 return "Primitive";
             }
-
-            Type type = value.GetType();
 
             // Blocklist is consulted before the cycle register and before any field walk, so a blocked
             // graph is never entered even once.
             string? blocked = BlockedReason(type);
             if (blocked != null)
             {
-                DigestStatistics.NoteBlocklisted();
+                if (!context.Redact) DigestStatistics.NoteBlocklisted();
                 builder.Append("<skipped:").Append(blocked).Append('>');
                 return "Blocklisted";
             }
@@ -209,7 +229,7 @@ namespace BehaviorDiff.Tracer
 
             if (depth >= context.MaxDepth)
             {
-                DigestStatistics.NoteDepthLimited();
+                if (!context.Redact) DigestStatistics.NoteDepthLimited();
                 builder.Append("<depth:").Append(type.Name).Append('>');
                 return "DepthLimit";
             }
@@ -228,7 +248,7 @@ namespace BehaviorDiff.Tracer
 
             if (IsEnumerable(type))
             {
-                DigestStatistics.NoteUnruledEnumerable(type.FullName ?? type.Name);
+                if (!context.Redact) DigestStatistics.NoteUnruledEnumerable(type.FullName ?? type.Name);
             }
 
             WriteFields(builder, value, type, depth, context);
@@ -584,6 +604,12 @@ namespace BehaviorDiff.Tracer
 
                 builder.Append(fields[i].Name).Append('=');
 
+                if (context.Redact && context.Options.Redaction.IsSensitiveName(fields[i].Name))
+                {
+                    builder.Append("<redacted>");
+                    continue;
+                }
+
                 object? fieldValue;
                 try
                 {
@@ -593,7 +619,7 @@ namespace BehaviorDiff.Tracer
                 {
                     // Never omitted. A digest that silently drops a field makes two different objects
                     // render identically, which reads downstream as "no behavior change".
-                    DigestStatistics.NoteErrored();
+                    if (!context.Redact) DigestStatistics.NoteErrored();
                     builder.Append("<error:").Append(fields[i].Name).Append(':').Append(ex.GetType().Name).Append('>');
                     continue;
                 }
@@ -718,13 +744,19 @@ namespace BehaviorDiff.Tracer
 
         private sealed class Context
         {
-            internal Context(DigestOptions options)
+            internal Context(DigestOptions options, bool redact)
             {
+                Options = options;
                 MaxDepth = options.MaxDepth;
                 CanonicalCap = options.CanonicalCap;
                 MaxElements = options.MaxElements;
                 Visited = new Dictionary<object, int>(ReferenceComparer.Instance);
+                Redact = redact;
             }
+
+            internal DigestOptions Options { get; }
+
+            internal bool Redact { get; }
 
             internal int MaxDepth { get; }
 
@@ -753,11 +785,12 @@ namespace BehaviorDiff.Tracer
 
     internal sealed class DigestOptions
     {
-        internal DigestOptions(int maxDepth, int canonicalCap, int maxElements)
+        internal DigestOptions(int maxDepth, int canonicalCap, int maxElements, RedactionPolicy redaction)
         {
             MaxDepth = maxDepth;
             CanonicalCap = canonicalCap;
             MaxElements = maxElements;
+            Redaction = redaction;
         }
 
         /// <summary>Kept at 6: real graphs reach four or five levels, and truncated-away state is a silent gap.</summary>
@@ -767,5 +800,7 @@ namespace BehaviorDiff.Tracer
         internal int CanonicalCap { get; }
 
         internal int MaxElements { get; }
+
+        internal RedactionPolicy Redaction { get; }
     }
 }

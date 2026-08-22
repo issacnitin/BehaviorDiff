@@ -55,11 +55,9 @@ namespace BehaviorDiff.Cli
             string? ciProvider = null;
             string? work = null;
             string? findings = null;
-            string? cacheDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".behaviordiff",
-                "cache",
-                "traces");
+            string? cacheDirectory = null;
+            TimeSpan cacheRetention = TimeSpan.FromDays(1);
+            TimeSpan? traceRetention = null;
             bool keep = false;
             var positional = new List<string>();
 
@@ -74,7 +72,9 @@ namespace BehaviorDiff.Cli
                     case "--work": work = Next(args, ref i); break;
                     case "--findings": findings = Next(args, ref i); break;
                     case "--cache-dir": cacheDirectory = Next(args, ref i); break;
+                    case "--cache-retention": cacheRetention = ParseDuration(Next(args, ref i)); break;
                     case "--no-cache": cacheDirectory = null; break;
+                    case "--keep-traces": traceRetention = ParseDuration(Next(args, ref i)); break;
                     case "--keep": keep = true; break;
                     case "-h":
                     case "--help":
@@ -126,6 +126,8 @@ namespace BehaviorDiff.Cli
                     findingsPath,
                     keep,
                     cacheDirectory,
+                    cacheRetention,
+                    traceRetention,
                     warmOnly);
                 return pipeline.Run();
             }
@@ -172,10 +174,27 @@ namespace BehaviorDiff.Cli
             return args[++i];
         }
 
+        private static TimeSpan ParseDuration(string value)
+        {
+            if (value.Length < 2
+                || !double.TryParse(value.Substring(0, value.Length - 1), NumberStyles.Float, CultureInfo.InvariantCulture, out double amount)
+                || amount <= 0)
+            {
+                throw new CliException("Retention duration must be a positive value such as 12h or 7d.");
+            }
+
+            return char.ToLowerInvariant(value[value.Length - 1]) switch
+            {
+                'h' => TimeSpan.FromHours(amount),
+                'd' => TimeSpan.FromDays(amount),
+                _ => throw new CliException("Retention duration must end in h (hours) or d (days)."),
+            };
+        }
+
         private static void Usage()
         {
-            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--work <dir>] [--findings <file>] [--cache-dir <dir>] [--no-cache] [--keep]");
-            Console.WriteLine("       behaviordiff warm <repo> --target <ref> [--cache-dir <dir>] [--work <dir>] [--keep]");
+            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--work <dir>] [--findings <file>] [--cache-dir <dir>] [--cache-retention <12h|7d>] [--keep-traces <12h|7d>] [--keep]");
+            Console.WriteLine("       behaviordiff warm <repo> --target <ref> --cache-dir <dir> [--cache-retention <12h|7d>] [--work <dir>] [--keep]");
             Console.WriteLine("       behaviordiff detect-language <repo>");
             Console.WriteLine("       behaviordiff [<repo>] --ci=azuredevops [--work <dir>] [--findings <file>] [--keep]");
             Console.WriteLine("       behaviordiff [<repo>] --ci=github [--work <dir>] [--findings <file>] [--keep]");
@@ -200,6 +219,7 @@ namespace BehaviorDiff.Cli
         private readonly bool _keep;
         private readonly TraceCacheSession _cache;
         private readonly bool _warmOnly;
+        private readonly TimeSpan? _traceRetention;
 
         internal ResolvedRefs? ResolvedRefs { get; private set; }
 
@@ -212,6 +232,8 @@ namespace BehaviorDiff.Cli
             string findings,
             bool keep,
             string? cacheDirectory,
+            TimeSpan cacheRetention,
+            TimeSpan? traceRetention,
             bool warmOnly)
         {
             _repo = repo;
@@ -222,13 +244,15 @@ namespace BehaviorDiff.Cli
             _findings = findings;
             _keep = keep;
             _cache = new TraceCacheSession(
-                cacheDirectory is null ? null : new LocalDirectoryTraceCacheStore(cacheDirectory),
+                cacheDirectory is null ? null : new LocalDirectoryTraceCacheStore(cacheDirectory, cacheRetention),
                 work);
+            _traceRetention = traceRetention;
             _warmOnly = warmOnly;
         }
 
         internal int Run()
         {
+            SweepExpiredTraces(Path.GetDirectoryName(_work));
             Directory.CreateDirectory(_work);
             Console.WriteLine("behaviordiff");
             Console.WriteLine("  repo : " + _repo);
@@ -428,6 +452,7 @@ namespace BehaviorDiff.Cli
             }
             finally
             {
+                ApplyTraceRetention();
                 if (_keep)
                 {
                     Console.WriteLine();
@@ -462,7 +487,91 @@ namespace BehaviorDiff.Cli
         }
 
         internal static string ScopeConfig(string scope) => scope + "\nexclude="
-            + (Environment.GetEnvironmentVariable("BEHAVIORDIFF_EXCLUDE_NAMESPACES") ?? string.Empty);
+            + (Environment.GetEnvironmentVariable("BEHAVIORDIFF_EXCLUDE_NAMESPACES") ?? string.Empty)
+            + "\nredactNames=" + (Environment.GetEnvironmentVariable("BEHAVIORDIFF_REDACT_NAMES") ?? string.Empty)
+            + "\nredactTypes=" + (Environment.GetEnvironmentVariable("BEHAVIORDIFF_REDACT_TYPES") ?? string.Empty)
+            + "\nredactPaths=" + (Environment.GetEnvironmentVariable("BEHAVIORDIFF_REDACT_PATHS") ?? string.Empty);
+
+        private void ApplyTraceRetention()
+        {
+            string[] runNames = { "base_run1", "base_run2", "base_run3", "pr_run" };
+            if (_traceRetention is null)
+            {
+                foreach (string run in runNames)
+                {
+                    string directory = Path.Combine(_work, run);
+                    if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+                }
+
+                Console.WriteLine("  trace retention: deleted after analysis");
+                return;
+            }
+
+            DateTimeOffset expires = DateTimeOffset.UtcNow + _traceRetention.Value;
+            File.WriteAllText(
+                Path.Combine(_work, "trace-retention.json"),
+                "{\"schema\":\"behaviordiff.trace-retention/1\",\"expiresUtc\":\""
+                + expires.ToString("O", CultureInfo.InvariantCulture) + "\"}" + Environment.NewLine);
+            Console.WriteLine("  trace retention: kept until " + expires.ToString("O", CultureInfo.InvariantCulture));
+        }
+
+        private static void SweepExpiredTraces(string? root)
+        {
+            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            {
+                return;
+            }
+
+            var markers = new List<string>();
+            string rootMarker = Path.Combine(root, "trace-retention.json");
+            if (File.Exists(rootMarker)) markers.Add(rootMarker);
+            try
+            {
+                markers.AddRange(Directory.EnumerateDirectories(root)
+                    .Select(directory => Path.Combine(directory, "trace-retention.json"))
+                    .Where(File.Exists));
+            }
+            catch (IOException)
+            {
+                return;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return;
+            }
+
+            foreach (string marker in markers)
+            {
+                try
+                {
+                    using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(marker));
+                    string? expiry = document.RootElement.GetProperty("expiresUtc").GetString();
+                    if (!DateTimeOffset.TryParse(expiry, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset expires)
+                        || expires > DateTimeOffset.UtcNow)
+                    {
+                        continue;
+                    }
+
+                    string directory = Path.GetDirectoryName(marker)!;
+                    foreach (string run in new[] { "base_run1", "base_run2", "base_run3", "pr_run" })
+                    {
+                        string runDirectory = Path.Combine(directory, run);
+                        if (Directory.Exists(runDirectory)) Directory.Delete(runDirectory, recursive: true);
+                    }
+
+                    File.Delete(marker);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                }
+            }
+        }
 
         private static void AssertLanguageSymmetry(LanguageDetection baseDetection, LanguageDetection prDetection)
         {

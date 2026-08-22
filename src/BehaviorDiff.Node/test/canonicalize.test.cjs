@@ -209,3 +209,19 @@ test('skips Maps and Sets without reading iterators', () => {
   assert.equal(result.counters.blocklisted, 2);
   assert.equal(result.partial, true);
 });
+
+test('redacts names and credential-shaped content without changing compared digests', () => {
+  const first = ['first-password', 'eyJabcdefghijk.abcdefghijkl.abcdefghijkl'];
+  const second = ['second-password', 'eyJzyxwvutsrqp.zzyyxxwwvvu.abcdefghijkl'];
+  const firstDigest = canonicalize(first);
+  const secondDigest = canonicalize(second);
+  const options = { redact: true, parameterNames: ['password', 'result'] };
+  const firstRendered = canonicalize(first, options);
+  const secondRendered = canonicalize(second, options);
+
+  assert.notEqual(firstDigest.digest, secondDigest.digest);
+  assert.doesNotMatch(firstRendered.rendered, /first-password|eyJabcdefghijk/);
+  assert.doesNotMatch(secondRendered.rendered, /second-password|eyJzyxwvutsrqp/);
+  assert.match(firstRendered.rendered, /<redacted>/);
+  assert.match(secondRendered.rendered, /<redacted>/);
+});

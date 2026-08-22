@@ -12,7 +12,11 @@ namespace BehaviorDiff.Tracer
         private const int MaxDepth = 6;
         private const int MaxElements = 16;
 
-        internal static DigestResult? RenderArguments(string[] parameterNames, object[]? args, int canonicalCap)
+        internal static DigestResult? RenderArguments(
+            string[] parameterNames,
+            object[]? args,
+            int canonicalCap,
+            RedactionPolicy redaction)
         {
             if (args is null || args.Length == 0)
             {
@@ -22,12 +26,12 @@ namespace BehaviorDiff.Tracer
             return StructuralDigest.ComputeArguments(
                 parameterNames,
                 args,
-                new DigestOptions(MaxDepth, canonicalCap, MaxElements));
+                new DigestOptions(MaxDepth, canonicalCap, MaxElements, redaction));
         }
 
-        internal static DigestResult RenderValue(object? value, int canonicalCap)
+        internal static DigestResult RenderValue(object? value, int canonicalCap, RedactionPolicy redaction)
         {
-            return StructuralDigest.ComputeValue(value, new DigestOptions(MaxDepth, canonicalCap, MaxElements));
+            return StructuralDigest.ComputeValue(value, new DigestOptions(MaxDepth, canonicalCap, MaxElements, redaction));
         }
     }
 }

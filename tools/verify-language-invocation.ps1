@@ -120,7 +120,7 @@ function Invoke-LanguageProof([string]$language, [object]$reference) {
     $runWork = Join-Path $work "$language-work"
     $findings = Join-Path $work "$language-findings.json"
     $output = @(& dotnet $cli $reference.Directory --base $reference.Base --pr $reference.Pr `
-        --work $runWork --findings $findings 2>&1)
+        --work $runWork --findings $findings --keep-traces 1d 2>&1)
     $exitCode = $LASTEXITCODE
     $output | ForEach-Object { Write-Host $_ }
     if ($exitCode -ne 0) {

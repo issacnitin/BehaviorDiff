@@ -9,6 +9,15 @@ const { canonicalize } = require('./canonicalize.cjs');
 const RUNTIME_SYMBOL = Symbol.for('behaviordiff.runtime');
 const SCHEMA = 'behaviordiff.trace/1';
 const WRITER_CAPACITY = 100000;
+const DEFAULT_REDACT_NAMES = 'password;token;secret;key;ssn;email;auth;credential';
+
+function configuredList(name, fallback = '') {
+  return (process.env[name] ?? fallback).split(/[;,]/).map(value => value.trim()).filter(Boolean);
+}
+
+function normalizedPath(value) {
+  return value.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
+}
 
 function decorate(configuredPath, processId, suffix) {
   const fullPath = path.resolve(configuredPath);
@@ -49,6 +58,11 @@ function createRuntime(options = {}) {
   const configuredPath = options.tracePath ?? process.env.BEHAVIORDIFF_TRACE;
   const processId = options.processId ?? process.pid;
   const storage = new AsyncLocalStorage();
+  const redaction = {
+    sensitiveNames: configuredList('BEHAVIORDIFF_REDACT_NAMES', DEFAULT_REDACT_NAMES),
+    digestOnlyTypes: configuredList('BEHAVIORDIFF_REDACT_TYPES'),
+    digestOnlyPaths: configuredList('BEHAVIORDIFF_REDACT_PATHS').map(normalizedPath),
+  };
   const modules = new Map();
   const ordinals = new Map();
   const digestCounters = {
@@ -72,11 +86,18 @@ function createRuntime(options = {}) {
     traceDescriptor = fs.openSync(tracePath, 'w');
   }
 
-  function capture(value) {
+  function capture(value, metadata, parameterNames) {
     try {
       const result = canonicalize(value);
+      const sourcePath = normalizedPath(metadata?.filePath ?? '');
+      const redactPath = sourcePath !== '' && redaction.digestOnlyPaths.some(prefix =>
+        sourcePath === prefix || sourcePath.startsWith(`${prefix}/`)
+          || sourcePath.endsWith(`/${prefix}`) || sourcePath.includes(`/${prefix}/`));
+      const rendered = redactPath
+        ? '<redacted>'
+        : canonicalize(value, { ...redaction, parameterNames, redact: true }).rendered;
       addCounters(digestCounters, result.counters);
-      return { digest: result.digest, rendered: result.rendered };
+      return { digest: result.digest, rendered };
     } catch {
       digestCounters.errored++;
       return null;
@@ -96,7 +117,7 @@ function createRuntime(options = {}) {
       parentCallId: parent?.callId,
       callDepth: parent ? parent.callDepth + 1 : 0,
       ordinal,
-      args: capture(args)
+      args: capture(args, metadata, metadata.parameterNames)
     };
   }
 
@@ -124,7 +145,7 @@ function createRuntime(options = {}) {
     if (error !== undefined) {
       event.exceptionType = exceptionType(error);
     } else if (includeReturn) {
-      const captured = capture(result);
+      const captured = capture(result, metadata);
       if (captured) {
         event.returnDigest = captured.digest;
         event.returnRendered = captured.rendered;

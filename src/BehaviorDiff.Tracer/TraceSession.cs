@@ -243,7 +243,7 @@ namespace BehaviorDiff.Tracer
                 parent,
                 info,
                 testId,
-                ValueRenderer.RenderArguments(info.ParameterNames, args, s_options.MaxDigestLength),
+                ValueRenderer.RenderArguments(info.ParameterNames, args, s_options.MaxDigestLength, s_options.Redaction),
                 Environment.CurrentManagedThreadId);
 
             frame.OwnsTestId = ownsTestId;
@@ -319,7 +319,7 @@ namespace BehaviorDiff.Tracer
             t_inTracer = true;
             try
             {
-                return ValueRenderer.RenderValue(value, s_options.MaxDigestLength);
+                return ValueRenderer.RenderValue(value, s_options.MaxDigestLength, s_options.Redaction);
             }
             catch (Exception)
             {
@@ -372,6 +372,7 @@ namespace BehaviorDiff.Tracer
                 return;
             }
 
+            bool redactPath = s_options.Redaction.IsDigestOnlyPath(frame.Info.FilePath);
             buffer.Enqueue(new TraceEvent
             {
                 TestId = frame.TestId,
@@ -384,9 +385,9 @@ namespace BehaviorDiff.Tracer
                 CallId = frame.CallId,
                 Ordinal = frame.Ordinal,
                 ArgsDigest = frame.Args?.Hash,
-                ArgsRendered = frame.Args?.Rendered,
+                ArgsRendered = RedactedRendered(frame.Args, redactPath),
                 ReturnDigest = result?.Hash,
-                ReturnRendered = result?.Rendered,
+                ReturnRendered = RedactedRendered(result, redactPath),
                 ExceptionType = exceptionType,
 
                 // The thread the call started on. An async continuation may complete on a different thread;
@@ -396,5 +397,9 @@ namespace BehaviorDiff.Tracer
                 IsHarness = frame.Info.Coverage.IsTestAssembly,
             });
         }
+
+        private static string? RedactedRendered(DigestResult? value, bool redact) => value.HasValue
+            ? redact ? "<redacted>" : value.Value.Rendered
+            : null;
     }
 }

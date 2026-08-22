@@ -164,10 +164,13 @@ namespace BehaviorDiff.Cli
         };
 
         private readonly string _root;
+        private readonly TimeSpan _retention;
 
-        internal LocalDirectoryTraceCacheStore(string root)
+        internal LocalDirectoryTraceCacheStore(string root, TimeSpan retention)
         {
             _root = Path.GetFullPath(root);
+            _retention = retention;
+            PruneExpired();
         }
 
         public bool TryRestore(TraceCacheKey key, string destination, out TraceCacheEntry? entry)
@@ -188,8 +191,11 @@ namespace BehaviorDiff.Cli
                 || metadata.TracerVersion != key.TracerVersion
                 || metadata.ScopeConfig != key.ScopeConfig
                 || string.IsNullOrWhiteSpace(metadata.BaseRoot)
-                || metadata.TraceWallClockMilliseconds < 0)
+                || metadata.TraceWallClockMilliseconds < 0
+                || !DateTimeOffset.TryParse(metadata.CreatedUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset created)
+                || created + _retention <= DateTimeOffset.UtcNow)
             {
+                Directory.Delete(cacheDirectory, recursive: true);
                 return false;
             }
 
@@ -267,6 +273,53 @@ namespace BehaviorDiff.Cli
         }
 
         private static readonly IReadOnlyList<string> RunNames = new[] { "base_run1", "base_run2", "base_run3" };
+
+        private void PruneExpired()
+        {
+            if (!Directory.Exists(_root))
+            {
+                return;
+            }
+
+            IReadOnlyList<string> directories;
+            try
+            {
+                directories = Directory.EnumerateDirectories(_root).ToArray();
+            }
+            catch (IOException)
+            {
+                return;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return;
+            }
+
+            foreach (string directory in directories)
+            {
+                string metadataPath = Path.Combine(directory, "metadata.json");
+                try
+                {
+                    if (!File.Exists(metadataPath)) continue;
+                    CacheMetadata? metadata = JsonSerializer.Deserialize<CacheMetadata>(File.ReadAllText(metadataPath), Json);
+                    if (metadata != null
+                        && DateTimeOffset.TryParse(metadata.CreatedUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset created)
+                        && created + _retention <= DateTimeOffset.UtcNow)
+                    {
+                        Directory.Delete(directory, recursive: true);
+                    }
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+                catch (JsonException)
+                {
+                }
+            }
+        }
 
         private static bool IsCompleteRun(string directory) =>
             Directory.Exists(directory)

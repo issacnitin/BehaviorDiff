@@ -1,6 +1,7 @@
 package io.behaviordiff.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -86,14 +87,38 @@ final class StructuralDigestTest {
 
     @Test
     void truncationDoesNotChangeDigestInput() {
-        String first = "a".repeat(3000) + "x";
-        String second = "a".repeat(3000) + "y";
+        String first = "a-".repeat(1500) + "x";
+        String second = "a-".repeat(1500) + "y";
         DigestResult left = StructuralDigest.compute(first);
         DigestResult right = StructuralDigest.compute(second);
 
         assertEquals(left.rendered(), right.rendered());
         assertTrue(left.rendered().endsWith("<truncated>"));
         assertNotEquals(left.digest(), right.digest());
+    }
+
+    @Test
+    void redactsSensitiveFieldsAndCredentialContentButKeepsRealDigest() {
+        Credential first = new Credential("first-password", "AKIA1234567890ABCDEF");
+        Credential second = new Credential("second-password", "AKIAFEDCBA0987654321");
+
+        DigestResult left = StructuralDigest.compute(first);
+        DigestResult right = StructuralDigest.compute(second);
+
+        assertNotEquals(left.digest(), right.digest());
+        assertFalse(left.rendered().contains("first-password"));
+        assertFalse(left.rendered().contains("AKIA1234567890ABCDEF"));
+        assertTrue(left.rendered().contains("<redacted>"));
+    }
+
+    private static final class Credential {
+        private final String password;
+        private final String result;
+
+        Credential(String password, String result) {
+            this.password = password;
+            this.result = result;
+        }
     }
 
     private static final class SideEffectValue implements Iterable<Integer> {

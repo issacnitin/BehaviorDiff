@@ -76,7 +76,7 @@ final class TraceSession {
             return;
         }
         DigestResult returnDigest = throwable == null && !frame.returnsVoid()
-            ? StructuralDigest.compute(returnValue)
+            ? StructuralDigest.compute(returnValue, frame.filePath())
             : null;
         StringBuilder line = new StringBuilder(768)
             .append('{')

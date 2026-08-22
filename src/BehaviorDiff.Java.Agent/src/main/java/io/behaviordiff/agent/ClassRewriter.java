@@ -27,6 +27,7 @@ final class ClassRewriter {
         new Type[] {
             Type.getType(String.class),
             Type.getType(Object[].class),
+            Type.getType(String[].class),
             Type.getType(String.class),
             Type.getType(String.class),
             Type.INT_TYPE,
@@ -148,7 +149,8 @@ final class ClassRewriter {
                     owner, name, descriptor, resolvedSourcePath, allowPackageRelativeFallback),
                 sourceMetadata.isHarness(),
                 sourceMetadata.isTestRoot(name, descriptor),
-                module);
+                module,
+                sourceMetadata.parameterNames(name, descriptor));
         }
     }
 
@@ -159,6 +161,7 @@ final class ClassRewriter {
         private final boolean harness;
         private final boolean testRoot;
         private final String module;
+        private final String[] parameterNames;
         private final Label bodyStart = new Label();
         private final Label bodyEnd = new Label();
         private final Label exceptionHandler = new Label();
@@ -174,7 +177,8 @@ final class ClassRewriter {
             SourceLocation sourceLocation,
             boolean harness,
             boolean testRoot,
-            String module) {
+            String module,
+            String[] parameterNames) {
             super(Opcodes.ASM9, delegate, access, name, descriptor);
             methodFullName = owner.replace('/', '.') + "." + name + descriptor;
             returnType = Type.getReturnType(descriptor);
@@ -182,12 +186,21 @@ final class ClassRewriter {
             this.harness = harness;
             this.testRoot = testRoot;
             this.module = module;
+            this.parameterNames = parameterNames;
         }
 
         @Override
         protected void onMethodEnter() {
             push(methodFullName);
             loadArgArray();
+            push(parameterNames.length);
+            newArray(Type.getType(String.class));
+            for (int index = 0; index < parameterNames.length; index++) {
+                dup();
+                push(index);
+                push(parameterNames[index]);
+                arrayStore(Type.getType(String.class));
+            }
             if (sourceLocation.filePath == null) {
                 visitInsn(ACONST_NULL);
             } else {
@@ -263,6 +276,7 @@ final class ClassRewriter {
         private boolean hasLineNumbers;
         private final Map<String, Integer> firstLines = new HashMap<>();
         private final Map<String, Boolean> testRoots = new HashMap<>();
+        private final Map<String, String[]> parameterNames = new HashMap<>();
 
         static SourceMetadata read(ClassReader reader) {
             SourceMetadata metadata = new SourceMetadata();
@@ -280,7 +294,39 @@ final class ClassRewriter {
                     String signature,
                     String[] exceptions) {
                     String key = name + descriptor;
+                    Type[] argumentTypes = Type.getArgumentTypes(descriptor);
+                    String[] names = new String[argumentTypes.length];
+                    for (int index = 0; index < names.length; index++) names[index] = "arg" + index;
+                    Map<Integer, Integer> slots = new HashMap<>();
+                    int slot = (access & Opcodes.ACC_STATIC) == 0 ? 1 : 0;
+                    for (int index = 0; index < argumentTypes.length; index++) {
+                        slots.put(slot, index);
+                        slot += argumentTypes[index].getSize();
+                    }
+                    metadata.parameterNames.put(key, names);
                     return new MethodVisitor(Opcodes.ASM9) {
+                        private int parameterIndex;
+
+                        @Override
+                        public void visitParameter(String parameterName, int parameterAccess) {
+                            if (parameterName != null && parameterIndex < names.length) names[parameterIndex] = parameterName;
+                            parameterIndex++;
+                        }
+
+                        @Override
+                        public void visitLocalVariable(
+                            String variableName,
+                            String variableDescriptor,
+                            String variableSignature,
+                            Label start,
+                            Label end,
+                            int variableIndex) {
+                            Integer argumentIndex = slots.get(variableIndex);
+                            if (argumentIndex != null && names[argumentIndex].startsWith("arg")) {
+                                names[argumentIndex] = variableName;
+                            }
+                        }
+
                         @Override
                         public void visitLineNumber(int line, Label start) {
                             metadata.hasLineNumbers = true;
@@ -306,6 +352,10 @@ final class ClassRewriter {
 
         boolean isTestRoot(String name, String descriptor) {
             return testRoots.getOrDefault(name + descriptor, false);
+        }
+
+        String[] parameterNames(String name, String descriptor) {
+            return parameterNames.getOrDefault(name + descriptor, new String[0]);
         }
 
         private static boolean isTestAnnotation(String descriptor) {

@@ -46,6 +46,7 @@ type memberDefinition struct {
 	Detail           string
 	IsTestRoot       bool
 	IsHarness        bool
+	ParameterNames   []string
 }
 
 func transformModule(model *moduleModel, out, runtimeImport string, report *Report) error {
@@ -631,6 +632,7 @@ func memberMetadata(fset *token.FileSet, file *sourceFile, function *ast.FuncDec
 		Module: file.pkg.path, Method: methodName(file.pkg, function), File: file.attribution,
 		Line: resolved.Line, ReturnKind: returnKind, SourceResolution: "debugInfo",
 		Status: "Patched", IsTestRoot: testRoot, IsHarness: testRoot,
+		ParameterNames: callableParameterNames(function),
 	}
 	if len(genericTypeParameterNames(function)) > 0 {
 		member.Status = "Skipped"
@@ -638,6 +640,25 @@ func memberMetadata(fset *token.FileSet, file *sourceFile, function *ast.FuncDec
 		member.Detail = "Go: GenericTemplate"
 	}
 	return member
+}
+
+func callableParameterNames(function *ast.FuncDecl) []string {
+	var names []string
+	if function.Recv != nil {
+		for _, field := range function.Recv.List {
+			for _, name := range field.Names {
+				names = append(names, name.Name)
+			}
+		}
+	}
+	if function.Type.Params != nil {
+		for _, field := range function.Type.Params.List {
+			for _, name := range field.Names {
+				names = append(names, name.Name)
+			}
+		}
+	}
+	return names
 }
 
 func specializedMetadataExpression(alias string, function *ast.FuncDecl, member memberDefinition) ast.Expr {
@@ -737,6 +758,16 @@ func metadataExpression(alias string, member memberDefinition) ast.Expr {
 	}
 	if member.IsHarness {
 		fields = append(fields, metadataField("IsHarness", ast.NewIdent("true")))
+	}
+	if len(member.ParameterNames) > 0 {
+		names := make([]ast.Expr, 0, len(member.ParameterNames))
+		for _, name := range member.ParameterNames {
+			names = append(names, stringLiteral(name))
+		}
+		fields = append(fields, metadataField("ParameterNames", &ast.CompositeLit{
+			Type: &ast.ArrayType{Elt: ast.NewIdent("string")},
+			Elts: names,
+		}))
 	}
 	return &ast.CompositeLit{Type: selector(alias, "Member"), Elts: fields}
 }

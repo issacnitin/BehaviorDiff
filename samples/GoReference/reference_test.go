@@ -137,7 +137,7 @@ func TestDigestProofs(t *testing.T) {
 	}
 	EchoDepth(deep)
 
-	prefix := strings.Repeat("x", 2400)
+	prefix := strings.Repeat("x-", 1200)
 	EchoLong(prefix + "left")
 	EchoLong(prefix + "right")
 	EchoPrivate(PrivateEnvelope{Visible: "visible", hidden: "secret"})

@@ -27,44 +27,62 @@ public final class StructuralDigest {
     private static final LongAdder BLOCKLISTED = new LongAdder();
     private static final LongAdder ERRORED = new LongAdder();
     private static final LongAdder RENDERED_TRUNCATED = new LongAdder();
+    private static final RedactionPolicy REDACTION = RedactionPolicy.fromEnvironment();
 
     private StructuralDigest() {
     }
 
     public static DigestResult compute(Object value) {
+        return compute(value, null);
+    }
+
+    public static DigestResult compute(Object value, String filePath) {
+        return computeArguments(value, filePath, new String[0]);
+    }
+
+    public static DigestResult computeArguments(Object value, String filePath, String[] parameterNames) {
         CollectionInternals.requireAccess();
         StringBuilder canonical = new StringBuilder();
-        write(value, canonical, new Context(), 0);
+        write(value, canonical, new Context(false, new String[0]), 0);
         String text = canonical.toString();
-        String rendered = text.length() <= RENDERED_CAP
-            ? text
-            : text.substring(0, RENDERED_CAP) + "<truncated>";
-        if (text.length() > RENDERED_CAP) {
+        StringBuilder safe = new StringBuilder();
+        if (REDACTION.digestOnlyPath(filePath)) safe.append("<redacted>");
+        else write(value, safe, new Context(true, parameterNames), 0);
+        String safeText = safe.toString();
+        String rendered = safeText.length() <= RENDERED_CAP
+            ? safeText
+            : safeText.substring(0, RENDERED_CAP) + "<truncated>";
+        if (safeText.length() > RENDERED_CAP) {
             RENDERED_TRUNCATED.increment();
         }
         return new DigestResult(hash(text), rendered);
     }
 
     private static void write(Object value, StringBuilder output, Context context, int depth) {
-        VALUES_DIGESTED.increment();
+        if (!context.redact) VALUES_DIGESTED.increment();
         if (value == null) {
             output.append("null");
             return;
         }
 
         Class<?> type = value.getClass();
+        if (context.redact && (REDACTION.digestOnlyType(type)
+            || value instanceof String && RedactionPolicy.credentialContent((String) value))) {
+            output.append("<redacted>");
+            return;
+        }
         if (writeScalar(value, type, output)) {
             return;
         }
 
         if (isBlocklisted(type)) {
-            BLOCKLISTED.increment();
+            if (!context.redact) BLOCKLISTED.increment();
             output.append("<skipped:").append(type.getName()).append('>');
             return;
         }
 
         if (depth >= MAX_DEPTH) {
-            DEPTH_LIMITED.increment();
+            if (!context.redact) DEPTH_LIMITED.increment();
             output.append("<depth:").append(type.getName()).append('>');
             return;
         }
@@ -135,7 +153,12 @@ public final class StructuralDigest {
             if (index > 0) {
                 output.append(", ");
             }
-            write(Array.get(value, index), output, context, depth + 1);
+            if (context.redact && depth == 0 && index < context.parameterNames.length
+                && REDACTION.sensitiveName(context.parameterNames[index])) {
+                output.append("<redacted>");
+            } else {
+                write(Array.get(value, index), output, context, depth + 1);
+            }
         }
         output.append(" }");
     }
@@ -158,7 +181,7 @@ public final class StructuralDigest {
             }
             output.append(" }");
         } catch (ReflectiveOperationException exception) {
-            appendError(output, "ArrayList", exception);
+            appendError(output, "ArrayList", exception, context);
         }
     }
 
@@ -188,7 +211,7 @@ public final class StructuralDigest {
             }
             output.append(" }");
         } catch (ReflectiveOperationException exception) {
-            appendError(output, keysOnly ? "HashSet" : "HashMap", exception);
+            appendError(output, keysOnly ? "HashSet" : "HashMap", exception, context);
         }
     }
 
@@ -203,7 +226,7 @@ public final class StructuralDigest {
             HashMap<Object, Object> map = (HashMap<Object, Object>) CollectionInternals.HASH_SET_MAP.get(value);
             writeHashMap(map, output, context, depth, reference, true);
         } catch (ReflectiveOperationException exception) {
-            appendError(output, "HashSet", exception);
+            appendError(output, "HashSet", exception, context);
         }
     }
 
@@ -226,7 +249,7 @@ public final class StructuralDigest {
     private static String sortableKey(Object node) {
         try {
             StringBuilder key = new StringBuilder();
-            write(CollectionInternals.HASH_NODE_KEY.get(node), key, new Context(), 0);
+            write(CollectionInternals.HASH_NODE_KEY.get(node), key, new Context(false, new String[0]), 0);
             return key.toString();
         } catch (IllegalAccessException exception) {
             return "<error:key:" + exception.getClass().getSimpleName() + ">";
@@ -243,15 +266,19 @@ public final class StructuralDigest {
             }
             Field field = fields.get(index);
             output.append(field.getDeclaringClass().getName()).append('.').append(field.getName()).append('=');
+            if (context.redact && REDACTION.sensitiveName(field.getName())) {
+                output.append("<redacted>");
+                continue;
+            }
             try {
                 if (!field.trySetAccessible()) {
-                    ERRORED.increment();
+                    if (!context.redact) ERRORED.increment();
                     output.append("<error:").append(field.getName()).append(":Inaccessible>");
                 } else {
                     write(field.get(value), output, context, depth + 1);
                 }
             } catch (RuntimeException | IllegalAccessException exception) {
-                appendError(output, field.getName(), exception);
+                appendError(output, field.getName(), exception, context);
             }
         }
         output.append(" }");
@@ -267,8 +294,8 @@ public final class StructuralDigest {
         return fields;
     }
 
-    private static void appendError(StringBuilder output, String location, Exception exception) {
-        ERRORED.increment();
+    private static void appendError(StringBuilder output, String location, Exception exception, Context context) {
+        if (!context.redact) ERRORED.increment();
         output.append("<error:").append(location).append(':')
             .append(exception.getClass().getSimpleName()).append('>');
     }
@@ -292,6 +319,13 @@ public final class StructuralDigest {
 
     private static final class Context {
         private final IdentityHashMap<Object, Integer> references = new IdentityHashMap<>();
+        private final boolean redact;
+        private final String[] parameterNames;
+
+        private Context(boolean redact, String[] parameterNames) {
+            this.redact = redact;
+            this.parameterNames = parameterNames;
+        }
     }
 
     static long valuesDigested() {

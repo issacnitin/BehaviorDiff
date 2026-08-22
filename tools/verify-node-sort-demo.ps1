@@ -134,7 +134,7 @@ try {
         $env:BEHAVIORDIFF_NODE_TRACER = $tracer
         $env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = $changedFile
         $cliOutput = @(& dotnet $cli $demoRepo --base $baseSha --pr $prSha `
-            --work $cliWork --findings $findingsPath --keep 2>&1)
+            --work $cliWork --findings $findingsPath --keep --keep-traces 1d 2>&1)
         $cliExit = $LASTEXITCODE
         $cliOutput | ForEach-Object { Write-Host $_ }
     } finally {

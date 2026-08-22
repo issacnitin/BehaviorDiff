@@ -47,6 +47,29 @@ type slicePair struct {
 
 type zeroSized struct{}
 
+func TestRedactionKeepsRealDigest(t *testing.T) {
+	type credential struct {
+		Password string
+		Result   string
+	}
+	first := credential{Password: "first-password", Result: "AKIA1234567890ABCDEF"}
+	second := credential{Password: "second-password", Result: "AKIAFEDCBA0987654321"}
+	options := Options{Redact: true, SensitiveNames: []string{"password"}}
+
+	left := DigestWithOptions(first, options)
+	right := DigestWithOptions(second, options)
+
+	if left.SHA256 == right.SHA256 {
+		t.Fatal("real secret values did not affect digest")
+	}
+	if strings.Contains(left.Canonical, "first-password") || strings.Contains(left.Canonical, "AKIA1234567890ABCDEF") {
+		t.Fatalf("rendered secret leaked: %s", left.Canonical)
+	}
+	if !strings.Contains(left.Canonical, "<redacted>") {
+		t.Fatalf("redaction marker missing: %s", left.Canonical)
+	}
+}
+
 type namedFloat32 float32
 
 type float32Holder struct {

@@ -8,6 +8,13 @@ const DEFAULT_MAX_DEPTH = 6;
 const DEFAULT_MAX_PROTOTYPE_DEPTH = 2;
 const DEFAULT_MAX_ENTRIES = 100;
 const ARRAY_INDEX_MAX = 0xfffffffe;
+const DEFAULT_SENSITIVE_NAMES = ['password', 'token', 'secret', 'key', 'ssn', 'email', 'auth', 'credential'];
+const CREDENTIAL_PATTERNS = [
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
+  /-----BEGIN [A-Z0-9 ]*(?:PRIVATE KEY|CERTIFICATE)-----/,
+  /(?:^|[^A-Za-z0-9+/])(?:[A-Za-z0-9+/]{40,}={0,2})(?:$|[^A-Za-z0-9+/=])/,
+];
 
 const intrinsicPrototypes = new Map([
   [Object.prototype, 'Object.prototype'],
@@ -87,6 +94,11 @@ function canonicalize(value, options = {}) {
     'maxPrototypeDepth'
   );
   const maxEntries = nonNegativeInteger(options.maxEntries, DEFAULT_MAX_ENTRIES, 'maxEntries');
+  const redact = options.redact === true;
+  const sensitiveNames = DEFAULT_SENSITIVE_NAMES.concat(options.sensitiveNames ?? [])
+    .map(name => String(name).toLowerCase());
+  const digestOnlyTypes = (options.digestOnlyTypes ?? []).map(name => String(name).toLowerCase());
+  const parameterNames = options.parameterNames ?? [];
   const writer = createWriter(renderedCap);
   const counters = {
     valuesDigested: 0,
@@ -181,6 +193,15 @@ function canonicalize(value, options = {}) {
     writer.write('=');
     if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
       marker('<skipped:accessor>', 'blocklisted');
+      return;
+    }
+
+    const effectiveName = depth === 1 && isArrayIndex(key)
+      ? parameterNames[Number(key)]
+      : typeof key === 'string' ? key : undefined;
+    if (redact && effectiveName !== undefined
+        && sensitiveNames.some(pattern => effectiveName.toLowerCase().includes(pattern))) {
+      writer.write('<redacted>');
       return;
     }
 
@@ -283,12 +304,29 @@ function canonicalize(value, options = {}) {
 
   function writeValue(current, depth, prototypeDepth) {
     counters.valuesDigested++;
-    if (writeScalar(current)) {
+    if (redact && typeof current === 'string'
+        && CREDENTIAL_PATTERNS.some(pattern => pattern.test(current))) {
+      writer.write('<redacted>');
       return;
     }
-
-    if (types.isProxy(current)) {
+    if (current !== null && (typeof current === 'object' || typeof current === 'function') && types.isProxy(current)) {
       marker('<skipped:Proxy>', 'blocklisted');
+      return;
+    }
+    if (redact && current !== null && (typeof current === 'object' || typeof current === 'function')) {
+      let constructorName = '';
+      try {
+        constructorName = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(current), 'constructor')?.value?.name ?? '';
+      } catch {
+        constructorName = '';
+      }
+      if (digestOnlyTypes.some(pattern => constructorName.toLowerCase() === pattern
+          || constructorName.toLowerCase().startsWith(`${pattern}.`))) {
+        writer.write('<redacted>');
+        return;
+      }
+    }
+    if (writeScalar(current)) {
       return;
     }
 

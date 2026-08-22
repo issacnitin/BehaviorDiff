@@ -151,8 +151,9 @@ Useful options:
 --work <directory>      Override the temporary work directory
 --findings <file>       Write canonical machine-readable findings
 --cache-dir <directory> Override the local base-trace cache directory
---no-cache              Disable base-trace cache reads and writes
---keep                  Keep worktrees and traces for investigation
+--cache-retention <n>    Expire cached traces after a stated window, for example 12h or 7d
+--keep-traces <n>        Opt in to retaining working traces for a stated window
+--keep                  Keep temporary Git worktrees; traces are still deleted by default
 --ci=github             Resolve refs from a GitHub pull_request event
 --ci=azuredevops        Resolve refs from Azure Pipelines variables
 ```
@@ -197,7 +198,7 @@ The command is intentionally the same for every language. `behaviordiff detect-l
 
 ### Base trace cache
 
-BehaviorDiff caches the three validated noise-baseline traces under `~/.behaviordiff/cache/traces` by default. The key contains the target SHA, language, a content fingerprint of the installed tracer, and the effective scope configuration. A tracer or scope change therefore cannot reuse stale evidence. The storage boundary is pluggable; this release includes the local-directory backend, which can be placed on a CI-native or S3-compatible mounted cache with `--cache-dir`.
+BehaviorDiff caches the three validated noise-baseline traces when `--cache-dir` is supplied. Persistence is opt-in. The key contains the target SHA, language, a content fingerprint of the installed tracer, and the effective scope/redaction configuration. A tracer, scope, or redaction change therefore cannot reuse stale evidence. The storage boundary is pluggable; this release includes the local-directory backend, which can be placed on a CI-native or S3-compatible mounted cache. Entries expire after one day by default; use `--cache-retention` to state a different window.
 
 On a hit, PR analysis restores the three baseline samples and performs only the PR instrumented run. A missing, malformed, or unavailable cache entry is reported as a miss and falls back to the existing four-run path. The console and `findings.json.baseTraceCache` report `hit`, `miss`, or `disabled`, the cache key/backend, and measured baseline wall-clock time saved.
 
@@ -206,6 +207,16 @@ Warm a target branch from a nightly job without running a synthetic PR compariso
 ```powershell
 behaviordiff warm C:\src\my-service --target origin/main --cache-dir C:\ci-cache\behaviordiff
 ```
+
+## Trace security and threat model
+
+Trace events contain method identities, source locations, test identities, call topology, and canonicalized argument and return values. Those values can include credentials, personal data, and business-sensitive state. Treat an unredacted trace as sensitive build output.
+
+Redaction is on by default. Names matching `password`, `token`, `secret`, `key`, `ssn`, `email`, `auth`, or `credential` render as `<redacted>`. Credential-shaped strings such as JWTs, AWS access-key IDs, PEM headers, and long base64 runs are also redacted. Add name patterns with `BEHAVIORDIFF_REDACT_NAMES`, whole runtime types with `BEHAVIORDIFF_REDACT_TYPES`, and repository directory prefixes with `BEHAVIORDIFF_REDACT_PATHS`; lists use commas or semicolons. Types and paths are still digested but never rendered.
+
+Redaction does not weaken comparison: SHA-256 digests are computed from the complete real canonical value before display redaction. Consequently, two different secrets still produce a behavior divergence even when both sides display `<redacted>`. Redaction does not hide method names, source paths, test names, object shape, non-matching values, exception types, digest equality, or the fact that a sensitive value changed. Name rules also depend on names retained by source/compiler metadata, so content, type, and path rules should protect contexts where names may be stripped.
+
+Working traces are deleted after analysis by default; `findings.json` persists. `--keep` retains worktrees but not traces. Diagnostic retention requires `--keep-traces 12h` (or another explicit hours/days window), which writes `trace-retention.json` with the expiry; later CLI runs prune expired sibling work directories. Base-trace caching is separately opt-in with `--cache-dir` and an explicit/default cache retention window. CI storage lifecycle policy remains the enforcement boundary after a retained work directory or cache directory is uploaded elsewhere.
 
 ## Read the result
 

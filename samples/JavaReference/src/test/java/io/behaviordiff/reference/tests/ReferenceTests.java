@@ -53,7 +53,7 @@ final class ReferenceTests {
         assertEquals(1, Subject.block(new Subject.RuntimeHolder()));
         assertEquals(1, Subject.deep(Subject.Node.deep(9)));
 
-        String prefix = "a".repeat(3000);
+        String prefix = "a-".repeat(1500);
         assertEquals(3001, Subject.longText(prefix + "x"));
         assertEquals(3001, Subject.longText(prefix + "y"));
         assertEquals(1, Subject.unreadable(new URI("https://example.test/path")));

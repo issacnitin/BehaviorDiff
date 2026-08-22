@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"math"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,9 +25,20 @@ var (
 )
 
 type Options struct {
-	RenderedCap int
-	MaxDepth    int
-	MaxEntries  int
+	RenderedCap     int
+	MaxDepth        int
+	MaxEntries      int
+	Redact          bool
+	SensitiveNames  []string
+	DigestOnlyTypes []string
+	ArgumentNames   []string
+}
+
+var credentialPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`),
+	regexp.MustCompile(`\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`),
+	regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*(?:PRIVATE KEY|CERTIFICATE)-----`),
+	regexp.MustCompile(`(?:^|[^A-Za-z0-9+/])(?:[A-Za-z0-9+/]{40,}={0,2})(?:$|[^A-Za-z0-9+/=])`),
 }
 
 type Counters struct {
@@ -89,11 +101,16 @@ func Digest(value any) Result {
 
 func DigestWithOptions(value any, options Options) Result {
 	options = normalizedOptions(options)
-	current := newState(options)
+	rawOptions := options
+	rawOptions.Redact = false
+	current := newState(rawOptions)
 	canonical := current.render(reflect.ValueOf(value), 0)
 	sum := sha256.Sum256([]byte(canonical))
 	digest := hex.EncodeToString(sum[:])
 	rendered := canonical
+	if options.Redact {
+		rendered = newState(options).render(reflect.ValueOf(value), 0)
+	}
 	if len(rendered) > options.RenderedCap {
 		current.counters.RenderedTruncated++
 		rendered = truncateRendered(rendered, options.RenderedCap)
@@ -164,6 +181,10 @@ func (current *state) render(value reflect.Value, depth int) (rendered string) {
 	}
 
 	typeName := typeLabel(value.Type())
+	if current.options.Redact && (current.digestOnlyType(typeName) ||
+		value.Kind() == reflect.String && credentialContent(value.String())) {
+		return "<redacted>"
+	}
 	if value.Type() == timeType && value.CanInterface() {
 		instant := value.Interface().(time.Time).Round(0).UTC()
 		return "time.Time(" + strconv.Quote(instant.Format(time.RFC3339Nano)) + ")"
@@ -261,6 +282,10 @@ func (current *state) renderStruct(value reflect.Value, typeName string, depth i
 		field := value.Type().Field(index)
 		output.WriteString(field.Name)
 		output.WriteByte('=')
+		if current.options.Redact && current.sensitiveName(field.Name) {
+			output.WriteString("<redacted>")
+			continue
+		}
 		if field.PkgPath != "" {
 			markerType := typeLabel(value.Type())
 			output.WriteString("<skipped:unexported:")
@@ -296,13 +321,48 @@ func (current *state) renderSequence(value reflect.Value, depth int) string {
 		if index > 0 {
 			output.WriteByte(',')
 		}
-		output.WriteString(current.render(value.Index(index), depth+1))
+		if current.options.Redact && depth == 0 && index < len(current.options.ArgumentNames) &&
+			current.sensitiveName(current.options.ArgumentNames[index]) {
+			output.WriteString("<redacted>")
+		} else {
+			output.WriteString(current.render(value.Index(index), depth+1))
+		}
 	}
 	if value.Len() > limit {
 		current.entryLimited(&output, value.Len()-limit)
 	}
 	output.WriteByte(']')
 	return output.String()
+}
+
+func (current *state) sensitiveName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, pattern := range current.options.SensitiveNames {
+		if strings.Contains(lower, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (current *state) digestOnlyType(name string) bool {
+	lower := strings.ToLower(name)
+	for _, pattern := range current.options.DigestOnlyTypes {
+		prefix := strings.ToLower(pattern)
+		if lower == prefix || strings.HasPrefix(lower, prefix+".") {
+			return true
+		}
+	}
+	return false
+}
+
+func credentialContent(value string) bool {
+	for _, pattern := range credentialPatterns {
+		if pattern.MatchString(value) {
+			return true
+		}
+	}
+	return false
 }
 
 func (current *state) renderMap(value reflect.Value, typeName string, id int, depth int) string {
