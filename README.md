@@ -150,6 +150,8 @@ Useful options:
 ```text
 --work <directory>      Override the temporary work directory
 --findings <file>       Write canonical machine-readable findings
+--cache-dir <directory> Override the local base-trace cache directory
+--no-cache              Disable base-trace cache reads and writes
 --keep                  Keep worktrees and traces for investigation
 --ci=github             Resolve refs from a GitHub pull_request event
 --ci=azuredevops        Resolve refs from Azure Pipelines variables
@@ -192,6 +194,18 @@ behaviordiff C:\src\node-service --base origin/main --pr HEAD
 ```
 
 The command is intentionally the same for every language. `behaviordiff detect-language <repo>` shows the selected language and build entry point.
+
+### Base trace cache
+
+BehaviorDiff caches the three validated noise-baseline traces under `~/.behaviordiff/cache/traces` by default. The key contains the target SHA, language, a content fingerprint of the installed tracer, and the effective scope configuration. A tracer or scope change therefore cannot reuse stale evidence. The storage boundary is pluggable; this release includes the local-directory backend, which can be placed on a CI-native or S3-compatible mounted cache with `--cache-dir`.
+
+On a hit, PR analysis restores the three baseline samples and performs only the PR instrumented run. A missing, malformed, or unavailable cache entry is reported as a miss and falls back to the existing four-run path. The console and `findings.json.baseTraceCache` report `hit`, `miss`, or `disabled`, the cache key/backend, and measured baseline wall-clock time saved.
+
+Warm a target branch from a nightly job without running a synthetic PR comparison:
+
+```powershell
+behaviordiff warm C:\src\my-service --target origin/main --cache-dir C:\ci-cache\behaviordiff
+```
 
 ## Read the result
 

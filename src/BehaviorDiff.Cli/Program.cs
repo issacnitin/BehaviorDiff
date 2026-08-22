@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -46,23 +47,34 @@ namespace BehaviorDiff.Cli
                 }
             }
 
+            bool warmOnly = args.Length > 0 && args[0] == "warm";
+            int firstOption = warmOnly ? 1 : 0;
             string? baseRef = null;
             string? prRef = null;
+            string? targetRef = null;
             string? ciProvider = null;
             string? work = null;
             string? findings = null;
+            string? cacheDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".behaviordiff",
+                "cache",
+                "traces");
             bool keep = false;
             var positional = new List<string>();
 
-            for (int i = 0; i < args.Length; i++)
+            for (int i = firstOption; i < args.Length; i++)
             {
                 switch (args[i])
                 {
                     case "--base": baseRef = Next(args, ref i); break;
                     case "--pr": prRef = Next(args, ref i); break;
+                    case "--target": targetRef = Next(args, ref i); break;
                     case "--ci": ciProvider = Next(args, ref i); break;
                     case "--work": work = Next(args, ref i); break;
                     case "--findings": findings = Next(args, ref i); break;
+                    case "--cache-dir": cacheDirectory = Next(args, ref i); break;
+                    case "--no-cache": cacheDirectory = null; break;
                     case "--keep": keep = true; break;
                     case "-h":
                     case "--help":
@@ -83,7 +95,14 @@ namespace BehaviorDiff.Cli
             }
 
             string? repo = positional.FirstOrDefault();
-            if (ciProvider is null && (repo is null || baseRef is null || prRef is null))
+            if (warmOnly)
+            {
+                baseRef = targetRef;
+                prRef = targetRef;
+            }
+
+            if ((warmOnly && (repo is null || targetRef is null || cacheDirectory is null))
+                || (!warmOnly && ciProvider is null && (repo is null || baseRef is null || prRef is null)))
             {
                 Usage();
                 return ExitCodes.BuildOrTestFailure;
@@ -105,7 +124,9 @@ namespace BehaviorDiff.Cli
                     ciProvider,
                     workDirectory,
                     findingsPath,
-                    keep);
+                    keep,
+                    cacheDirectory,
+                    warmOnly);
                 return pipeline.Run();
             }
             catch (CliException ex)
@@ -153,7 +174,8 @@ namespace BehaviorDiff.Cli
 
         private static void Usage()
         {
-            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--work <dir>] [--findings <file>] [--keep]");
+            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--work <dir>] [--findings <file>] [--cache-dir <dir>] [--no-cache] [--keep]");
+            Console.WriteLine("       behaviordiff warm <repo> --target <ref> [--cache-dir <dir>] [--work <dir>] [--keep]");
             Console.WriteLine("       behaviordiff detect-language <repo>");
             Console.WriteLine("       behaviordiff [<repo>] --ci=azuredevops [--work <dir>] [--findings <file>] [--keep]");
             Console.WriteLine("       behaviordiff [<repo>] --ci=github [--work <dir>] [--findings <file>] [--keep]");
@@ -176,6 +198,8 @@ namespace BehaviorDiff.Cli
         private readonly string _work;
         private readonly string _findings;
         private readonly bool _keep;
+        private readonly TraceCacheSession _cache;
+        private readonly bool _warmOnly;
 
         internal ResolvedRefs? ResolvedRefs { get; private set; }
 
@@ -186,7 +210,9 @@ namespace BehaviorDiff.Cli
             string? ciProvider,
             string work,
             string findings,
-            bool keep)
+            bool keep,
+            string? cacheDirectory,
+            bool warmOnly)
         {
             _repo = repo;
             _baseRef = baseRef;
@@ -195,6 +221,10 @@ namespace BehaviorDiff.Cli
             _work = work;
             _findings = findings;
             _keep = keep;
+            _cache = new TraceCacheSession(
+                cacheDirectory is null ? null : new LocalDirectoryTraceCacheStore(cacheDirectory),
+                work);
+            _warmOnly = warmOnly;
         }
 
         internal int Run()
@@ -203,6 +233,7 @@ namespace BehaviorDiff.Cli
             Console.WriteLine("behaviordiff");
             Console.WriteLine("  repo : " + _repo);
             Console.WriteLine("  work : " + _work);
+            Console.WriteLine("  mode : " + (_warmOnly ? "warm base trace cache" : "analyze PR"));
 
             if (!Directory.Exists(Path.Combine(_repo, ".git")) && !File.Exists(Path.Combine(_repo, ".git")))
             {
@@ -225,28 +256,44 @@ namespace BehaviorDiff.Cli
                 Console.WriteLine();
                 Console.WriteLine("=== 1. worktrees ===");
                 Shell.Git(_repo, "worktree", "add", "--detach", baseTree, refs.BaseSha);
-                Shell.Git(_repo, "worktree", "add", "--detach", prTree, refs.PrSha);
+                if (!_warmOnly)
+                {
+                    Shell.Git(_repo, "worktree", "add", "--detach", prTree, refs.PrSha);
+                }
 
                 LanguageDetection baseDetection = LanguageDetector.Detect(baseTree);
-                LanguageDetection prDetection = LanguageDetector.Detect(prTree);
-                AssertLanguageSymmetry(baseDetection, prDetection);
+                LanguageDetection prDetection = _warmOnly ? baseDetection : LanguageDetector.Detect(prTree);
+                if (!_warmOnly)
+                {
+                    AssertLanguageSymmetry(baseDetection, prDetection);
+                }
                 Console.WriteLine("  language   : " + baseDetection.Language.ToString().ToLowerInvariant());
                 Console.WriteLine("  entry point: " + baseDetection.Evidence);
 
                 if (baseDetection.Language != RepositoryLanguage.DotNet)
                 {
                     int removed = CrossLanguageExecution.StripBuildOutput(baseTree)
-                        + CrossLanguageExecution.StripBuildOutput(prTree);
+                        + (_warmOnly ? 0 : CrossLanguageExecution.StripBuildOutput(prTree));
                     Console.WriteLine("  stale target/node_modules/dist removed: " + removed);
-                    CrossLanguageRunSet runs = new CrossLanguageExecution(_work).Run(
+                    var execution = new CrossLanguageExecution(_work, _cache);
+                    if (_warmOnly)
+                    {
+                        execution.Warm(baseDetection, baseTree, refs.BaseSha);
+                        _cache.Print();
+                        return ExitCodes.NoUnexpected;
+                    }
+
+                    CrossLanguageRunSet runs = execution.Run(
                         baseDetection,
                         prDetection,
                         baseTree,
-                        prTree);
-                    return Analyze(refs, baseTree, prTree, runs.Base1, runs.Base2, runs.Base3, runs.Pr);
+                        prTree,
+                        refs.BaseSha);
+                    _cache.Print();
+                    return Analyze(refs, runs.BaseRoot, prTree, runs.Base1, runs.Base2, runs.Base3, runs.Pr);
                 }
 
-                Console.WriteLine("  stale bin/obj removed: " + (StripBuildOutput(baseTree) + StripBuildOutput(prTree)));
+                Console.WriteLine("  stale bin/obj removed: " + (StripBuildOutput(baseTree) + (_warmOnly ? 0 : StripBuildOutput(prTree))));
 
                 Console.WriteLine();
                 Console.WriteLine("=== 2. scan ===");
@@ -256,25 +303,68 @@ namespace BehaviorDiff.Cli
                 Console.WriteLine();
                 Console.WriteLine("=== 3. repo builds unmodified ===");
                 BuildUnmodified("base", baseTree);
-                BuildUnmodified("pr", prTree);
-                Console.WriteLine("  both worktrees build without instrumentation");
+                if (!_warmOnly)
+                {
+                    BuildUnmodified("pr", prTree);
+                    Console.WriteLine("  both worktrees build without instrumentation");
+                }
 
                 Console.WriteLine();
                 Console.WriteLine("=== 4. resolve xunit versions and TFMs ===");
                 var baseProjects = scan.XunitProjects.Select(p => Assets.Read(p.Path)).ToList();
-                var prProjects = baseProjects
+                var prProjects = _warmOnly ? new List<ResolvedTestProject>() : baseProjects
                     .Select(p => Path.Combine(prTree, Path.GetRelativePath(baseTree, p.Path)))
                     .Where(File.Exists)
                     .Select(Assets.Read)
                     .ToList();
 
                 ReportResolved(baseProjects);
-                AssertSymmetry(baseProjects, prProjects);
+                if (!_warmOnly)
+                {
+                    AssertSymmetry(baseProjects, prProjects);
+                }
 
                 string kit = InjectionKit.Build(_work);
+                string scope = string.Join(";", scan.NamespacePrefixes);
+                Console.WriteLine("  tracer namespace scope: " + (scope.Length == 0 ? "<empty>" : scope));
+                if (scope.Length == 0)
+                {
+                    throw new CliException("Could not derive any namespace scope from the repository's project names.");
+                }
+
+                string scopeConfig = ScopeConfig(scope);
+                string tracerVersion = TracerFingerprint.ForDirectory(
+                    AppContext.BaseDirectory,
+                    path =>
+                    {
+                        string name = Path.GetFileName(path);
+                        return name is "behaviordiff.dll" or "behaviordiff-weaver.dll" or "BehaviorDiff.Contracts.dll"
+                            or "BehaviorDiff.Tracer.dll" or "BehaviorDiff.Tracer.Xunit.dll" or "Mono.Cecil.dll";
+                    });
+                var cacheKey = new TraceCacheKey(refs.BaseSha, "dotnet", tracerVersion, scopeConfig);
+                bool cacheHit = _cache.TryRestore(cacheKey, out TraceCacheEntry? cacheEntry);
+                if (_warmOnly)
+                {
+                    if (!cacheHit)
+                    {
+                        WarmDotNet(cacheKey, baseTree, baseProjects, scan.NamespacePrefixes, kit, scope);
+                    }
+
+                    _cache.Print();
+                    return ExitCodes.NoUnexpected;
+                }
+
+                var baseTraceStopwatch = new Stopwatch();
+
                 Console.WriteLine();
                 Console.WriteLine("=== 5. trace adapters (one per test project, per resolved xunit version) ===");
-                AdapterBuilder.BuildAll(Path.Combine(_work, "base-adapters"), kit, baseProjects);
+                if (!cacheHit)
+                {
+                    baseTraceStopwatch.Start();
+                    AdapterBuilder.BuildAll(Path.Combine(_work, "base-adapters"), kit, baseProjects);
+                    baseTraceStopwatch.Stop();
+                }
+
                 AdapterBuilder.BuildAll(Path.Combine(_work, "pr-adapters"), kit, prProjects);
                 foreach (ResolvedTestProject project in baseProjects)
                 {
@@ -285,30 +375,56 @@ namespace BehaviorDiff.Cli
 
                 Console.WriteLine();
                 Console.WriteLine("=== 6. instrumented build ===");
-                BuildInstrumented("base", baseTree, kit, baseProjects);
+                if (!cacheHit)
+                {
+                    baseTraceStopwatch.Start();
+                    BuildInstrumented("base", baseTree, kit, baseProjects);
+                    baseTraceStopwatch.Stop();
+                }
+
                 BuildInstrumented("pr", prTree, kit, prProjects);
 
                 Console.WriteLine();
                 Console.WriteLine("=== 6b. weave project assemblies ===");
-                WeaveOutputs("base", baseProjects, scan.NamespacePrefixes);
+                if (!cacheHit)
+                {
+                    baseTraceStopwatch.Start();
+                    WeaveOutputs("base", baseProjects, scan.NamespacePrefixes);
+                    baseTraceStopwatch.Stop();
+                }
+
                 WeaveOutputs("pr", prProjects, scan.NamespacePrefixes);
 
                 Console.WriteLine();
                 Console.WriteLine("=== 7. test runs ===");
-                string scope = string.Join(";", scan.NamespacePrefixes);
-                Console.WriteLine("  tracer namespace scope: " + (scope.Length == 0 ? "<empty>" : scope));
-                if (scope.Length == 0)
+                string base1;
+                string base2;
+                string base3;
+                string baseRoot;
+                if (cacheHit)
                 {
-                    throw new CliException("Could not derive any namespace scope from the repository's project names.");
+                    base1 = TraceCacheSession.RunPath(_work, 1);
+                    base2 = TraceCacheSession.RunPath(_work, 2);
+                    base3 = TraceCacheSession.RunPath(_work, 3);
+                    baseRoot = cacheEntry!.BaseRoot;
+                    AssertTestIdsPresent(base1);
+                }
+                else
+                {
+                    baseTraceStopwatch.Start();
+                    base1 = RunTests("base_run1", baseTree, baseProjects, scope);
+                    base2 = RunTests("base_run2", baseTree, baseProjects, scope);
+                    base3 = RunTests("base_run3", baseTree, baseProjects, scope);
+                    baseRoot = baseTree;
+                    baseTraceStopwatch.Stop();
+                    _cache.Store(cacheKey, baseRoot, baseTraceStopwatch.ElapsedMilliseconds);
                 }
 
-                string base1 = RunTests("base_run1", baseTree, baseProjects, scope);
-                string base2 = RunTests("base_run2", baseTree, baseProjects, scope);
-                string base3 = RunTests("base_run3", baseTree, baseProjects, scope);
                 string pr = RunTests("pr_run", prTree, prProjects, scope);
 
                 AssertTestIdsPresent(base1);
-                return Analyze(refs, baseTree, prTree, base1, base2, base3, pr);
+                _cache.Print();
+                return Analyze(refs, baseRoot, prTree, base1, base2, base3, pr);
             }
             finally
             {
@@ -324,6 +440,29 @@ namespace BehaviorDiff.Cli
                 }
             }
         }
+
+        private void WarmDotNet(
+            TraceCacheKey cacheKey,
+            string baseTree,
+            List<ResolvedTestProject> baseProjects,
+            IEnumerable<string> namespacePrefixes,
+            string kit,
+            string scope)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            AdapterBuilder.BuildAll(Path.Combine(_work, "base-adapters"), kit, baseProjects);
+            BuildInstrumented("base", baseTree, kit, baseProjects);
+            WeaveOutputs("base", baseProjects, namespacePrefixes);
+            string base1 = RunTests("base_run1", baseTree, baseProjects, scope);
+            RunTests("base_run2", baseTree, baseProjects, scope);
+            RunTests("base_run3", baseTree, baseProjects, scope);
+            AssertTestIdsPresent(base1);
+            stopwatch.Stop();
+            _cache.Store(cacheKey, baseTree, stopwatch.ElapsedMilliseconds);
+        }
+
+        internal static string ScopeConfig(string scope) => scope + "\nexclude="
+            + (Environment.GetEnvironmentVariable("BEHAVIORDIFF_EXCLUDE_NAMESPACES") ?? string.Empty);
 
         private static void AssertLanguageSymmetry(LanguageDetection baseDetection, LanguageDetection prDetection)
         {
@@ -422,7 +561,11 @@ namespace BehaviorDiff.Cli
                 exitCode,
                 refs.BaseSha,
                 refs.PrSha,
-                refs.MergeBaseSha);
+                refs.MergeBaseSha,
+                _cache.Report.Status,
+                _cache.Report.Key,
+                _cache.Report.Backend,
+                _cache.Report.SavedWallClockMilliseconds);
             return exitCode;
         }
 

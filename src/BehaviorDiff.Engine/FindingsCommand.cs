@@ -27,7 +27,11 @@ namespace BehaviorDiff.Engine
             int exitCode,
             string baseSha,
             string prSha,
-            string mergeBaseSha)
+            string mergeBaseSha,
+            string cacheStatus = "unreported",
+            string cacheKey = "",
+            string cacheBackend = "none",
+            long cacheSavedWallClockMilliseconds = 0)
         {
             using JsonDocument divergenceSet = JsonDocument.Parse(File.ReadAllText(divergenceSetPath));
             using JsonDocument frontierReport = JsonDocument.Parse(File.ReadAllText(frontierReportPath));
@@ -72,6 +76,13 @@ namespace BehaviorDiff.Engine
                 exitCode,
                 exitReason = unexpectedMembers == 0 ? "analyzed_no_unexpected" : "unexpected_findings",
                 refs = new { baseSha, prSha, mergeBaseSha },
+                baseTraceCache = new
+                {
+                    status = cacheStatus,
+                    key = cacheKey,
+                    backend = cacheBackend,
+                    savedWallClockMilliseconds = cacheSavedWallClockMilliseconds,
+                },
                 summary = new
                 {
                     unexpectedMembers,

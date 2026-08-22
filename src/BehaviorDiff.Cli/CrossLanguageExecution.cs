@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -16,6 +17,8 @@ namespace BehaviorDiff.Cli
         internal string Base3 { get; init; } = string.Empty;
 
         internal string Pr { get; init; } = string.Empty;
+
+        internal string BaseRoot { get; init; } = string.Empty;
     }
 
     internal sealed class CrossLanguageExecution
@@ -25,10 +28,12 @@ namespace BehaviorDiff.Cli
             RegexOptions.Compiled | RegexOptions.Multiline | RegexOptions.CultureInvariant);
 
         private readonly string _work;
+        private readonly TraceCacheSession _cache;
 
-        internal CrossLanguageExecution(string work)
+        internal CrossLanguageExecution(string work, TraceCacheSession cache)
         {
             _work = work;
+            _cache = cache;
         }
 
         internal static int StripBuildOutput(string tree)
@@ -56,21 +61,106 @@ namespace BehaviorDiff.Cli
             LanguageDetection baseDetection,
             LanguageDetection prDetection,
             string baseTree,
-            string prTree)
+            string prTree,
+            string targetSha)
         {
             return baseDetection.Language switch
             {
-                RepositoryLanguage.Java => RunJava(baseDetection, prDetection, baseTree, prTree),
-                RepositoryLanguage.Node => RunNode(baseDetection, prDetection, baseTree, prTree),
+                RepositoryLanguage.Java => RunJava(baseDetection, prDetection, baseTree, prTree, targetSha),
+                RepositoryLanguage.Node => RunNode(baseDetection, prDetection, baseTree, prTree, targetSha),
                 _ => throw new CliException("Cross-language execution was requested for " + baseDetection.Language + "."),
             };
+        }
+
+        internal void Warm(LanguageDetection detection, string baseTree, string targetSha)
+        {
+            switch (detection.Language)
+            {
+                case RepositoryLanguage.Java:
+                    WarmJava(detection, baseTree, targetSha);
+                    break;
+                case RepositoryLanguage.Node:
+                    WarmNode(detection, baseTree, targetSha);
+                    break;
+                default:
+                    throw new CliException("Cache warming was requested for " + detection.Language + ".");
+            }
+        }
+
+        private void WarmJava(LanguageDetection detection, string baseTree, string targetSha)
+        {
+            Console.WriteLine();
+            Console.WriteLine("=== 2. Java clean build ===");
+            MavenCommand maven = ResolveMaven(detection.EntryPoint, baseTree);
+            BuildJava("base", detection.EntryPoint, maven);
+
+            string scope = string.Join(",", DeriveJavaScopes(detection.EntryPoint, detection.EntryPoint));
+            string agent = ResolveJavaAgent();
+            var key = new TraceCacheKey(
+                targetSha,
+                "java",
+                TracerFingerprint.ForFile(agent),
+                Pipeline.ScopeConfig(scope));
+            if (_cache.TryRestore(key, out _))
+            {
+                return;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("=== 3. Java base trace runs ===");
+            var stopwatch = Stopwatch.StartNew();
+            string base1 = RunJavaTests("base_run1", detection.EntryPoint, baseTree, maven, scope, agent);
+            RunJavaTests("base_run2", detection.EntryPoint, baseTree, maven, scope, agent);
+            RunJavaTests("base_run3", detection.EntryPoint, baseTree, maven, scope, agent);
+            Pipeline.AssertTestIdsPresent(base1);
+            stopwatch.Stop();
+            _cache.Store(key, baseTree, stopwatch.ElapsedMilliseconds);
+        }
+
+        private void WarmNode(LanguageDetection detection, string baseTree, string targetSha)
+        {
+            Console.WriteLine();
+            Console.WriteLine("=== 2. Node clean build ===");
+            string baseDirectory = Path.GetDirectoryName(detection.EntryPoint)!;
+            string manager = DetectNodePackageManager(baseDirectory);
+            if (manager != "npm")
+            {
+                throw new CliException(
+                    "Detected " + manager + " from " + LockfileName(manager)
+                    + ", but this BehaviorDiff version supports npm/package-lock.json only.",
+                    ExitCodes.RunInvalid);
+            }
+
+            BuildNode("base", baseDirectory);
+            string scope = string.Join(";", DeriveNodeScopes(baseDirectory, baseDirectory));
+            string tracer = ResolveNodeTracer();
+            var key = new TraceCacheKey(
+                targetSha,
+                "node",
+                TracerFingerprint.ForDirectory(tracer),
+                Pipeline.ScopeConfig(scope));
+            if (_cache.TryRestore(key, out _))
+            {
+                return;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("=== 3. Node base trace runs ===");
+            var stopwatch = Stopwatch.StartNew();
+            string base1 = RunNodeTests("base_run1", baseDirectory, baseTree, scope, tracer);
+            RunNodeTests("base_run2", baseDirectory, baseTree, scope, tracer);
+            RunNodeTests("base_run3", baseDirectory, baseTree, scope, tracer);
+            Pipeline.AssertTestIdsPresent(base1);
+            stopwatch.Stop();
+            _cache.Store(key, baseTree, stopwatch.ElapsedMilliseconds);
         }
 
         private CrossLanguageRunSet RunJava(
             LanguageDetection baseDetection,
             LanguageDetection prDetection,
             string baseTree,
-            string prTree)
+            string prTree,
+            string targetSha)
         {
             Console.WriteLine();
             Console.WriteLine("=== 2. Java clean builds ===");
@@ -86,21 +176,48 @@ namespace BehaviorDiff.Cli
             Console.WriteLine("  package scope: " + scope);
             Console.WriteLine("  java agent  : " + agent);
 
+            var key = new TraceCacheKey(
+                targetSha,
+                "java",
+                TracerFingerprint.ForFile(agent),
+                Pipeline.ScopeConfig(scope));
+            bool cacheHit = _cache.TryRestore(key, out TraceCacheEntry? cacheEntry);
+
             Console.WriteLine();
             Console.WriteLine("=== 4. Java test runs ===");
-            string base1 = RunJavaTests("base_run1", baseDetection.EntryPoint, baseTree, baseMaven, scope, agent);
+            string base1;
+            string base2;
+            string base3;
+            string baseRoot;
+            if (cacheHit)
+            {
+                base1 = TraceCacheSession.RunPath(_work, 1);
+                base2 = TraceCacheSession.RunPath(_work, 2);
+                base3 = TraceCacheSession.RunPath(_work, 3);
+                baseRoot = cacheEntry!.BaseRoot;
+            }
+            else
+            {
+                var stopwatch = Stopwatch.StartNew();
+                base1 = RunJavaTests("base_run1", baseDetection.EntryPoint, baseTree, baseMaven, scope, agent);
+                base2 = RunJavaTests("base_run2", baseDetection.EntryPoint, baseTree, baseMaven, scope, agent);
+                base3 = RunJavaTests("base_run3", baseDetection.EntryPoint, baseTree, baseMaven, scope, agent);
+                stopwatch.Stop();
+                baseRoot = baseTree;
+                _cache.Store(key, baseRoot, stopwatch.ElapsedMilliseconds);
+            }
+
             Pipeline.AssertTestIdsPresent(base1);
-            string base2 = RunJavaTests("base_run2", baseDetection.EntryPoint, baseTree, baseMaven, scope, agent);
-            string base3 = RunJavaTests("base_run3", baseDetection.EntryPoint, baseTree, baseMaven, scope, agent);
             string pr = RunJavaTests("pr_run", prDetection.EntryPoint, prTree, prMaven, scope, agent);
-            return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr };
+            return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
         }
 
         private CrossLanguageRunSet RunNode(
             LanguageDetection baseDetection,
             LanguageDetection prDetection,
             string baseTree,
-            string prTree)
+            string prTree,
+            string targetSha)
         {
             Console.WriteLine();
             Console.WriteLine("=== 2. Node clean builds ===");
@@ -134,14 +251,40 @@ namespace BehaviorDiff.Cli
             Console.WriteLine("  path scope : " + scope);
             Console.WriteLine("  node tracer: " + tracer);
 
+            var key = new TraceCacheKey(
+                targetSha,
+                "node",
+                TracerFingerprint.ForDirectory(tracer),
+                Pipeline.ScopeConfig(scope));
+            bool cacheHit = _cache.TryRestore(key, out TraceCacheEntry? cacheEntry);
+
             Console.WriteLine();
             Console.WriteLine("=== 4. Node test runs ===");
-            string base1 = RunNodeTests("base_run1", baseDirectory, baseTree, scope, tracer);
+            string base1;
+            string base2;
+            string base3;
+            string baseRoot;
+            if (cacheHit)
+            {
+                base1 = TraceCacheSession.RunPath(_work, 1);
+                base2 = TraceCacheSession.RunPath(_work, 2);
+                base3 = TraceCacheSession.RunPath(_work, 3);
+                baseRoot = cacheEntry!.BaseRoot;
+            }
+            else
+            {
+                var stopwatch = Stopwatch.StartNew();
+                base1 = RunNodeTests("base_run1", baseDirectory, baseTree, scope, tracer);
+                base2 = RunNodeTests("base_run2", baseDirectory, baseTree, scope, tracer);
+                base3 = RunNodeTests("base_run3", baseDirectory, baseTree, scope, tracer);
+                stopwatch.Stop();
+                baseRoot = baseTree;
+                _cache.Store(key, baseRoot, stopwatch.ElapsedMilliseconds);
+            }
+
             Pipeline.AssertTestIdsPresent(base1);
-            string base2 = RunNodeTests("base_run2", baseDirectory, baseTree, scope, tracer);
-            string base3 = RunNodeTests("base_run3", baseDirectory, baseTree, scope, tracer);
             string pr = RunNodeTests("pr_run", prDirectory, prTree, scope, tracer);
-            return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr };
+            return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
         }
 
         private static void BuildJava(string label, string entryPoint, MavenCommand maven)
