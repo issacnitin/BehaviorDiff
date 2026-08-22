@@ -26,6 +26,27 @@ func TestBehavior(t *testing.T) {
 	}
 }
 
+func TestGenerics(t *testing.T) {
+	if Identity(7) != 7 || Identity(8) != 8 || Identity("seven") != "seven" {
+		t.Fatal("generic identity changed")
+	}
+	counter := &Counter{Base: 11}
+	if Identity(counter) != counter {
+		t.Fatal("generic pointer identity changed")
+	}
+	counters := []Counter{{Base: 1}, {Base: 2}}
+	if len(Identity(counters)) != 2 {
+		t.Fatal("generic slice identity changed")
+	}
+	pair := PairValues(9, "nine")
+	if pair.First != 9 || pair.Second != "nine" {
+		t.Fatal("generic pair changed")
+	}
+	if (Box[int]{Value: 10}).Get() != 10 || (Box[string]{Value: "ten"}).Get() != "ten" {
+		t.Fatal("generic receiver changed")
+	}
+}
+
 func TestGoroutines(t *testing.T) {
 	direct := make(chan int, 1)
 	GoDirect(direct, 7)

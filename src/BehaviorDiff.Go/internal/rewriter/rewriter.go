@@ -17,17 +17,18 @@ type Options struct {
 }
 
 type Metrics struct {
-	Packages     int `json:"packages"`
-	Files        int `json:"files"`
-	Functions    int `json:"functions"`
-	Methods      int `json:"methods"`
-	Companions   int `json:"companions"`
-	TestRoots    int `json:"testRoots"`
-	Patched      int `json:"patched"`
-	Skipped      int `json:"skipped"`
-	DirectCalls  int `json:"directCalls"`
-	GoStatements int `json:"goStatements"`
-	Boundaries   int `json:"boundaries"`
+	Packages         int `json:"packages"`
+	Files            int `json:"files"`
+	Functions        int `json:"functions"`
+	Methods          int `json:"methods"`
+	Companions       int `json:"companions"`
+	TestRoots        int `json:"testRoots"`
+	Patched          int `json:"patched"`
+	Skipped          int `json:"skipped"`
+	GenericTemplates int `json:"genericTemplates"`
+	DirectCalls      int `json:"directCalls"`
+	GoStatements     int `json:"goStatements"`
+	Boundaries       int `json:"boundaries"`
 }
 
 type Boundary struct {
@@ -38,13 +39,22 @@ type Boundary struct {
 	Expression string `json:"expression"`
 }
 
+type GenericTemplate struct {
+	File       string `json:"file"`
+	Line       int    `json:"line"`
+	Method     string `json:"method"`
+	SkipReason string `json:"skipReason"`
+	Detail     string `json:"detail"`
+}
+
 type Report struct {
-	Source        string     `json:"source"`
-	Output        string     `json:"output"`
-	Module        string     `json:"module"`
-	RuntimeImport string     `json:"runtimeImport"`
-	Metrics       Metrics    `json:"metrics"`
-	Boundaries    []Boundary `json:"boundaries"`
+	Source           string            `json:"source"`
+	Output           string            `json:"output"`
+	Module           string            `json:"module"`
+	RuntimeImport    string            `json:"runtimeImport"`
+	Metrics          Metrics           `json:"metrics"`
+	Boundaries       []Boundary        `json:"boundaries"`
+	GenericTemplates []GenericTemplate `json:"genericTemplates"`
 }
 
 func Rewrite(options Options) (report Report, err error) {
@@ -76,11 +86,12 @@ func Rewrite(options Options) (report Report, err error) {
 		return Report{}, err
 	}
 	report = Report{
-		Source:        source,
-		Output:        out,
-		Module:        modulePath,
-		RuntimeImport: runtimeImport,
-		Boundaries:    make([]Boundary, 0),
+		Source:           source,
+		Output:           out,
+		Module:           modulePath,
+		RuntimeImport:    runtimeImport,
+		Boundaries:       make([]Boundary, 0),
+		GenericTemplates: make([]GenericTemplate, 0),
 	}
 	if err := transformModule(model, out, runtimeImport, &report); err != nil {
 		return Report{}, err

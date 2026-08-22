@@ -102,13 +102,14 @@ try {
     $expected = [ordered]@{
         packages = 2
         files = 3
-        functions = 26
-        methods = 4
-        companions = 30
-        testRoots = 4
-        patched = 30
-        skipped = 4
-        directCalls = 30
+        functions = 29
+        methods = 5
+        companions = 34
+        testRoots = 5
+        patched = 31
+        skipped = 7
+        genericTemplates = 3
+        directCalls = 38
         goStatements = 8
         boundaries = 4
     }
@@ -124,14 +125,22 @@ try {
         throw "Boundary kinds mismatch: $($actualBoundaryKinds -join ',')"
     }
 
-    $expectedSummary = 'GO_REWRITE_SUMMARY methods=4 companions=30 roots=4 patched=30 skipped=4 direct=30 go=8 boundaries=4 report=behaviordiff-rewrite-report.json'
+    $templates = @($report.genericTemplates)
+    if ($templates.Count -ne 3 -or @($templates | Where-Object {
+        $_.skipReason -ne 'Unobservable' -or $_.detail -ne 'Go: GenericTemplate'
+    }).Count -ne 0 -or [int]$report.metrics.skipped -ne [int]$report.metrics.boundaries + $templates.Count) {
+        throw "Generic template report mismatch: $($templates | ConvertTo-Json -Compress)"
+    }
+
+    $expectedSummary = 'GO_REWRITE_SUMMARY methods=5 companions=34 roots=5 patched=31 skipped=7 templates=3 direct=38 go=8 boundaries=4 report=behaviordiff-rewrite-report.json'
     if (-not (($rewriteOutput -join "`n").Contains($expectedSummary, [StringComparison]::Ordinal))) {
         throw "Required CLI summary was not found: $expectedSummary"
     }
 
     Write-Host 'GO_REWRITER_SOURCE unchanged=true files=5' -ForegroundColor Green
     Write-Host 'GO_REWRITER_CACHE go_test=passed parseable=true formatted=true' -ForegroundColor Green
-    Write-Host 'GO_REWRITER_SUMMARY methods=4 companions=30 roots=4 patched=30 skipped=4 direct=30 go=8 boundaries=4' -ForegroundColor Green
+    Write-Host 'GO_REWRITER_SUMMARY methods=5 companions=34 roots=5 patched=31 skipped=7 templates=3 direct=38 go=8 boundaries=4' -ForegroundColor Green
+    Write-Host 'GO_REWRITER_TEMPLATES count=3 status=Skipped reason=Unobservable detail=Go:GenericTemplate' -ForegroundColor Green
     Write-Host "GO_REWRITER_BOUNDARIES kinds=$($actualBoundaryKinds -join ',')" -ForegroundColor Green
 } finally {
     Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

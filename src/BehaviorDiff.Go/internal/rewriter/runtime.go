@@ -108,15 +108,87 @@ func init() {
 func Register(members ...Member) bool {
 	state.Lock()
 	defer state.Unlock()
+	changed := false
 	for _, member := range members {
-		module := state.modules[member.Module]
-		if module == nil {
-			module = &moduleState{members: make(map[string]Member)}
-			state.modules[member.Module] = module
-		}
-		module.members[member.Method] = member
+		changed = ensureMemberLocked(member) || changed
 	}
-	writeManifestLocked()
+	if changed {
+		writeManifestLocked()
+	}
+	return true
+}
+
+func TypeName[T any]() string {
+	return stableTypeName(reflect.TypeOf((*T)(nil)).Elem())
+}
+
+func stableTypeName(typeToken reflect.Type) string {
+	if typeToken.Name() != "" {
+		if typeToken.PkgPath() != "" {
+			return typeToken.PkgPath() + "." + typeToken.Name()
+		}
+		return typeToken.Name()
+	}
+	switch typeToken.Kind() {
+	case reflect.Pointer:
+		return "*" + stableTypeName(typeToken.Elem())
+	case reflect.Slice:
+		return "[]" + stableTypeName(typeToken.Elem())
+	case reflect.Array:
+		return fmt.Sprintf("[%d]%s", typeToken.Len(), stableTypeName(typeToken.Elem()))
+	case reflect.Map:
+		return "map[" + stableTypeName(typeToken.Key()) + "]" + stableTypeName(typeToken.Elem())
+	case reflect.Chan:
+		return typeToken.ChanDir().String() + " " + stableTypeName(typeToken.Elem())
+	case reflect.Func:
+		var name strings.Builder
+		name.WriteString("func(")
+		for index := 0; index < typeToken.NumIn(); index++ {
+			if index > 0 { name.WriteByte(',') }
+			name.WriteString(stableTypeName(typeToken.In(index)))
+		}
+		name.WriteByte(')')
+		if typeToken.NumOut() == 1 {
+			name.WriteByte(' ')
+			name.WriteString(stableTypeName(typeToken.Out(0)))
+		} else if typeToken.NumOut() > 1 {
+			name.WriteString(" (")
+			for index := 0; index < typeToken.NumOut(); index++ {
+				if index > 0 { name.WriteByte(',') }
+				name.WriteString(stableTypeName(typeToken.Out(index)))
+			}
+			name.WriteByte(')')
+		}
+		return name.String()
+	}
+	return typeToken.String()
+}
+
+func Specialize(member Member, callable, receiver string, receiverTypeArgumentCount int, typeArguments ...string) Member {
+	if receiver != "" {
+		prefix := member.Module + "." + receiver
+		receiverArguments := typeArguments[:receiverTypeArgumentCount]
+		member.Method = prefix + "[" + strings.Join(receiverArguments, ",") + "]" + strings.TrimPrefix(member.Method, prefix)
+	} else {
+		prefix := member.Module + "." + callable
+		member.Method = prefix + "[" + strings.Join(typeArguments, ",") + "]" + strings.TrimPrefix(member.Method, prefix)
+	}
+	member.Status = "Patched"
+	member.SkipReason = ""
+	member.Detail = ""
+	return member
+}
+
+func ensureMemberLocked(member Member) bool {
+	module := state.modules[member.Module]
+	if module == nil {
+		module = &moduleState{members: make(map[string]Member)}
+		state.modules[member.Module] = module
+	}
+	if _, exists := module.members[member.Method]; exists {
+		return false
+	}
+	module.members[member.Method] = member
 	return true
 }
 
@@ -141,6 +213,9 @@ func OpenTest(testID string, member Member, args []any) *Frame {
 
 func enter(parentCallID uint64, depth int, testID string, member Member, args []any) *Frame {
 	state.Lock()
+	if ensureMemberLocked(member) {
+		writeManifestLocked()
+	}
 	callID := state.nextCallID
 	state.nextCallID++
 	key := ordinalKey{testID: testID, method: member.Method}

@@ -168,6 +168,10 @@ func (transformer *transformer) transformFunction(file *sourceFile, wrapper *ast
 	ensureParameterNames(wrapper.Type.Params, companion.Type.Params, usedNames)
 	receiverName := ensureReceiverName(wrapper.Recv, companion.Recv, usedNames)
 	metadata := memberMetadata(transformer.model.fset, file, wrapper, isTestRoot(file, wrapper))
+	runtimeMetadata := metadataExpression(alias, metadata)
+	if metadata.Detail == "Go: GenericTemplate" {
+		runtimeMetadata = specializedMetadataExpression(alias, wrapper, metadata)
+	}
 	activeFrame := frameName
 	if metadata.IsTestRoot {
 		activeFrame = parentName
@@ -180,13 +184,22 @@ func (transformer *transformer) transformFunction(file *sourceFile, wrapper *ast
 		wrapper.Body = testWrapperBody(wrapper, companion.Name.Name, alias, metadata, usedNames)
 	} else {
 		companion.Body.List = append([]ast.Stmt{
-			enterStatement(alias, frameName, parentName, metadataExpression(alias, metadata), argumentExpression(companion.Type.Params, receiverName)),
+			enterStatement(alias, frameName, parentName, runtimeMetadata, argumentExpression(companion.Type.Params, receiverName)),
 			exitStatement(alias, frameName, resultNames, usedNames),
 		}, companion.Body.List...)
 		wrapper.Body = wrapperBody(wrapper, companion.Name.Name, receiverName)
 	}
 	transformer.report.Metrics.Companions++
-	transformer.report.Metrics.Patched++
+	if metadata.Status == "Patched" {
+		transformer.report.Metrics.Patched++
+	} else {
+		transformer.report.Metrics.Skipped++
+		transformer.report.Metrics.GenericTemplates++
+		transformer.report.GenericTemplates = append(transformer.report.GenericTemplates, GenericTemplate{
+			File: metadata.File, Line: metadata.Line, Method: metadata.Method,
+			SkipReason: metadata.SkipReason, Detail: metadata.Detail,
+		})
+	}
 	if metadata.IsTestRoot {
 		transformer.report.Metrics.TestRoots++
 	}
@@ -427,6 +440,14 @@ func wrapperBody(wrapper *ast.FuncDecl, companion, receiver string) *ast.BlockSt
 	var target ast.Expr = ast.NewIdent(companion)
 	if wrapper.Recv != nil {
 		target = &ast.SelectorExpr{X: ast.NewIdent(receiver), Sel: ast.NewIdent(companion)}
+	} else if typeParameters := functionTypeParameterNames(wrapper); len(typeParameters) == 1 {
+		target = &ast.IndexExpr{X: target, Index: ast.NewIdent(typeParameters[0])}
+	} else if len(typeParameters) > 1 {
+		indices := make([]ast.Expr, 0, len(typeParameters))
+		for _, name := range typeParameters {
+			indices = append(indices, ast.NewIdent(name))
+		}
+		target = &ast.IndexListExpr{X: target, Indices: indices}
 	}
 	arguments := []ast.Expr{ast.NewIdent("nil")}
 	if wrapper.Type.Params != nil {
@@ -606,11 +627,80 @@ func memberMetadata(fset *token.FileSet, file *sourceFile, function *ast.FuncDec
 	if function.Type.Results != nil && len(function.Type.Results.List) > 0 {
 		returnKind = "Sync"
 	}
-	return memberDefinition{
+	member := memberDefinition{
 		Module: file.pkg.path, Method: methodName(file.pkg, function), File: file.attribution,
 		Line: resolved.Line, ReturnKind: returnKind, SourceResolution: "debugInfo",
 		Status: "Patched", IsTestRoot: testRoot, IsHarness: testRoot,
 	}
+	if len(genericTypeParameterNames(function)) > 0 {
+		member.Status = "Skipped"
+		member.SkipReason = "Unobservable"
+		member.Detail = "Go: GenericTemplate"
+	}
+	return member
+}
+
+func specializedMetadataExpression(alias string, function *ast.FuncDecl, member memberDefinition) ast.Expr {
+	typeParameters := genericTypeParameterNames(function)
+	receiverParameters := receiverTypeParameterNames(function.Recv)
+	arguments := []ast.Expr{
+		metadataExpression(alias, member),
+		stringLiteral(function.Name.Name),
+		stringLiteral(receiverTypeName(function.Recv)),
+		&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(len(receiverParameters))},
+	}
+	for _, name := range typeParameters {
+		arguments = append(arguments, &ast.CallExpr{
+			Fun: &ast.IndexExpr{X: selector(alias, "TypeName"), Index: ast.NewIdent(name)},
+		})
+	}
+	return &ast.CallExpr{Fun: selector(alias, "Specialize"), Args: arguments}
+}
+
+func genericTypeParameterNames(function *ast.FuncDecl) []string {
+	names := receiverTypeParameterNames(function.Recv)
+	return append(names, functionTypeParameterNames(function)...)
+}
+
+func functionTypeParameterNames(function *ast.FuncDecl) []string {
+	if function.Type.TypeParams == nil {
+		return nil
+	}
+	names := make([]string, 0)
+	for _, field := range function.Type.TypeParams.List {
+		for _, name := range field.Names {
+			names = append(names, name.Name)
+		}
+	}
+	return names
+}
+
+func receiverTypeParameterNames(receiver *ast.FieldList) []string {
+	if receiver == nil || len(receiver.List) == 0 {
+		return nil
+	}
+	expression := receiver.List[0].Type
+	if star, ok := expression.(*ast.StarExpr); ok {
+		expression = star.X
+	}
+	indices := make([]ast.Expr, 0)
+	switch indexed := expression.(type) {
+	case *ast.IndexExpr:
+		indices = append(indices, indexed.Index)
+	case *ast.IndexListExpr:
+		indices = append(indices, indexed.Indices...)
+	default:
+		return nil
+	}
+	names := make([]string, 0, len(indices))
+	for _, index := range indices {
+		identifier, ok := index.(*ast.Ident)
+		if !ok {
+			return nil
+		}
+		names = append(names, identifier.Name)
+	}
+	return names
 }
 
 func isTestRoot(file *sourceFile, function *ast.FuncDecl) bool {

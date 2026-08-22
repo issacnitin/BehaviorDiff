@@ -1,4 +1,7 @@
 func One(value int) int { return __bd_One(nil, value) }
+func Identity[T any](value T) T { return __bd_Identity[T](nil, value) }
+behaviordiffrt.TypeName[T]()
+behaviordiffrt.TypeName[U]()
 func __bd_One(__bd_parent *behaviordiffrt.Frame, value int) (__bd_result0 int) {
 		__bd_recovered := recover()
 		behaviordiffrt.Exit(__bd_frame, []any{&__bd_result0}, __bd_recovered)

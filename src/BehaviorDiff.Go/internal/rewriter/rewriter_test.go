@@ -34,9 +34,9 @@ func TestRewriteFixture(t *testing.T) {
 	}
 
 	expectedMetrics := Metrics{
-		Packages: 2, Files: 3, Functions: 26, Methods: 4, Companions: 30,
-		TestRoots: 4, Patched: 30, Skipped: 4,
-		DirectCalls: 30, GoStatements: 8, Boundaries: 4,
+		Packages: 2, Files: 3, Functions: 29, Methods: 5, Companions: 34,
+		TestRoots: 5, Patched: 31, Skipped: 7, GenericTemplates: 3,
+		DirectCalls: 38, GoStatements: 8, Boundaries: 4,
 	}
 	if report.Metrics != expectedMetrics {
 		t.Fatalf("metrics mismatch: got %+v, want %+v", report.Metrics, expectedMetrics)
@@ -49,6 +49,14 @@ func TestRewriteFixture(t *testing.T) {
 	sort.Strings(actualBoundaryKinds)
 	if !reflect.DeepEqual(actualBoundaryKinds, expectedBoundaryKinds) {
 		t.Fatalf("boundary kinds mismatch: got %v, want %v", actualBoundaryKinds, expectedBoundaryKinds)
+	}
+	if len(report.GenericTemplates) != 3 || report.Metrics.Skipped != report.Metrics.Boundaries+len(report.GenericTemplates) {
+		t.Fatalf("generic template reconciliation failed: templates=%+v metrics=%+v", report.GenericTemplates, report.Metrics)
+	}
+	for _, template := range report.GenericTemplates {
+		if template.SkipReason != "Unobservable" || template.Detail != "Go: GenericTemplate" {
+			t.Fatalf("generic template classification mismatch: %+v", template)
+		}
 	}
 
 	parseGoTree(t, out)
@@ -121,6 +129,7 @@ type emittedManifestRecord struct {
 	Method              string `json:"method"`
 	Status              string `json:"status"`
 	SkipReason          string `json:"skipReason"`
+	Detail              string `json:"detail"`
 	IsTestRoot          bool   `json:"isTestRoot"`
 	PatchedMembers      int    `json:"patchedMembers"`
 	DiscoveredMembers   int    `json:"discoveredMembers"`
@@ -184,6 +193,7 @@ func verifyEmittedEvents(t *testing.T, events []emittedEvent) {
 	panicCaptured := false
 	recoveredTestPassed := false
 	goroutineParent := false
+	genericCounts := make(map[string]int)
 	for _, event := range events {
 		if event.CallID == 0 || byCallID[event.CallID].CallID != 0 {
 			t.Fatalf("invalid or duplicate call id %d", event.CallID)
@@ -214,6 +224,9 @@ func verifyEmittedEvents(t *testing.T, events []emittedEvent) {
 		if strings.Contains(event.Method, ".sendValue(") && event.TestID == "TestGoroutines" && event.ParentCallID != nil && event.Depth > 1 {
 			goroutineParent = true
 		}
+		if strings.Contains(event.Method, ".Identity[") || strings.Contains(event.Method, ".PairValues[") || strings.Contains(event.Method, ".Box[") {
+			genericCounts[event.Method]++
+		}
 	}
 	for _, event := range events {
 		if event.ParentCallID != nil {
@@ -232,7 +245,19 @@ func verifyEmittedEvents(t *testing.T, events []emittedEvent) {
 			}
 		}
 	}
-	if rootCount != 4 || !returnCaptured || !panicCaptured || !recoveredTestPassed || !goroutineParent {
+	expectedGenericCounts := map[string]int{
+		"example.com/rewritefixture.Identity[int](T) T":                                                     2,
+		"example.com/rewritefixture.Identity[string](T) T":                                                  1,
+		"example.com/rewritefixture.Identity[*example.com/rewritefixture.Counter](T) T":                     1,
+		"example.com/rewritefixture.Identity[[]example.com/rewritefixture.Counter](T) T":                    1,
+		"example.com/rewritefixture.PairValues[int,string](T,U) example.com/rewritefixture.PairValue[T, U]": 1,
+		"example.com/rewritefixture.Box[int].Get() T":                                                       1,
+		"example.com/rewritefixture.Box[string].Get() T":                                                    1,
+	}
+	if !reflect.DeepEqual(genericCounts, expectedGenericCounts) {
+		t.Fatalf("generic event identities mismatch: got %v, want %v", genericCounts, expectedGenericCounts)
+	}
+	if rootCount != 5 || !returnCaptured || !panicCaptured || !recoveredTestPassed || !goroutineParent {
 		t.Fatalf("event proof failed: roots=%d return=%t panic=%t recovered=%t goroutineParent=%t", rootCount, returnCaptured, panicCaptured, recoveredTestPassed, goroutineParent)
 	}
 }
@@ -274,16 +299,21 @@ func verifyEmittedManifest(t *testing.T, records []emittedManifestRecord, events
 		skipped += module.SkippedMembers
 		traced += module.TracedCalls
 	}
-	if len(modules) != 2 || len(members) != 34 || patched != 30 || skipped != 4 || traced != len(events) {
+	if len(modules) != 2 || len(members) != 45 || patched != 38 || skipped != 7 || traced != len(events) {
 		t.Fatalf("manifest totals mismatch: modules=%d members=%d patched=%d skipped=%d traced=%d events=%d", len(modules), len(members), patched, skipped, traced, len(events))
 	}
 	testRoots := 0
+	templateCount := 0
 	for _, member := range members {
 		if member.IsTestRoot {
 			testRoots++
 		}
-		if member.Status == "Skipped" && member.SkipReason != "UnsupportedShape" && member.SkipReason != "DeclaredExternally" {
-			t.Fatalf("non-neutral boundary skip: %+v", member)
+		if member.Status == "Skipped" {
+			if member.SkipReason == "Unobservable" && member.Detail == "Go: GenericTemplate" {
+				templateCount++
+			} else if member.SkipReason != "UnsupportedShape" && member.SkipReason != "DeclaredExternally" {
+				t.Fatalf("non-neutral skip: %+v", member)
+			}
 		}
 	}
 	for _, event := range events {
@@ -292,7 +322,7 @@ func verifyEmittedManifest(t *testing.T, records []emittedManifestRecord, events
 			t.Fatalf("event/member join failed for %q", event.Method)
 		}
 	}
-	if testRoots != 4 || digest.ValuesDigested <= 0 || digest.UnreadableFields <= 0 || writer.Enqueued != len(events) || writer.Written != len(events) || writer.Dropped != 0 || writer.Capacity <= 0 {
+	if testRoots != 5 || templateCount != 3 || digest.ValuesDigested <= 0 || digest.UnreadableFields <= 0 || writer.Enqueued != len(events) || writer.Written != len(events) || writer.Dropped != 0 || writer.Capacity <= 0 {
 		t.Fatalf("counter proof failed: roots=%d values=%d unreadable=%d writer=%+v events=%d", testRoots, digest.ValuesDigested, digest.UnreadableFields, writer, len(events))
 	}
 	t.Logf("GO_EMITTER_SUMMARY events=%d members=%d modules=%d patched=%d skipped=%d roots=%d values=%d unreadableFields=%d ambiguousMapEntries=%d enqueued=%d written=%d dropped=%d",

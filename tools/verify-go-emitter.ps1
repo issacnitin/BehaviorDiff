@@ -36,7 +36,7 @@ try {
         Pop-Location
     }
 
-    $expected = 'GO_EMITTER_SUMMARY events=46 members=34 modules=2 patched=30 skipped=4 roots=4 values=253 unreadableFields=12 ambiguousMapEntries=0 enqueued=46 written=46 dropped=0'
+    $expected = 'GO_EMITTER_SUMMARY events=55 members=45 modules=2 patched=38 skipped=7 roots=5 values=310 unreadableFields=15 ambiguousMapEntries=0 enqueued=55 written=55 dropped=0'
     if (-not (($output -join "`n").Contains($expected, [StringComparison]::Ordinal))) {
         throw "Required emitter summary was not found: $expected"
     }

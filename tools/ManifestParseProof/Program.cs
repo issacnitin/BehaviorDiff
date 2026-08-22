@@ -25,6 +25,19 @@ internal static class Program
 
         int patched = manifest.Assemblies.Sum(module => module.PatchedMembers);
         int skipped = manifest.Assemblies.Sum(module => module.SkippedMembers);
+        int genericTemplates = manifest.Members.Count(member =>
+            member.Status == PatchStatus.Skipped
+            && member.SkipReason == NeutralSkipReason.Unobservable
+            && member.Detail == "Go: GenericTemplate");
+        string[] concreteGenericFragments =
+        [
+            ".Identity[int](", ".Identity[string](", ".PairValues[int,string](",
+            ".Box[int].Get(", ".Box[string].Get(",
+        ];
+        int concreteGenerics = concreteGenericFragments.Count(fragment =>
+            manifest.Members.Count(member =>
+                member.Status == PatchStatus.Patched
+                && member.MethodFullName?.Contains(fragment, StringComparison.Ordinal) == true) == 1);
         bool reconciled = manifest.Assemblies.All(module =>
             module.Discovery == AssemblyDiscovery.GoAstRewrite
             && module.PatchFailedMembers == 0
@@ -36,9 +49,11 @@ internal static class Program
         if (manifest.Metadata?.Schema != TraceFormat.Schema
             || manifest.Metadata.Language != TraceFormat.GoLanguage
             || manifest.Assemblies.Count != 2
-            || manifest.Members.Count != 34
-            || patched != 30
-            || skipped != 4
+            || manifest.Members.Count != 45
+            || patched != 38
+            || skipped != 7
+            || genericTemplates != 3
+            || concreteGenerics != concreteGenericFragments.Length
             || !reconciled
             || digest is null
             || digest.UnreadableFields <= 0
@@ -51,11 +66,13 @@ internal static class Program
         }
 
         Console.WriteLine(
-            "GO_MANIFEST_PARSE modules={0} members={1} patched={2} skipped={3} unreadableFields={4} ambiguousMapEntries={5} written={6}",
+            "GO_MANIFEST_PARSE modules={0} members={1} patched={2} skipped={3} templates={4} concrete={5} unreadableFields={6} ambiguousMapEntries={7} written={8}",
             manifest.Assemblies.Count,
             manifest.Members.Count,
             patched,
             skipped,
+            genericTemplates,
+            concreteGenerics,
             digest.UnreadableFields,
             digest.AmbiguousMapEntries,
             writer.Written);

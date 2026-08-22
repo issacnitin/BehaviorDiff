@@ -226,23 +226,53 @@ function Assert-RunIntegrity([string]$runDirectory, [string]$tree, [object]$repo
     if ($digestTotals.errored -lt 0) { throw "Go digest error counter invalid ($label)" }
 
     $boundaryKinds = @($report.boundaries.kind | Sort-Object)
-    if ($report.metrics.skipped -ne $report.metrics.boundaries -or $report.metrics.skipped -lt 3 -or
+    $templates = @($report.genericTemplates)
+    if ([int]$report.metrics.genericTemplates -ne $templates.Count -or
+        [int]$report.metrics.skipped -ne [int]$report.metrics.boundaries + $templates.Count -or
+        @($templates | Where-Object { $_.skipReason -ne 'Unobservable' -or $_.detail -ne 'Go: GenericTemplate' }).Count -ne 0 -or
+        $report.metrics.boundaries -lt 3 -or
         'interface-call' -notin $boundaryKinds -or 'function-value-call' -notin $boundaryKinds) {
         throw "Go rewrite boundary report failed ($label): $($boundaryKinds -join ',')"
     }
     if ($skippedMembers -ne [int]$report.metrics.skipped) {
         throw "Go manifest boundary count failed ($label): report=$($report.metrics.skipped) manifest=$skippedMembers"
     }
-    $manifestBoundaryKinds = @($run.ManifestRecords | Where-Object {
-        $_.kind -eq 'member' -and $_.status -eq 'Skipped'
+        $manifestBoundaryKinds = @($run.ManifestRecords | Where-Object {
+		$_.kind -eq 'member' -and $_.status -eq 'Skipped' -and $_.detail -ne 'Go: GenericTemplate'
     } | ForEach-Object { ([string]$_.detail).Replace('Go: ', '') } | Sort-Object)
     if (($manifestBoundaryKinds -join ',') -cne ($boundaryKinds -join ',')) {
         throw "Go manifest boundary kinds failed ($label): $($manifestBoundaryKinds -join ',')"
+    }
+    $manifestTemplates = @($run.ManifestRecords | Where-Object {
+        $_.kind -eq 'member' -and $_.status -eq 'Skipped' -and
+        $_.skipReason -eq 'Unobservable' -and $_.detail -eq 'Go: GenericTemplate'
+    } | ForEach-Object method | Sort-Object -Unique)
+    if ($manifestTemplates.Count -ne $templates.Count) {
+        throw "Go manifest generic template count failed ($label): report=$($templates.Count) manifest=$($manifestTemplates.Count)"
+    }
+
+    $requiredGenericPrefixes = @(
+        '.Identity[int](', '.Identity[string](', '.Convert[int,string](',
+        '.SumNumbers[int](', '.SumNumbers[int64](', '.PairValues[int,string](',
+        '.Box[int].Get(', '.Box[string].Get('
+    )
+    $genericMembers = @($run.ManifestRecords | Where-Object {
+        if ($_.kind -ne 'member' -or $_.status -ne 'Patched') { return $false }
+        $method = [string]$_.method
+        return @($requiredGenericPrefixes | Where-Object {
+            $method.Contains($_, [StringComparison]::Ordinal)
+        }).Count -gt 0
+    } | ForEach-Object method | Sort-Object -Unique)
+    foreach ($prefix in $requiredGenericPrefixes) {
+        if (@($genericMembers | Where-Object { $_.Contains($prefix, [StringComparison]::Ordinal) }).Count -ne 1) {
+            throw "Go concrete generic member missing or duplicated ($label): $prefix"
+        }
     }
 
     return [pscustomobject]@{
         Run = $run; DerivedTests = $derivedTests; Events = $run.Events.Count; ManifestFiles = $manifestFiles.Count
         Members = $memberCount; SkippedMembers = $skippedMembers; Boundaries = $boundaryKinds
+        GenericTemplates = $manifestTemplates; GenericMembers = $genericMembers
         SourceFiles = @($run.Events.filePath | Sort-Object -Unique).Count
         Digest = [pscustomobject]$digestTotals; WriterEvents = $writerEvents; Orphans = $orphanCount
         WriterEnqueued = $writerEnqueued; WriterWritten = $writerWritten
@@ -331,6 +361,7 @@ try {
     Write-Host "  manifests per run           : $($integrity1.ManifestFiles) / $($integrity2.ManifestFiles)"
     Write-Host "  members / skipped per run   : $($integrity1.Members) / $($integrity1.SkippedMembers)"
     Write-Host "  boundaries                  : $($integrity1.Boundaries -join ',')"
+    Write-Host "  generic templates / concrete: $($integrity1.GenericTemplates.Count) / $($integrity1.GenericMembers.Count)"
     Write-Host "  source events / files run 1 : $($integrity1.Events) / $($integrity1.SourceFiles)"
     Write-Host "  source events / files run 2 : $($integrity2.Events) / $($integrity2.SourceFiles)"
     Write-Host "  source hashes unchanged     : true / true"

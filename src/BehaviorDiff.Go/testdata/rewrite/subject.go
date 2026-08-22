@@ -12,6 +12,15 @@ type Counter struct {
 	Base int
 }
 
+type Box[T any] struct {
+	Value T
+}
+
+type PairValue[T, U any] struct {
+	First  T
+	Second U
+}
+
 type Incrementer interface {
 	Add(int) int
 }
@@ -54,6 +63,18 @@ func Named(value int) (double int) {
 
 func (counter Counter) Add(value int) int {
 	return counter.Base + value
+}
+
+func Identity[T any](value T) T {
+	return value
+}
+
+func PairValues[T, U any](first T, second U) PairValue[T, U] {
+	return PairValue[T, U]{First: first, Second: second}
+}
+
+func (box Box[T]) Get() T {
+	return box.Value
 }
 
 func Recursive(value int) int {
