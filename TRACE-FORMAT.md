@@ -35,7 +35,7 @@ All process manifests merged into one run MUST agree on `schema` and `language`.
 
 Include and exclude scopes are language-owned strings, but their matching semantics are shared. A prefix matches an exact namespace, package, or repository path segment and its descendants. It does not match a longer sibling segment: `Acme.Cart` matches `Acme.Cart.Checkout` but not `Acme.Carts`, and `src/cart` matches `src/cart/item.js` but not `src/cart-old/item.js`. Exclude scope wins over include scope. A member excluded after discovery still receives a `Skipped` manifest record with `skipReason:"ExcludedByScope"`; otherwise a configuration difference can masquerade as removed behavior.
 
-Callable identity MUST include a stable module/source identity and the language's stable callable signature. Languages with declared parameter types include them. JavaScript, which has no runtime overload signature, uses the repository-relative module path plus lexical callable identity; anonymous callables include their original source line and column as a discriminator. Generated output positions are never used when a source map establishes an original position. Build-specific absolute roots, generated symbol numbers, and runtime object identities are forbidden in `methodFullName`.
+Callable identity MUST include a stable module/source identity and the language's stable callable signature. Languages with declared parameter types include them. A monomorphized generic callable MUST include its concrete generic arguments when distinct instantiations can have distinct observed behavior; a source-level generic identity alone is insufficient in that case. JavaScript, which has no runtime overload signature, uses the repository-relative module path plus lexical callable identity; anonymous callables include their original source line and column as a discriminator. Generated output positions are never used when a source map establishes an original position. Build-specific absolute roots, generated symbol numbers, and runtime object identities are forbidden in `methodFullName`.
 
 ## Trace events
 
@@ -217,9 +217,15 @@ The engine refuses a mismatch. Missing events are observationally identical to r
 
 ## Digest contract
 
-A digest establishes self-consistency only within one language and canonicalizer version. Java, Node, and .NET digests are never compared with one another. A conforming canonicalizer is deterministic and stable across processes for the same supported value graph and options.
+A digest establishes self-consistency only within one language and canonicalizer version. Digests from different languages are never compared with one another. A conforming canonicalizer is deterministic and stable across processes for the same supported value graph and options.
 
 Canonicalization MUST NOT execute user code. In particular it MUST NOT invoke getters, `toString`/`ToString`, user equality/hash methods, iterators, enumeration protocols, proxy traps, or callbacks. It may use runtime primitives that read fields or collection backing storage without dispatching into the observed program.
+
+Runtime reflection is not required. A language without sufficient reflection MAY generate type-specific canonicalization code at build time from the target's source, compiler metadata, or another semantics-preserving intermediate representation. Generated code is held to the same no-user-code and determinism rules as a reflective canonicalizer. Requiring target-owned derives, annotations, trait implementations, or handwritten serializers is not conforming to the transparent tracer contract unless the language integration explicitly declares an opt-in product boundary.
+
+Every discovered field or value region that the canonicalizer cannot inspect MUST remain visible as evidence. Opaque private/unexported fields, erased trait/interface objects, unions whose active field cannot be established safely, dependency-owned external types without usable layout, and comparable opaque shapes emit a deterministic `<skipped:DETAIL>` marker and increment a manifest counter covering the omitted region. They MUST NOT be silently omitted or replaced by a marker that is indistinguishable from a fully observed value. Equal digests containing such markers are partial and do not establish equality inside those regions.
+
+Sealed standard-library collection traversal is permitted only through a language/runtime primitive or generated shape rule that cannot dispatch into target-defined code. The rule MAY read backing storage or use a runtime-guaranteed non-overridable traversal operation. It MUST NOT call user-overridable iteration, hashing, equality, comparison, formatting, or callbacks. If the runtime cannot provide such traversal, the collection or unreadable region is represented by a counted `<skipped:...>` marker rather than iterated unsafely.
 
 Canonicalization MUST:
 
