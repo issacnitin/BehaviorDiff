@@ -93,6 +93,21 @@ This covers sort stability, retry policy, and configuration parsing.
 
 ## Install the CLI
 
+### Use the all-language container
+
+The published Linux image contains the BehaviorDiff CLI and engine, the .NET 8 SDK and tracer, Java 17 and the shaded agent, Node 24 and the production tracer, and Go with `behaviordiff-go-rewrite`. The host needs only Docker:
+
+```bash
+docker pull ghcr.io/issacnitin/behaviordiff:main
+docker run --rm \
+  --volume "$PWD:/workspace" \
+  ghcr.io/issacnitin/behaviordiff:main \
+  /workspace --base origin/main --pr HEAD \
+  --findings /workspace/.behaviordiff/artifacts/findings.json
+```
+
+The normal image entrypoint is `behaviordiff`; no PowerShell wrapper is involved. The unified CLI currently orchestrates .NET, Java, and Node/TypeScript repositories. The same image exposes the Go source rewriter as `behaviordiff-go-rewrite`; Go is not yet wired into the unified base/PR CLI pipeline.
+
 ### Install the GitHub release
 
 Download the package from the [latest release](https://github.com/issacnitin/BehaviorDiff/releases/latest), then install it from the download directory:
@@ -259,9 +274,28 @@ Key concepts:
 
 ## GitHub Actions
 
-The repository includes two workflows:
+Use the published Docker Action after a full-history checkout:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+
+steps:
+  - uses: actions/checkout@v4
+    with:
+      fetch-depth: 0
+  - uses: issacnitin/BehaviorDiff@main
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+```
+
+It writes `.behaviordiff/artifacts/findings.json`, restores or updates `.behaviordiff/cache`, and posts with the `warn-only` gate by default. Inputs expose the work, findings, cache, retention, gate, and posting settings.
+
+This repository includes three workflows:
 
 - [CI](.github/workflows/ci.yml) builds, runs executable proofs, and packs the CLI.
+- [Container](.github/workflows/container.yml) builds the single image, proves full Node and Java analysis on Linux with Docker as the only host prerequisite, reports image size, and publishes commit and channel tags to GHCR.
 - [BehaviorDiff blast radius](.github/workflows/blastradius.yml) analyzes pull requests, uploads `findings.json`, and posts comments for same-repository PRs.
 
 For your own repository, copy `blastradius.yml` and adjust namespace exclusions if needed. The workflow uses immutable pull-request SHAs and full Git history.
@@ -272,7 +306,7 @@ Fork pull requests are analyzed without posting because GitHub supplies a read-o
 
 ## Azure Pipelines
 
-[azure-pipelines.yml](azure-pipelines.yml) provides the equivalent Azure Repos flow. Add it as a **Build validation** branch policy; Azure Repos does not honor YAML `pr` triggers.
+[azure-pipelines.yml](azure-pipelines.yml) provides the equivalent Azure Repos container job. It pulls the same all-language image and runs only Bash and native commands; the hosted agent does not install .NET, Java, Node, Go, Maven, npm, or PowerShell for BehaviorDiff. Add it as a **Build validation** branch policy; Azure Repos does not honor YAML `pr` triggers.
 
 ```text
 behaviordiff <repo> --ci=azuredevops --findings findings.json

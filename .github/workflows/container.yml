@@ -1,0 +1,65 @@
+name: BehaviorDiff container
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - action.yml
+      - docker/**
+      - tools/verify-container*.sh
+      - src/**
+      - .github/workflows/container.yml
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/issacnitin/behaviordiff
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build all-language image
+        run: docker build --build-arg BUILD_VERSION="$GITHUB_SHA" --tag "$IMAGE:$GITHUB_SHA" .
+
+      - name: Prove Node and Java analysis using only Docker
+        run: bash tools/verify-container.sh "$IMAGE:$GITHUB_SHA"
+
+      - name: Report image size
+        run: |
+          bytes=$(docker image inspect "$IMAGE:$GITHUB_SHA" --format '{{.Size}}')
+          echo "CONTAINER_IMAGE_SIZE bytes=$bytes"
+          echo "BehaviorDiff image size: $(numfmt --to=iec-i --suffix=B "$bytes") ($bytes bytes)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish immutable image
+        if: github.event_name != 'pull_request'
+        run: docker push "$IMAGE:$GITHUB_SHA"
+
+      - name: Publish channel tag
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            channel=main
+          else
+            channel="${GITHUB_REF_NAME}"
+          fi
+          docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:$channel"
+          docker push "$IMAGE:$channel"

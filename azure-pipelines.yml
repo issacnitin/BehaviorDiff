@@ -1,162 +1,78 @@
-# Azure Repos does not honor YAML `pr` triggers. Attach this pipeline as a Build validation policy
-# on each target branch. That branch policy is the PR trigger; keeping `trigger: none` prevents an
-# additional push build from duplicating the policy-triggered merge-commit build.
+# Azure Repos does not honor YAML `pr` triggers. Attach this pipeline as a build validation policy
+# on each target branch. The branch policy triggers the PR validation build.
 trigger: none
 
 pool:
   vmImage: ubuntu-24.04
 
 variables:
-  # New analysis should inform before it blocks. Change explicitly after the signal is trusted.
+  behaviorDiffImage: ghcr.io/issacnitin/behaviordiff:main
   behaviorDiffGate: warn-only
   behaviorDiffWork: $(Agent.TempDirectory)/behaviordiff-work
+  behaviorDiffCache: $(Pipeline.Workspace)/behaviordiff-cache
   behaviorDiffFindings: $(Build.ArtifactStagingDirectory)/behaviordiff/findings.json
   behaviorDiffExcludeNamespaces: SampleApp.Diagnostics,SampleApp.Persistence,Infrastructure.Collections
 
-steps:
-  # Ref resolution needs both parents of ADO's synthetic PR merge commit and their merge base.
-  # fetchDepth: 0 overrides the hosted agent's possible depth-1 default.
-  - checkout: self
-    clean: 'true'
-    fetchDepth: '0'
-    fetchTags: 'false'
+jobs:
+  - job: behaviordiff
+    displayName: BehaviorDiff blast radius
+    container:
+      image: $(behaviorDiffImage)
+      options: --entrypoint ""
 
-  - task: UseDotNet@2
-    displayName: Use .NET 8 SDK
-    inputs:
-      packageType: sdk
-      version: 8.x
+    steps:
+      - checkout: self
+        clean: 'true'
+        fetchDepth: '0'
+        fetchTags: 'false'
 
-  - pwsh: |
-      dotnet build src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj -c Release --nologo -v quiet
-      if ($LASTEXITCODE -ne 0) { throw "BehaviorDiff CLI build failed: $LASTEXITCODE" }
-    displayName: Build BehaviorDiff CLI
+      - bash: |
+          set -euo pipefail
+          git config --global --add safe.directory '*'
+          mkdir -p "$(dirname '$(behaviorDiffFindings)')" '$(behaviorDiffCache)'
 
-  - pwsh: |
-      $ErrorActionPreference = 'Stop'
-      $cli = Join-Path '$(Build.SourcesDirectory)' 'src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll'
-      $work = '$(behaviorDiffWork)'
-      $findings = '$(behaviorDiffFindings)'
-      New-Item -ItemType Directory -Path (Split-Path -Parent $findings) -Force | Out-Null
+          set +e
+          BEHAVIORDIFF_EXCLUDE_NAMESPACES='$(behaviorDiffExcludeNamespaces)' \
+            behaviordiff '$(Build.Repository.LocalPath)' --ci=azuredevops \
+              --work '$(behaviorDiffWork)' \
+              --findings '$(behaviorDiffFindings)' \
+              --cache-dir '$(behaviorDiffCache)' \
+              --cache-retention 1d
+          analysis_exit=$?
+          set -e
 
-      $stdout = Join-Path '$(Agent.TempDirectory)' 'behaviordiff.stdout.log'
-      $stderr = Join-Path '$(Agent.TempDirectory)' 'behaviordiff.stderr.log'
-      $processInfo = [Diagnostics.ProcessStartInfo]::new('dotnet')
-      foreach ($argument in @(
-          $cli,
-          '$(Build.Repository.LocalPath)',
-          '--ci=azuredevops',
-          '--work', $work,
-          '--findings', $findings)) {
-          [void]$processInfo.ArgumentList.Add($argument)
-      }
-      $processInfo.RedirectStandardOutput = $true
-      $processInfo.RedirectStandardError = $true
-      $processInfo.UseShellExecute = $false
-      $processInfo.Environment['BEHAVIORDIFF_EXCLUDE_NAMESPACES'] = '$(behaviorDiffExcludeNamespaces)'
+          echo "##vso[task.setvariable variable=behaviorDiffAnalysisExit]$analysis_exit"
+          if [[ ! -f '$(behaviorDiffFindings)' ]]; then
+            echo "##vso[task.logissue type=error]BehaviorDiff exited $analysis_exit without findings.json."
+            exit "$analysis_exit"
+          fi
 
-      $started = [DateTime]::UtcNow
-      $process = [Diagnostics.Process]::Start($processInfo)
-      $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-      $stderrTask = $process.StandardError.ReadToEndAsync()
-      $peakBytes = 0L
-      while (-not $process.WaitForExit(250)) {
-          $process.Refresh()
-          $peakBytes = [Math]::Max($peakBytes, $process.WorkingSet64)
-      }
-      $process.Refresh()
-      $peakBytes = [Math]::Max($peakBytes, $process.PeakWorkingSet64)
-      $stdoutTask.Wait()
-      $stderrTask.Wait()
-      Set-Content $stdout $stdoutTask.Result
-      Set-Content $stderr $stderrTask.Result
-      Write-Host $stdoutTask.Result
-      if ($stderrTask.Result) { Write-Host $stderrTask.Result }
+          if (( analysis_exit != 0 && analysis_exit != 1 )); then
+            echo "##vso[task.logissue type=warning]BehaviorDiff produced a non-verdict (exit $analysis_exit)."
+          fi
+        displayName: Analyze runtime behavior
 
-      $wallSeconds = ([DateTime]::UtcNow - $started).TotalSeconds
-      $traceBytes = (Get-ChildItem $work -Recurse -File -Filter '*.ndjson' -ErrorAction SilentlyContinue |
-          Where-Object Name -NotMatch 'manifest' | Measure-Object Length -Sum).Sum
-      if ($null -eq $traceBytes) { $traceBytes = 0 }
+      - bash: |
+          set -euo pipefail
+          behaviordiff post --provider=azuredevops \
+            --findings '$(behaviorDiffFindings)' \
+            --gate '$(behaviorDiffGate)'
+        displayName: Post BehaviorDiff findings to PR
+        condition: always()
+        env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
-      Write-Host ('HOSTED MEASUREMENT wall={0:N1}s peak={1:N0} bytes traces={2:N0} bytes exit={3}' -f `
-          $wallSeconds, $peakBytes, $traceBytes, $process.ExitCode)
-      Write-Host 'Local FluentValidation reference: 51.9s wall, 1.33 GB peak, 555,099,175 trace bytes.'
-      Write-Host "##vso[task.setvariable variable=behaviorDiffAnalysisExit]$($process.ExitCode)"
-      Write-Host "##vso[task.setvariable variable=behaviorDiffWallSeconds]$wallSeconds"
-      Write-Host "##vso[task.setvariable variable=behaviorDiffPeakBytes]$peakBytes"
-      Write-Host "##vso[task.setvariable variable=behaviorDiffTraceBytes]$traceBytes"
+      - task: PublishPipelineArtifact@1
+        displayName: Publish machine-readable findings
+        condition: always()
+        inputs:
+          targetPath: $(Build.ArtifactStagingDirectory)/behaviordiff
+          artifact: behaviordiff-findings
 
-      if (-not (Test-Path $findings)) {
-          @{
-            schema = 'behaviordiff.findings/1'
-            generatedUtc = [DateTime]::UtcNow.ToString('o')
-            status = 'failed'
-            verdict = 'could_not_analyze'
-            isCleanResult = $false
-            exitCode = $process.ExitCode
-            exitReason = 'analysis_process_failed_without_artifact'
-            refs = @{ baseSha = $null; prSha = $null; mergeBaseSha = $null }
-            refusal = @{ reason = "BehaviorDiff exited $($process.ExitCode) without findings.json. No safety verdict was produced. See behaviordiff.stdout.log and behaviordiff.stderr.log." }
-          } | ConvertTo-Json -Depth 5 | Set-Content $findings
-          Write-Host '##vso[task.logissue type=warning]BehaviorDiff produced no findings artifact; synthesized a failed non-verdict for PR posting.'
-      }
-
-      # Analysis exits 1 for findings and 3/4/5 for a non-verdict. Posting owns the gate result,
-      # so preserve the artifact and let the next step report every one of those states.
-      exit 0
-    displayName: Analyze runtime behavior and measure
-
-  - pwsh: |
-      $findings = '$(behaviorDiffFindings)'
-      if (Test-Path $findings) {
-          exit 0
-      }
-
-      New-Item -ItemType Directory -Path (Split-Path -Parent $findings) -Force | Out-Null
-      @{
-          schema = 'behaviordiff.findings/1'
-          generatedUtc = [DateTime]::UtcNow.ToString('o')
-          status = 'failed'
-          verdict = 'could_not_analyze'
-          isCleanResult = $false
-          exitCode = 4
-          exitReason = 'pipeline_failed_before_analysis_artifact'
-          refs = @{ baseSha = $null; prSha = $null; mergeBaseSha = $null }
-          refusal = @{ reason = 'The pipeline failed or skipped analysis before findings.json was written. No safety verdict was produced. Review earlier pipeline steps.' }
-      } | ConvertTo-Json -Depth 5 | Set-Content $findings
-      Write-Host '##vso[task.logissue type=warning]Synthesized a failed BehaviorDiff non-verdict because an earlier step produced no findings.json.'
-    displayName: Guarantee a postable non-verdict
-    condition: always()
-
-  - pwsh: |
-      $cli = Join-Path '$(Build.SourcesDirectory)' 'src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll'
-      if (Test-Path $cli) {
-        & dotnet $cli post --provider=azuredevops --findings '$(behaviorDiffFindings)' --gate '$(behaviorDiffGate)'
-        exit $LASTEXITCODE
-      }
-
-      Write-Host '##vso[task.logissue type=warning]BehaviorDiff CLI is unavailable; using the summary-only non-verdict poster.'
-      & '$(Build.SourcesDirectory)/tools/Post-AdoFallback.ps1' -Findings '$(behaviorDiffFindings)'
-      exit $LASTEXITCODE
-    displayName: Post BehaviorDiff findings to PR
-    condition: always()
-    env:
-      # Microsoft requires System.AccessToken to be mapped explicitly into YAML script steps.
-      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-
-  - task: PublishPipelineArtifact@1
-    displayName: Publish machine-readable findings
-    condition: always()
-    inputs:
-      targetPath: $(Build.ArtifactStagingDirectory)/behaviordiff
-      artifact: behaviordiff-findings
-
-  - pwsh: |
-      $work = '$(behaviorDiffWork)'
-      $before = if (Test-Path $work) {
-          (Get-ChildItem $work -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-      } else { 0 }
-      Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
-      Write-Host "BehaviorDiff cleanup removed $before bytes of worktrees/traces. findings.json was retained as a pipeline artifact."
-    displayName: Delete traces and worktrees
-    condition: always()
+      - bash: |
+          set -euo pipefail
+          before=$(du -sb '$(behaviorDiffWork)' 2>/dev/null | cut -f1 || echo 0)
+          rm -rf '$(behaviorDiffWork)'
+          echo "BehaviorDiff cleanup removed $before bytes; findings.json was retained."
+        displayName: Delete traces and worktrees
+        condition: always()

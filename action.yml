@@ -1,0 +1,56 @@
+name: BehaviorDiff
+description: Analyze a pull request for runtime behavior changes with the published all-language container.
+author: Nitin Issac Joy
+branding:
+  icon: activity
+  color: blue
+inputs:
+  repo:
+    description: Repository path inside the Action container.
+    required: false
+    default: /github/workspace
+  work:
+    description: Temporary worktree and trace directory.
+    required: false
+    default: /github/workspace/.behaviordiff/work
+  findings:
+    description: Machine-readable findings output path.
+    required: false
+    default: /github/workspace/.behaviordiff/artifacts/findings.json
+  cache-dir:
+    description: Persistent baseline trace cache directory.
+    required: false
+    default: /github/workspace/.behaviordiff/cache
+  cache-retention:
+    description: Baseline cache retention window.
+    required: false
+    default: 1d
+  gate:
+    description: Posting gate, either warn-only or fail-on-findings.
+    required: false
+    default: warn-only
+  post:
+    description: Post the findings to the GitHub pull request.
+    required: false
+    default: 'true'
+outputs:
+  analysis-exit:
+    description: BehaviorDiff analysis exit code before posting policy.
+  findings:
+    description: Path to findings.json.
+  status:
+    description: Findings artifact status.
+  verdict:
+    description: Findings artifact verdict.
+runs:
+  using: docker
+  image: docker://ghcr.io/issacnitin/behaviordiff:main
+  args:
+    - __action
+    - ${{ inputs.repo }}
+    - ${{ inputs.work }}
+    - ${{ inputs.findings }}
+    - ${{ inputs.cache-dir }}
+    - ${{ inputs.cache-retention }}
+    - ${{ inputs.gate }}
+    - ${{ inputs.post }}

@@ -1,0 +1,11 @@
+.git
+.vs
+.vscode
+**/bin
+**/obj
+**/node_modules
+**/target
+artifacts
+evidence
+samples
+*.user
