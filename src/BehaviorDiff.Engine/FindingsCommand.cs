@@ -31,7 +31,14 @@ namespace BehaviorDiff.Engine
             string cacheStatus = "unreported",
             string cacheKey = "",
             string cacheBackend = "none",
-            long cacheSavedWallClockMilliseconds = 0)
+            long cacheSavedWallClockMilliseconds = 0,
+            long buildMilliseconds = 0,
+            long weaveMilliseconds = 0,
+            long instrumentedRunMilliseconds = 0,
+            long cacheRestoreMilliseconds = 0,
+            long cacheStoreMilliseconds = 0,
+            long diffMilliseconds = 0,
+            long frontierMilliseconds = 0)
         {
             using JsonDocument divergenceSet = JsonDocument.Parse(File.ReadAllText(divergenceSetPath));
             using JsonDocument frontierReport = JsonDocument.Parse(File.ReadAllText(frontierReportPath));
@@ -82,6 +89,18 @@ namespace BehaviorDiff.Engine
                     key = cacheKey,
                     backend = cacheBackend,
                     savedWallClockMilliseconds = cacheSavedWallClockMilliseconds,
+                },
+                timings = new
+                {
+                    buildMilliseconds,
+                    weaveMilliseconds,
+                    instrumentedRunMilliseconds,
+                    cacheRestoreMilliseconds,
+                    cacheStoreMilliseconds,
+                    diffMilliseconds,
+                    frontierMilliseconds,
+                    measuredTotalMilliseconds = buildMilliseconds + weaveMilliseconds + instrumentedRunMilliseconds
+                        + cacheRestoreMilliseconds + cacheStoreMilliseconds + diffMilliseconds + frontierMilliseconds,
                 },
                 summary = new
                 {

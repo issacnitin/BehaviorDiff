@@ -108,6 +108,26 @@ function Invoke-Analysis([string]$language, [string]$directory, [object]$refs, [
         throw "$language warm findings did not report positive saved wall-clock time"
     }
 
+    $timings = $artifact.timings
+    $timingParts = @(
+        [long]$timings.buildMilliseconds
+        [long]$timings.weaveMilliseconds
+        [long]$timings.instrumentedRunMilliseconds
+        [long]$timings.cacheRestoreMilliseconds
+        [long]$timings.cacheStoreMilliseconds
+        [long]$timings.diffMilliseconds
+        [long]$timings.frontierMilliseconds
+    )
+    if ([long]$timings.measuredTotalMilliseconds -ne ($timingParts | Measure-Object -Sum).Sum) {
+        throw "$language $label findings timing total does not match its stage timings"
+    }
+    if ($label -eq 'cold' -and [long]$timings.cacheStoreMilliseconds -le 0) {
+        throw "$language cold findings did not report positive cache store time"
+    }
+    if ($label -eq 'warm' -and [long]$timings.cacheRestoreMilliseconds -le 0) {
+        throw "$language warm findings did not report positive cache restore time"
+    }
+
     $text = $output -join "`n"
     $baseRuns = @([regex]::Matches($text, '(?m)^\s*(base_run[123])\s+.*(?:traces=|command:)') |
         ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique).Count

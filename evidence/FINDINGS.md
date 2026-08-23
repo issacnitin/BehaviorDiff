@@ -55,11 +55,24 @@ A merged FluentValidation change was analyzed as an external scale case:
 
 ```text
 instrumented    : 638 library members, 1,054 test members
-events per run  : 105,743
-traces          : 555 MB across four runs
-matched keys    : 45,519
-end to end      : 51.9 s on the measurement machine
+events per run  : approximately 99,600
+traces          : approximately 563 MB across four runs
+matched keys    : 45,519-45,537 across the measured runs
 ```
+
+The same target and PR were run cold against an empty local baseline cache and then warm against the populated cache:
+
+| Measurement | Cold cache miss | Warm cache hit |
+| --- | ---: | ---: |
+| Total CLI wall time | 339.705 s | 53.962 s |
+| Build | 23.675 s | 13.264 s |
+| Weave | 5.598 s | 2.729 s |
+| Instrumented runs | 46.978 s | 11.844 s |
+| Engine diff | 9.649 s | 10.386 s |
+| Engine frontier | 6.998 s | 6.503 s |
+| Five-stage measured total | 92.898 s | 44.726 s |
+
+The warm run reduced end-to-end wall time by 84.1%, from 5 minutes 39.705 seconds to 53.962 seconds, a 6.3x speedup. It still pays for both clean builds, PR weaving, one instrumented test run, and the full engine. The cold run had 246.807 seconds outside the original five counters; that interval includes cache storage, worktree setup and cleanup, trace deletion, and orchestration. Subsequent telemetry records cache restore and store separately in the console and `findings.json.timings`; cleanup occurs after the analyzed artifact is written and remains outside its measured total.
 
 The run exercised member lifecycle changes, generated members that could not be attributed through normal Git paths, and nondeterministic residual behavior in unedited caches. Peak diff working set was 1.33 GB against 416 MB of parsed traces. Memory currently scales with event count because parsed events are retained for comparison.
 

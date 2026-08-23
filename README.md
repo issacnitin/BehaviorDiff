@@ -202,6 +202,10 @@ BehaviorDiff caches the three validated noise-baseline traces when `--cache-dir`
 
 On a hit, PR analysis restores the three baseline samples and performs only the PR instrumented run. A missing, malformed, or unavailable cache entry is reported as a miss and falls back to the existing four-run path. The console and `findings.json.baseTraceCache` report `hit`, `miss`, or `disabled`, the cache key/backend, and measured baseline wall-clock time saved.
 
+On the 99,000-event-per-run FluentValidation scale case, a cold four-run analysis took 339.705 seconds and the subsequent cache-hit analysis took 53.962 seconds: an 84.1% reduction, or 6.3 times faster. The warm run spent 13.264 seconds building, 2.729 seconds weaving, 11.844 seconds in its single instrumented run, 10.386 seconds diffing, and 6.503 seconds finding the frontier. These are measurements from one Windows development machine, not performance guarantees; full methodology and the cold-run breakdown are in [evidence/FINDINGS.md](evidence/FINDINGS.md).
+
+Every analyzed `findings.json` includes `timings` for build, weave, instrumented runs, cache restore/store, engine diff, engine frontier, and their measured total. This makes CI cost visible without parsing console output.
+
 Warm a target branch from a nightly job without running a synthetic PR comparison:
 
 ```powershell

@@ -220,6 +220,7 @@ namespace BehaviorDiff.Cli
         private readonly TraceCacheSession _cache;
         private readonly bool _warmOnly;
         private readonly TimeSpan? _traceRetention;
+        private readonly PipelineTimings _timings = new PipelineTimings();
 
         internal ResolvedRefs? ResolvedRefs { get; private set; }
 
@@ -245,7 +246,8 @@ namespace BehaviorDiff.Cli
             _keep = keep;
             _cache = new TraceCacheSession(
                 cacheDirectory is null ? null : new LocalDirectoryTraceCacheStore(cacheDirectory, cacheRetention),
-                work);
+                work,
+                _timings);
             _traceRetention = traceRetention;
             _warmOnly = warmOnly;
         }
@@ -299,7 +301,7 @@ namespace BehaviorDiff.Cli
                     int removed = CrossLanguageExecution.StripBuildOutput(baseTree)
                         + (_warmOnly ? 0 : CrossLanguageExecution.StripBuildOutput(prTree));
                     Console.WriteLine("  stale target/node_modules/dist removed: " + removed);
-                    var execution = new CrossLanguageExecution(_work, _cache);
+                    var execution = new CrossLanguageExecution(_work, _cache, _timings);
                     if (_warmOnly)
                     {
                         execution.Warm(baseDetection, baseTree, refs.BaseSha);
@@ -326,12 +328,15 @@ namespace BehaviorDiff.Cli
 
                 Console.WriteLine();
                 Console.WriteLine("=== 3. repo builds unmodified ===");
+                var buildStopwatch = Stopwatch.StartNew();
                 BuildUnmodified("base", baseTree);
                 if (!_warmOnly)
                 {
                     BuildUnmodified("pr", prTree);
                     Console.WriteLine("  both worktrees build without instrumentation");
                 }
+                buildStopwatch.Stop();
+                _timings.BuildMilliseconds += buildStopwatch.ElapsedMilliseconds;
 
                 Console.WriteLine();
                 Console.WriteLine("=== 4. resolve xunit versions and TFMs ===");
@@ -385,11 +390,17 @@ namespace BehaviorDiff.Cli
                 if (!cacheHit)
                 {
                     baseTraceStopwatch.Start();
+                    buildStopwatch.Restart();
                     AdapterBuilder.BuildAll(Path.Combine(_work, "base-adapters"), kit, baseProjects);
+                    buildStopwatch.Stop();
+                    _timings.BuildMilliseconds += buildStopwatch.ElapsedMilliseconds;
                     baseTraceStopwatch.Stop();
                 }
 
+                buildStopwatch.Restart();
                 AdapterBuilder.BuildAll(Path.Combine(_work, "pr-adapters"), kit, prProjects);
+                buildStopwatch.Stop();
+                _timings.BuildMilliseconds += buildStopwatch.ElapsedMilliseconds;
                 foreach (ResolvedTestProject project in baseProjects)
                 {
                     Console.WriteLine("  " + project.Name + " -> " + (project.UsesExistingTracerXunit
@@ -402,22 +413,34 @@ namespace BehaviorDiff.Cli
                 if (!cacheHit)
                 {
                     baseTraceStopwatch.Start();
+                    buildStopwatch.Restart();
                     BuildInstrumented("base", baseTree, kit, baseProjects);
+                    buildStopwatch.Stop();
+                    _timings.BuildMilliseconds += buildStopwatch.ElapsedMilliseconds;
                     baseTraceStopwatch.Stop();
                 }
 
+                buildStopwatch.Restart();
                 BuildInstrumented("pr", prTree, kit, prProjects);
+                buildStopwatch.Stop();
+                _timings.BuildMilliseconds += buildStopwatch.ElapsedMilliseconds;
 
                 Console.WriteLine();
                 Console.WriteLine("=== 6b. weave project assemblies ===");
                 if (!cacheHit)
                 {
                     baseTraceStopwatch.Start();
+                    var weaveStopwatch = Stopwatch.StartNew();
                     WeaveOutputs("base", baseProjects, scan.NamespacePrefixes);
+                    weaveStopwatch.Stop();
+                    _timings.WeaveMilliseconds += weaveStopwatch.ElapsedMilliseconds;
                     baseTraceStopwatch.Stop();
                 }
 
+                var prWeaveStopwatch = Stopwatch.StartNew();
                 WeaveOutputs("pr", prProjects, scan.NamespacePrefixes);
+                prWeaveStopwatch.Stop();
+                _timings.WeaveMilliseconds += prWeaveStopwatch.ElapsedMilliseconds;
 
                 Console.WriteLine();
                 Console.WriteLine("=== 7. test runs ===");
@@ -436,15 +459,21 @@ namespace BehaviorDiff.Cli
                 else
                 {
                     baseTraceStopwatch.Start();
+                    var runStopwatch = Stopwatch.StartNew();
                     base1 = RunTests("base_run1", baseTree, baseProjects, scope);
                     base2 = RunTests("base_run2", baseTree, baseProjects, scope);
                     base3 = RunTests("base_run3", baseTree, baseProjects, scope);
+                    runStopwatch.Stop();
+                    _timings.InstrumentedRunMilliseconds += runStopwatch.ElapsedMilliseconds;
                     baseRoot = baseTree;
                     baseTraceStopwatch.Stop();
                     _cache.Store(cacheKey, baseRoot, baseTraceStopwatch.ElapsedMilliseconds);
                 }
 
+                var prRunStopwatch = Stopwatch.StartNew();
                 string pr = RunTests("pr_run", prTree, prProjects, scope);
+                prRunStopwatch.Stop();
+                _timings.InstrumentedRunMilliseconds += prRunStopwatch.ElapsedMilliseconds;
 
                 AssertTestIdsPresent(base1);
                 _cache.Print();
@@ -608,6 +637,7 @@ namespace BehaviorDiff.Cli
 
             Console.WriteLine();
             Console.WriteLine("=== 9. engine part 1 ===");
+            var diffStopwatch = Stopwatch.StartNew();
             string divergenceSet = Path.Combine(_work, "divergence-set.json");
             var diffOptions = new DiffOptions
             {
@@ -620,7 +650,10 @@ namespace BehaviorDiff.Cli
                 ChangedFiles = changedList,
                 Output = divergenceSet,
             };
-            if (DiffCommand.Run(diffOptions) != 0)
+            int diffExit = DiffCommand.Run(diffOptions);
+            diffStopwatch.Stop();
+            _timings.DiffMilliseconds += diffStopwatch.ElapsedMilliseconds;
+            if (diffExit != 0)
             {
                 string reason = diffOptions.RefusalReason ?? "The comparison was refused before a DivergenceSet was produced.";
                 FindingsCommand.WriteInvalid(
@@ -639,6 +672,7 @@ namespace BehaviorDiff.Cli
 
             Console.WriteLine();
             Console.WriteLine("=== 10. engine part 2 ===");
+            var frontierStopwatch = Stopwatch.StartNew();
             string report = Path.Combine(_work, "frontier-report.json");
             var frontierOptions = new FrontierOptions
             {
@@ -646,7 +680,10 @@ namespace BehaviorDiff.Cli
                 ChangedFiles = changedList,
                 Output = report,
             };
-            if (FrontierCommand.Run(frontierOptions) != 0)
+            int frontierExit = FrontierCommand.Run(frontierOptions);
+            frontierStopwatch.Stop();
+            _timings.FrontierMilliseconds += frontierStopwatch.ElapsedMilliseconds;
+            if (frontierExit != 0)
             {
                 string reason = frontierOptions.RefusalReason ?? "Frontier detection was refused before a report was produced.";
                 FindingsCommand.WriteInvalid(
@@ -674,7 +711,15 @@ namespace BehaviorDiff.Cli
                 _cache.Report.Status,
                 _cache.Report.Key,
                 _cache.Report.Backend,
-                _cache.Report.SavedWallClockMilliseconds);
+                _cache.Report.SavedWallClockMilliseconds,
+                _timings.BuildMilliseconds,
+                _timings.WeaveMilliseconds,
+                _timings.InstrumentedRunMilliseconds,
+                _timings.CacheRestoreMilliseconds,
+                _timings.CacheStoreMilliseconds,
+                _timings.DiffMilliseconds,
+                _timings.FrontierMilliseconds);
+            _timings.Report();
             return exitCode;
         }
 

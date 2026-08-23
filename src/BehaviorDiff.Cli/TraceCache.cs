@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -44,11 +45,13 @@ namespace BehaviorDiff.Cli
     {
         private readonly ITraceCacheStore? _store;
         private readonly string _work;
+        private readonly PipelineTimings _timings;
 
-        internal TraceCacheSession(ITraceCacheStore? store, string work)
+        internal TraceCacheSession(ITraceCacheStore? store, string work, PipelineTimings timings)
         {
             _store = store;
             _work = work;
+            _timings = timings;
             Report = new TraceCacheReport(store is null ? "disabled" : "miss", string.Empty, BackendName, 0);
         }
 
@@ -65,6 +68,7 @@ namespace BehaviorDiff.Cli
                 return false;
             }
 
+            var stopwatch = Stopwatch.StartNew();
             try
             {
                 if (!_store.TryRestore(key, _work, out entry) || entry is null)
@@ -89,6 +93,11 @@ namespace BehaviorDiff.Cli
                 Console.WriteLine("  base trace cache warning: " + ex.GetType().Name + ": " + ex.Message);
                 return false;
             }
+            finally
+            {
+                stopwatch.Stop();
+                _timings.CacheRestoreMilliseconds += stopwatch.ElapsedMilliseconds;
+            }
         }
 
         internal void Store(TraceCacheKey key, string baseRoot, long traceWallClockMilliseconds)
@@ -98,6 +107,7 @@ namespace BehaviorDiff.Cli
                 return;
             }
 
+            var stopwatch = Stopwatch.StartNew();
             try
             {
                 _store.Store(key, _work, new TraceCacheEntry(baseRoot, traceWallClockMilliseconds));
@@ -105,6 +115,11 @@ namespace BehaviorDiff.Cli
             catch (Exception ex)
             {
                 Console.WriteLine("  base trace cache warning: " + ex.GetType().Name + ": " + ex.Message);
+            }
+            finally
+            {
+                stopwatch.Stop();
+                _timings.CacheStoreMilliseconds += stopwatch.ElapsedMilliseconds;
             }
         }
 

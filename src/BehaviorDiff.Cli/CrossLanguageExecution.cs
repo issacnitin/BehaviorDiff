@@ -29,11 +29,13 @@ namespace BehaviorDiff.Cli
 
         private readonly string _work;
         private readonly TraceCacheSession _cache;
+        private readonly PipelineTimings _timings;
 
-        internal CrossLanguageExecution(string work, TraceCacheSession cache)
+        internal CrossLanguageExecution(string work, TraceCacheSession cache, PipelineTimings timings)
         {
             _work = work;
             _cache = cache;
+            _timings = timings;
         }
 
         internal static int StripBuildOutput(string tree)
@@ -221,6 +223,7 @@ namespace BehaviorDiff.Cli
         {
             Console.WriteLine();
             Console.WriteLine("=== 2. Node clean builds ===");
+            var buildStopwatch = Stopwatch.StartNew();
             string baseDirectory = Path.GetDirectoryName(baseDetection.EntryPoint)!;
             string prDirectory = Path.GetDirectoryName(prDetection.EntryPoint)!;
             string baseManager = DetectNodePackageManager(baseDirectory);
@@ -243,6 +246,8 @@ namespace BehaviorDiff.Cli
 
             BuildNode("base", baseDirectory);
             BuildNode("pr", prDirectory);
+            buildStopwatch.Stop();
+            _timings.BuildMilliseconds += buildStopwatch.ElapsedMilliseconds;
 
             Console.WriteLine();
             Console.WriteLine("=== 3. Node trace scope and tracer ===");
@@ -278,12 +283,16 @@ namespace BehaviorDiff.Cli
                 base2 = RunNodeTests("base_run2", baseDirectory, baseTree, scope, tracer);
                 base3 = RunNodeTests("base_run3", baseDirectory, baseTree, scope, tracer);
                 stopwatch.Stop();
+                _timings.InstrumentedRunMilliseconds += stopwatch.ElapsedMilliseconds;
                 baseRoot = baseTree;
                 _cache.Store(key, baseRoot, stopwatch.ElapsedMilliseconds);
             }
 
             Pipeline.AssertTestIdsPresent(base1);
+            var prStopwatch = Stopwatch.StartNew();
             string pr = RunNodeTests("pr_run", prDirectory, prTree, scope, tracer);
+            prStopwatch.Stop();
+            _timings.InstrumentedRunMilliseconds += prStopwatch.ElapsedMilliseconds;
             return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
         }
 
