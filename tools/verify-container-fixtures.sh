@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'status=$?; echo "::error file=.github,line=8::Container fixture failed at line $LINENO: $BASH_COMMAND (exit $status)"; exit $status' ERR
 
 root="$(mktemp -d)"
 trap 'rm -rf "$root"' EXIT
+
+git config --global --add safe.directory '*'
 
 for command in dotnet java mvn node npm go git behaviordiff behaviordiff-go-rewrite; do
     command -v "$command" >/dev/null || { echo "missing image command: $command" >&2; exit 1; }
