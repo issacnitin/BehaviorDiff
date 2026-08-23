@@ -229,6 +229,38 @@ Warm a target branch from a nightly job without running a synthetic PR compariso
 behaviordiff warm C:\src\my-service --target origin/main --cache-dir C:\ci-cache\behaviordiff
 ```
 
+### Suppression baseline
+
+BehaviorDiff automatically applies `.behaviordiff/baseline.yml` from the analyzed repository. Suppression is a policy projection: every raw member and the original `unexpectedMembers` count remain in `findings.json`, while matched members receive `suppression` metadata and additive actionable/suppressed counts control process and posting gates. Use `--no-baseline` to inspect the raw result or `--baseline <file>` for a nonstandard path.
+
+Write or merge 30-day acknowledgements for every currently actionable member in one command:
+
+```bash
+behaviordiff baseline write --findings .behaviordiff/artifacts/findings.json
+```
+
+Use `--expires 90d` to choose another window or `--no-expiry` for permanent policy. Re-running the command is idempotent and adds only actionable members not already acknowledged.
+
+```yaml
+schema: behaviordiff.baseline/1
+acknowledgements:
+  - id: accepted-pricing-change
+    member: Commerce.Pricing.DiscountEngine.SelectDiscount(System.Decimal)
+    path: src/Commerce.Pricing/DiscountEngine.cs
+    reason: Approved pricing migration
+    expires: 2026-09-30
+ignorePaths:
+  - id: generated-sources
+    pattern: '**/generated/**'
+    reason: Generated files are reviewed through their source templates
+ignoreMembers:
+  - id: legacy-cache
+    pattern: Legacy.Cache.*
+    reason: Known nondeterministic legacy cache
+```
+
+Rule IDs must be unique. Acknowledgements match an exact member and optional path; path and member ignores use case-sensitive `*`, `**`, and `?` globs. An expiry before the current UTC date disables the rule. Active rules matching no current finding are reported as stale in console output, `findings.json.baseline.staleEntries`, and PR summaries. Provider comments show suppressed member/call-site counts and link to the committed baseline.
+
 ## Trace security and threat model
 
 Trace events contain method identities, source locations, test identities, call topology, and canonicalized argument and return values. Those values can include credentials, personal data, and business-sensitive state. Treat an unredacted trace as sensitive build output.

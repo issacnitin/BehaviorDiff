@@ -90,7 +90,7 @@ namespace BehaviorDiff.Cli
                     return ExitCodes.NoUnexpected;
                 }
 
-                int unexpected = root.GetProperty("summary").GetProperty("unexpectedMembers").GetInt32();
+                int unexpected = BaselinePolicy.ActionableUnexpectedMembers(root.GetProperty("summary"));
                 if (unexpected == 0)
                 {
                     return ExitCodes.NoUnexpected;

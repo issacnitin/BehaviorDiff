@@ -47,6 +47,19 @@ namespace BehaviorDiff.Cli
                 }
             }
 
+            if (args.Length > 0 && args[0] == "baseline")
+            {
+                try
+                {
+                    return BaselineCommand.Run(args.Skip(1).ToArray());
+                }
+                catch (CliException ex)
+                {
+                    Console.Error.WriteLine("BASELINE FAILED: " + ex.Message);
+                    return ExitCodes.BuildOrTestFailure;
+                }
+            }
+
             bool warmOnly = args.Length > 0 && args[0] == "warm";
             int firstOption = warmOnly ? 1 : 0;
             string? baseRef = null;
@@ -55,10 +68,12 @@ namespace BehaviorDiff.Cli
             string? ciProvider = null;
             string? work = null;
             string? findings = null;
+            string? baseline = null;
             string? cacheDirectory = null;
             TimeSpan cacheRetention = TimeSpan.FromDays(1);
             TimeSpan? traceRetention = null;
             bool keep = false;
+            bool noBaseline = false;
             var positional = new List<string>();
 
             for (int i = firstOption; i < args.Length; i++)
@@ -71,6 +86,8 @@ namespace BehaviorDiff.Cli
                     case "--ci": ciProvider = Next(args, ref i); break;
                     case "--work": work = Next(args, ref i); break;
                     case "--findings": findings = Next(args, ref i); break;
+                    case "--baseline": baseline = Next(args, ref i); break;
+                    case "--no-baseline": noBaseline = true; break;
                     case "--cache-dir": cacheDirectory = Next(args, ref i); break;
                     case "--cache-retention": cacheRetention = ParseDuration(Next(args, ref i)); break;
                     case "--no-cache": cacheDirectory = null; break;
@@ -117,6 +134,19 @@ namespace BehaviorDiff.Cli
             try
             {
                 string resolvedRepository = RefResolution.ResolveRepository(repo, ciProvider);
+                string? baselinePath = noBaseline
+                    ? null
+                    : Path.GetFullPath(baseline ?? Path.Combine(resolvedRepository, ".behaviordiff", "baseline.yml"));
+                if (baseline is null && baselinePath is not null && !File.Exists(baselinePath))
+                {
+                    baselinePath = null;
+                }
+
+                if (baselinePath is not null)
+                {
+                    BaselinePolicy.Read(baselinePath);
+                }
+
                 pipeline = new Pipeline(
                     resolvedRepository,
                     baseRef,
@@ -124,6 +154,7 @@ namespace BehaviorDiff.Cli
                     ciProvider,
                     workDirectory,
                     findingsPath,
+                    baselinePath,
                     keep,
                     cacheDirectory,
                     cacheRetention,
@@ -193,12 +224,14 @@ namespace BehaviorDiff.Cli
 
         private static void Usage()
         {
-            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--work <dir>] [--findings <file>] [--cache-dir <dir>] [--cache-retention <12h|7d>] [--keep-traces <12h|7d>] [--keep]");
+            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--work <dir>] [--findings <file>] [--baseline <file>|--no-baseline] [--cache-dir <dir>] [--cache-retention <12h|7d>] [--keep-traces <12h|7d>] [--keep]");
             Console.WriteLine("       behaviordiff warm <repo> --target <ref> --cache-dir <dir> [--cache-retention <12h|7d>] [--work <dir>] [--keep]");
             Console.WriteLine("       behaviordiff detect-language <repo>");
             Console.WriteLine("       behaviordiff [<repo>] --ci=azuredevops [--work <dir>] [--findings <file>] [--keep]");
             Console.WriteLine("       behaviordiff [<repo>] --ci=github [--work <dir>] [--findings <file>] [--keep]");
             Console.WriteLine("       behaviordiff post --provider=<azuredevops|github> --findings <file> [--gate warn-only|fail-on-findings]");
+            Console.WriteLine("       behaviordiff baseline write --findings <file> [--repo <dir>] [--output <file>] [--expires 30d|--no-expiry]");
+            Console.WriteLine("       behaviordiff baseline apply --findings <file> --baseline <file>");
             Console.WriteLine();
             Console.WriteLine("  exit 0  analyzed, no unexpected divergences");
             Console.WriteLine("  exit 1  analyzed, unexpected divergences found");
@@ -216,6 +249,7 @@ namespace BehaviorDiff.Cli
         private readonly string? _ciProvider;
         private readonly string _work;
         private readonly string _findings;
+        private readonly string? _baseline;
         private readonly bool _keep;
         private readonly TraceCacheSession _cache;
         private readonly bool _warmOnly;
@@ -231,6 +265,7 @@ namespace BehaviorDiff.Cli
             string? ciProvider,
             string work,
             string findings,
+            string? baseline,
             bool keep,
             string? cacheDirectory,
             TimeSpan cacheRetention,
@@ -243,6 +278,7 @@ namespace BehaviorDiff.Cli
             _ciProvider = ciProvider;
             _work = work;
             _findings = findings;
+            _baseline = baseline;
             _keep = keep;
             _cache = new TraceCacheSession(
                 cacheDirectory is null ? null : new LocalDirectoryTraceCacheStore(cacheDirectory, cacheRetention),
@@ -719,8 +755,18 @@ namespace BehaviorDiff.Cli
                 _timings.CacheStoreMilliseconds,
                 _timings.DiffMilliseconds,
                 _timings.FrontierMilliseconds);
+            int policyExitCode = exitCode;
+            if (_baseline is not null)
+            {
+                Console.WriteLine();
+                Console.WriteLine("=== baseline policy ===");
+                BaselineResult baseline = BaselinePolicy.Apply(_findings, _baseline);
+                BaselineCommand.Report(baseline, _baseline);
+                policyExitCode = baseline.ExitCode;
+            }
+
             _timings.Report();
-            return exitCode;
+            return policyExitCode;
         }
 
         private static void ReportScan(RepoScanResult scan)

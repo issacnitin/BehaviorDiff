@@ -97,7 +97,8 @@ namespace BehaviorDiff.Cli
             {
                 foreach (JsonElement member in members.EnumerateArray()
                     .Where(member => String(member, "attribution") == "unexpected"
-                        && Int(member, "untestedCallSiteCount") > 0))
+                        && Int(member, "untestedCallSiteCount") > 0
+                        && !BaselinePolicy.IsSuppressed(member)))
                 {
                     CauseAnchor? anchor = FindCauseAnchor(patches);
                     if (anchor is null)
@@ -224,7 +225,8 @@ namespace BehaviorDiff.Cli
             var explanations = new Dictionary<string, ModelExplanation>(StringComparer.Ordinal);
             using AnthropicExplainer explainer = _explainerFactory(apiKey);
             JsonElement[] unexpected = members.EnumerateArray()
-                .Where(item => String(item, "attribution") == "unexpected")
+                .Where(item => String(item, "attribution") == "unexpected"
+                    && !BaselinePolicy.IsSuppressed(item))
                 .ToArray();
             foreach (JsonElement member in unexpected)
             {
@@ -542,21 +544,32 @@ namespace BehaviorDiff.Cli
             }
 
             JsonElement summary = findings.GetProperty("summary");
-            int unexpectedMembers = Int(summary, "unexpectedMembers");
+            int unexpectedMembers = BaselinePolicy.ActionableUnexpectedMembers(summary);
             if (unexpectedMembers == 0)
             {
-                builder.AppendLine("## BehaviorDiff: no behavior changes outside this diff");
+                int suppressed = Int(summary, "suppressedMembers");
+                builder.AppendLine(suppressed > 0
+                    ? "## BehaviorDiff: no unsuppressed behavior changes outside this diff"
+                    : "## BehaviorDiff: no behavior changes outside this diff");
                 builder.AppendLine();
-                builder.AppendLine("**No unexpected behavior changes across " + Int(summary, "editedFiles")
-                    + " edited files (" + Int(summary, "tracedMembers")
-                    + (Int(summary, "tracedMembers") == 1 ? " member, " : " members, ")
-                    + Int(summary, "observedCallSites")
-                    + (Int(summary, "observedCallSites") == 1 ? " call site observed).**" : " call sites observed).**"));
+                if (suppressed > 0)
+                {
+                    builder.AppendLine("**Every unexpected finding was acknowledged or ignored by the repository baseline.**");
+                }
+                else
+                {
+                    builder.AppendLine("**No unexpected behavior changes across " + Int(summary, "editedFiles")
+                        + " edited files (" + Int(summary, "tracedMembers")
+                        + (Int(summary, "tracedMembers") == 1 ? " member, " : " members, ")
+                        + Int(summary, "observedCallSites")
+                        + (Int(summary, "observedCallSites") == 1 ? " call site observed).**" : " call sites observed).**"));
+                }
             }
             else
             {
                 JsonElement[] unexpected = findings.GetProperty("members").EnumerateArray()
-                    .Where(member => String(member, "attribution") == "unexpected")
+                    .Where(member => String(member, "attribution") == "unexpected"
+                        && !BaselinePolicy.IsSuppressed(member))
                     .ToArray();
                 JsonElement[] gaps = unexpected
                     .Where(member => Int(member, "untestedCallSiteCount") > 0)
@@ -601,6 +614,7 @@ namespace BehaviorDiff.Cli
                 builder.AppendLine(CoverageFooter(findings, lead, repository, headSha));
             }
 
+            AppendBaselinePolicy(builder, findings, repository, headSha);
             builder.AppendLine();
             builder.Append(marker);
             string rendered = builder.ToString();
@@ -846,6 +860,36 @@ namespace BehaviorDiff.Cli
                 + " edited files exercised. " + renderedSource + "._";
         }
 
+        private static void AppendBaselinePolicy(
+            StringBuilder builder,
+            JsonElement findings,
+            string? repository,
+            string? headSha)
+        {
+            if (!findings.TryGetProperty("baseline", out JsonElement baseline))
+            {
+                return;
+            }
+
+            string path = String(baseline, "path");
+            string reference = repository is not null && headSha is not null
+                ? "[`" + path + "`](https://github.com/" + repository + "/blob/" + headSha + "/" + path + ")"
+                : Code(path);
+            int suppressed = Int(baseline, "suppressedMembers");
+            int suppressedCallSites = Int(baseline, "suppressedCallSites");
+            int stale = baseline.GetProperty("staleEntries").GetArrayLength();
+            int expired = baseline.GetProperty("expiredEntries").GetArrayLength();
+            builder.AppendLine();
+            builder.AppendLine("Baseline policy " + reference + ": **" + suppressed + " member(s), "
+                + suppressedCallSites + " call site(s) suppressed**; **" + stale + " stale, "
+                + expired + " expired entry/entries**.");
+            if (stale > 0)
+            {
+                builder.AppendLine("Stale baseline rules: " + string.Join(", ", baseline.GetProperty("staleEntries")
+                    .EnumerateArray().Take(10).Select(entry => Code(String(entry, "ruleId")))) + ".");
+            }
+        }
+
         private static string ShortMember(string memberName)
         {
             int paren = memberName.IndexOf('(');
@@ -895,7 +939,8 @@ namespace BehaviorDiff.Cli
             }
 
             JsonElement[] selected = members.EnumerateArray()
-                .Where(member => String(member, "attribution") == attribution)
+                .Where(member => String(member, "attribution") == attribution
+                    && !BaselinePolicy.IsSuppressed(member))
                 .ToArray();
             if (selected.Length == 0)
             {
@@ -926,10 +971,11 @@ namespace BehaviorDiff.Cli
         private static string RenderBudgetFallback(JsonElement findings, string marker)
         {
             JsonElement summary = findings.GetProperty("summary");
-            bool clean = String(findings, "verdict") == "clean";
+            bool clean = BaselinePolicy.ActionableUnexpectedMembers(summary) == 0;
             JsonElement[] unexpected = findings.TryGetProperty("members", out JsonElement findingMembers)
                 ? findingMembers.EnumerateArray()
-                    .Where(item => String(item, "attribution") == "unexpected")
+                    .Where(item => String(item, "attribution") == "unexpected"
+                        && !BaselinePolicy.IsSuppressed(item))
                     .ToArray()
                 : Array.Empty<JsonElement>();
             int gaps = unexpected.Count(item => Int(item, "untestedCallSiteCount") > 0);
@@ -940,7 +986,7 @@ namespace BehaviorDiff.Cli
             builder.AppendLine(clean
                 ? "**No unexpected behavior changes were found in the observed execution.**"
                 : "**" + gaps + " unasserted behavior gap(s); " + covered
-                    + " test-covered change(s), across " + Int(summary, "unexpectedCallSites")
+                    + " test-covered change(s), across " + BaselinePolicy.ActionableUnexpectedCallSites(summary)
                     + " call site(s).**");
             builder.AppendLine();
             builder.AppendLine("The complete deterministic evidence exceeded GitHub's comment limit. Inspect findings.json "
@@ -950,7 +996,8 @@ namespace BehaviorDiff.Cli
             if (findings.TryGetProperty("members", out JsonElement members))
             {
                 foreach (JsonElement member in members.EnumerateArray()
-                    .Where(item => String(item, "attribution") == "unexpected")
+                    .Where(item => String(item, "attribution") == "unexpected"
+                        && !BaselinePolicy.IsSuppressed(item))
                     .Take(100))
                 {
                     string line = "- " + Code(String(member, "memberName")) + " at " + Code(Source(member))
@@ -965,6 +1012,7 @@ namespace BehaviorDiff.Cli
                 }
             }
 
+            AppendBaselinePolicy(builder, findings, repository: null, headSha: null);
             builder.AppendLine();
             builder.Append(marker);
             return builder.ToString();
