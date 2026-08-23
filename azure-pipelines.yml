@@ -8,6 +8,7 @@ pool:
 variables:
   behaviorDiffImage: ghcr.io/issacnitin/behaviordiff:main
   behaviorDiffGate: warn-only
+  behaviorDiffStrict: 'false'
   behaviorDiffWork: $(Agent.TempDirectory)/behaviordiff-work
   behaviorDiffCache: $(Pipeline.Workspace)/behaviordiff-cache
   behaviorDiffFindings: $(Build.ArtifactStagingDirectory)/behaviordiff/findings.json
@@ -31,13 +32,18 @@ jobs:
           git config --global --add safe.directory '*'
           mkdir -p "$(dirname '$(behaviorDiffFindings)')" '$(behaviorDiffCache)'
 
+          args=('$(Build.Repository.LocalPath)' --ci=azuredevops
+            --work '$(behaviorDiffWork)'
+            --findings '$(behaviorDiffFindings)'
+            --cache-dir '$(behaviorDiffCache)'
+            --cache-retention 1d)
+          if [[ '$(behaviorDiffStrict)' == 'true' ]]; then
+            args+=(--strict)
+          fi
+
           set +e
           BEHAVIORDIFF_EXCLUDE_NAMESPACES='$(behaviorDiffExcludeNamespaces)' \
-            behaviordiff '$(Build.Repository.LocalPath)' --ci=azuredevops \
-              --work '$(behaviorDiffWork)' \
-              --findings '$(behaviorDiffFindings)' \
-              --cache-dir '$(behaviorDiffCache)' \
-              --cache-retention 1d
+            behaviordiff "${args[@]}"
           analysis_exit=$?
           set -e
 

@@ -149,6 +149,18 @@ Nondeterministic keys found as base samples increased:
 
 Three base runs are the current operating point. They captured roughly 97% of the keys found by four runs in this subject while saving one full test invocation. This is sampled evidence, not a proof that a fourth or later run cannot reveal more noise.
 
+## Comment confidence benchmark
+
+The maintained demo suite measures the default comment policy against three known behavioral changes. Each finding remains actionable in `findings.json`; default comments suppress it because the recorded call path does not reach the edited file, while strict comments retain the full evidence.
+
+| Demo | Confidence | Unexpected members / call sites | Default comment | Strict comment | Suppression reason |
+| --- | --- | ---: | --- | --- | --- |
+| Stable sort | medium | 1 / 3 | suppressed | visible | `no_edited_file_reachability` |
+| Retry fallback | medium | 1 / 2 | suppressed | visible | `no_edited_file_reachability` |
+| Configuration threshold | medium | 1 / 2 | suppressed | visible | `no_edited_file_reachability` |
+
+None of the three findings was classified as baseline nondeterministic. This benchmark records what the conservative policy suppresses; it does not relax edited-file reachability to make the demos high-confidence.
+
 ## Public stable-sort demonstration
 
 The maintained .NET demo changes one file in an excluded infrastructure project:

@@ -201,6 +201,99 @@ if ($document.status -ne 'analyzed') { throw "findings status is $($document.sta
 if ($document.members.Count -lt 1) { throw 'analyzed findings has no member evidence' }
 if ($document.members[0].callSiteCount -lt 1) { throw 'member rollup has no call sites' }
 if ($document.members[0].evidence.Count -lt 1) { throw 'member has no per-member evidence' }
+if ($Mutate -and $Change -eq 'sort') {
+    $member = $document.members[0]
+    if ($member.confidence -ne 'medium' -or $member.defaultCommentEligible `
+        -or -not $member.confidenceFactors.verifiedFrontier `
+        -or -not $member.confidenceFactors.exactDigest `
+        -or $member.confidenceFactors.editedFileReachable `
+        -or $member.commentSuppressionReasons -notcontains 'no_edited_file_reachability' `
+        -or $member.nondeterminism.classification -ne 'none') {
+        throw "sort finding did not expose missing edited-file reachability: $($member | ConvertTo-Json -Compress -Depth 5)"
+    }
+    if ($document.commentPolicy.mode -ne 'high-confidence' `
+        -or $document.commentPolicy.eligibleUnexpectedMembers -ne 0 `
+        -or $document.summary.highConfidenceUnexpectedMembers -ne 0) {
+        throw "default comment policy counts are wrong: $($document.commentPolicy | ConvertTo-Json -Compress)"
+    }
+
+    $strictFindings = Join-Path $work 'findings-strict.json'
+    & dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
+        findings --divergences $out --frontier $report --out $strictFindings --exit-code $findingsExit `
+        --base-sha proof-base --pr-sha proof-pr --merge-base proof-merge-base --strict
+    if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE }
+    $strict = Get-Content $strictFindings -Raw | ConvertFrom-Json
+    if ($strict.members.Count -ne $document.members.Count `
+        -or $strict.commentPolicy.mode -ne 'strict' `
+        -or $strict.commentPolicy.eligibleUnexpectedMembers -ne 1) {
+        throw "strict policy did not retain/include the finding: $($strict | ConvertTo-Json -Compress -Depth 6)"
+    }
+
+    $memberParts = ($member.memberName.Split('(')[0]).Split('.')
+    $shortMember = $memberParts[-2] + '.' + $memberParts[-1]
+    $preview = Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj'
+    $defaultGitHub = @(& dotnet run --project $preview -c Release -- $findings 2>&1) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw "default GitHub preview failed: $LASTEXITCODE" }
+    $strictGitHub = @(& dotnet run --project $preview -c Release -- $strictFindings 2>&1) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw "strict GitHub preview failed: $LASTEXITCODE" }
+    $defaultAzure = @(& dotnet run --project $preview -c Release -- --provider=azuredevops $findings 2>&1) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw "default Azure preview failed: $LASTEXITCODE" }
+    $strictAzure = @(& dotnet run --project $preview -c Release -- --provider=azuredevops $strictFindings 2>&1) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw "strict Azure preview failed: $LASTEXITCODE" }
+    foreach ($rendered in @($defaultGitHub, $defaultAzure)) {
+        if ($rendered -match [regex]::Escape($shortMember) `
+            -or $rendered -notmatch 'lower-confidence or nondeterministic finding\(s\) remain') {
+            throw "default comment did not suppress/explain medium finding: $rendered"
+        }
+    }
+    foreach ($rendered in @($strictGitHub, $strictAzure)) {
+        if ($rendered -notmatch [regex]::Escape($shortMember) -or $rendered -notmatch 'strict') {
+            throw "strict comment did not include medium finding: $rendered"
+        }
+    }
+
+    $policyDivergenceSet = Join-Path $work 'divergence-set-policy.json'
+    $policyFindings = Join-Path $work 'findings-policy.json'
+    $divergenceDocument = Get-Content $out -Raw | ConvertFrom-Json
+    foreach ($node in @($divergenceDocument.callTree) + @($divergenceDocument.prCallTree)) {
+        $node.filePath = $changed[0]
+    }
+    $divergenceDocument | ConvertTo-Json -Depth 100 | Set-Content $policyDivergenceSet
+    & dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
+        findings --divergences $policyDivergenceSet --frontier $report --out $policyFindings --exit-code $findingsExit `
+        --base-sha proof-base --pr-sha proof-pr --merge-base proof-merge-base
+    if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE }
+    $policy = Get-Content $policyFindings -Raw | ConvertFrom-Json
+    if ($policy.members[0].confidence -ne 'high' -or -not $policy.members[0].defaultCommentEligible `
+        -or -not $policy.members[0].confidenceFactors.editedFileReachable `
+        -or $policy.commentPolicy.eligibleUnexpectedMembers -ne 1) {
+        throw "verified/exact/reachable finding was not high-confidence: $($policy | ConvertTo-Json -Compress -Depth 6)"
+    }
+
+    $noisyDivergenceSet = Join-Path $work 'divergence-set-noisy.json'
+    $noisyFindings = Join-Path $work 'findings-noisy.json'
+    $divergenceDocument.noiseExclusions = @([ordered]@{
+        testId = 'proof-noise'
+        methodFullName = $member.memberName
+        differences = 1
+    })
+    $divergenceDocument | ConvertTo-Json -Depth 100 | Set-Content $noisyDivergenceSet
+    & dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
+        findings --divergences $noisyDivergenceSet --frontier $report --out $noisyFindings --exit-code $findingsExit `
+        --base-sha proof-base --pr-sha proof-pr --merge-base proof-merge-base
+    if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE }
+    $noisy = Get-Content $noisyFindings -Raw | ConvertFrom-Json
+    if ($noisy.members.Count -ne $document.members.Count `
+        -or $noisy.members[0].confidence -ne 'low' `
+        -or $noisy.members[0].defaultCommentEligible `
+        -or $noisy.members[0].nondeterminism.classification -ne 'baseline-observed' `
+        -or $noisy.members[0].commentSuppressionReasons -notcontains 'baseline_nondeterminism' `
+        -or $noisy.commentPolicy.eligibleUnexpectedMembers -ne 0 `
+        -or $noisy.summary.nondeterministicUnexpectedMembers -ne 1) {
+        throw "nondeterministic finding policy is wrong: $($noisy | ConvertTo-Json -Compress -Depth 6)"
+    }
+    Write-Host 'confidence and nondeterminism policy: PASS' -ForegroundColor Green
+}
 Write-Host "  $($document.summary.unexpectedMembers) unexpected member(s), $($document.summary.unexpectedCallSites) call site(s)"
 Write-Host "  first member evidence count: $($document.members[0].evidence.Count)"
 Write-Host 'findings.json analyzed arm: PASS' -ForegroundColor Green

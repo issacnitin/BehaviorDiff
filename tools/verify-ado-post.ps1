@@ -17,6 +17,7 @@ $findings = Join-Path $proofWork 'findings.json'
 $recording = Join-Path $proofWork 'ado-mock.ndjson'
 $refusal = Join-Path $proofWork 'ado-refusal.json'
 $clean = Join-Path $proofWork 'ado-clean.json'
+$strict = Join-Path $proofWork 'ado-strict.json'
 $ready = Join-Path $proofWork 'ado-mock.ready'
 $port = 0
 
@@ -33,7 +34,7 @@ catch {
 }
 
 try {
-Remove-Item $recording, $refusal, $clean, $ready -Force -ErrorAction SilentlyContinue
+Remove-Item $recording, $refusal, $clean, $strict, $ready -Force -ErrorAction SilentlyContinue
 @{
     schema = 'behaviordiff.findings/1'; status = 'refused'; verdict = 'could_not_analyze'
     isCleanResult = $false; exitCode = 3; exitReason = 'analysis_refused'
@@ -50,6 +51,18 @@ $cleanDocument.summary.unexpectedMembers = 0
 $cleanDocument.summary.unexpectedCallSites = 0
 $cleanDocument.members = @($cleanDocument.members | Where-Object attribution -ne 'unexpected')
 $cleanDocument | ConvertTo-Json -Depth 20 | Set-Content $clean
+
+$strictDocument = Get-Content $findings -Raw | ConvertFrom-Json
+if ($strictDocument.members[0].defaultCommentEligible `
+    -or $strictDocument.members[0].confidence -eq 'high') {
+    throw 'ADO fixture must be lower-confidence so default and strict posting differ'
+}
+$strictDocument.commentPolicy.mode = 'strict'
+$strictDocument.commentPolicy.eligibleUnexpectedMembers = $strictDocument.summary.unexpectedMembers
+$strictDocument.commentPolicy.eligibleUnexpectedCallSites = $strictDocument.summary.unexpectedCallSites
+$strictDocument.commentPolicy.suppressedUnexpectedMembers = 0
+$strictDocument.commentPolicy.suppressedUnexpectedCallSites = 0
+$strictDocument | ConvertTo-Json -Depth 30 | Set-Content $strict
 
 $server = Start-Job -ArgumentList $port, $recording, $ready -ScriptBlock {
     param($port, $recording, $ready)
@@ -135,10 +148,13 @@ $server = Start-Job -ArgumentList $port, $recording, $ready -ScriptBlock {
 
 try {
     $readyDeadline = [DateTime]::UtcNow.AddSeconds(10)
-    while (-not (Test-Path $ready)) {
+    $port = 0
+    while ($port -le 0) {
         if ([DateTime]::UtcNow -gt $readyDeadline) { throw 'local ADO mock did not become ready' }
+        if (Test-Path $ready) {
+            [void][int]::TryParse((Get-Content $ready -Raw), [ref]$port)
+        }
     }
-    $port = [int](Get-Content $ready -Raw)
 
     dotnet build $cli -c Release --nologo -v quiet | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'CLI build failed' }
@@ -149,13 +165,17 @@ try {
     $env:BUILD_REPOSITORY_ID = '00000000-0000-0000-0000-000000000314'
     $env:SYSTEM_PULLREQUEST_PULLREQUESTID = '314'
 
-    Write-Host '=== first post creates summary and anchored member ===' -ForegroundColor Cyan
+    Write-Host '=== default post creates summary only ===' -ForegroundColor Cyan
     dotnet run --project $cli -c Release --no-build -- post --provider=azuredevops --findings $findings
     if ($LASTEXITCODE -ne 0) { throw "warn-only first post returned $LASTEXITCODE" }
 
     Write-Host '=== second post updates, never appends ===' -ForegroundColor Cyan
     dotnet run --project $cli -c Release --no-build -- post --provider=azuredevops --findings $findings
     if ($LASTEXITCODE -ne 0) { throw "warn-only second post returned $LASTEXITCODE" }
+
+    Write-Host '=== strict post adds the anchored member ===' -ForegroundColor Cyan
+    dotnet run --project $cli -c Release --no-build -- post --provider=azuredevops --findings $strict
+    if ($LASTEXITCODE -ne 0) { throw "strict warn-only post returned $LASTEXITCODE" }
 
     Write-Host '=== refusal updates summary and still posts ===' -ForegroundColor Cyan
     dotnet run --project $cli -c Release --no-build -- post --provider=azuredevops --findings $refusal
@@ -182,14 +202,20 @@ try {
     $patches = @($requests | Where-Object method -eq 'PATCH')
     $gets = @($requests | Where-Object method -eq 'GET')
     if ($posts.Count -ne 2) { throw "idempotency failed: expected exactly 2 creates total, got $($posts.Count)" }
-    if ($patches.Count -ne 7) { throw "expected 7 updates across re-push/refusal/gate/fallback/clean, got $($patches.Count)" }
-    if ($gets.Count -ne 6) { throw "expected one list call per invocation, got $($gets.Count)" }
+    if ($patches.Count -ne 6) { throw "expected 6 updates across re-push/strict/refusal/gate/fallback/clean, got $($patches.Count)" }
+    if ($gets.Count -ne 7) { throw "expected one list call per invocation, got $($gets.Count)" }
 
     $summary = $posts | Where-Object { $_.body -match 'behaviordiff:pr:314:summary' } | Select-Object -First 1
     $member = $posts | Where-Object { $_.body -match 'behaviordiff:pr:314:member:' } | Select-Object -First 1
     if (-not $summary -or -not $member) { throw 'summary/member marker missing from create payloads' }
-    if ($summary.body.IndexOf('Edited-code coverage') -gt $summary.body.IndexOf('UNASSERTED')) { throw 'coverage did not precede gap count' }
-    if ($summary.body.IndexOf('UNASSERTED') -gt $summary.body.IndexOf('EXPECTED')) { throw 'summary did not put unasserted gaps first' }
+    if ($summary.body -notmatch 'No high-confidence findings to comment' `
+        -or $summary.body -notmatch 'lower-confidence or nondeterministic finding') {
+        throw 'default summary did not explain confidence suppression'
+    }
+    $strictPatch = $patches | Where-Object { $_.body -match 'UNASSERTED' -and $_.body -match 'Comment policy.*strict' } | Select-Object -First 1
+    if (-not $strictPatch) { throw 'strict summary did not include the lower-confidence finding' }
+    if ($strictPatch.body.IndexOf('Edited-code coverage') -gt $strictPatch.body.IndexOf('UNASSERTED')) { throw 'coverage did not precede strict gap count' }
+    if ($strictPatch.body.IndexOf('UNASSERTED') -gt $strictPatch.body.IndexOf('EXPECTED')) { throw 'strict summary did not put unasserted gaps first' }
     $memberBody = $member.body | ConvertFrom-Json
     if ($memberBody.threadContext.filePath -ne '/samples/SampleApp/ShippingCalculator.cs') { throw 'wrong anchored file path' }
     if ($memberBody.threadContext.rightFileStart.line -ne 10) { throw 'wrong one-based source line' }
@@ -202,7 +228,7 @@ try {
     if (-not $cleanPatch) { throw 'clean summary omitted coverage-qualified wording' }
     if ($cleanPatch.body -match '\bNo findings\b') { throw 'clean summary used an unqualified all-clear' }
 
-    Write-Host 'PASS: first run POSTed one summary and one line-anchored member thread' -ForegroundColor Green
+    Write-Host 'PASS: default POSTed summary only; strict added one line-anchored member thread' -ForegroundColor Green
     Write-Host 'PASS: re-push PATCHed existing comments; total POST count stayed at 2' -ForegroundColor Green
     Write-Host 'PASS: refusal PATCHed the summary with the reason; never posted silence' -ForegroundColor Green
     Write-Host 'PASS: warn-only returned 0; fail-on-findings returned 1' -ForegroundColor Green

@@ -144,6 +144,21 @@ namespace BehaviorDiff.Cli
             summary["actionableUnexpectedCallSites"] = actionableCallSites;
             summary["suppressedMembers"] = suppressedMembers;
             summary["suppressedCallSites"] = suppressedCallSites;
+            JsonObject? commentPolicy = root["commentPolicy"] as JsonObject;
+            if (commentPolicy is not null)
+            {
+                bool strict = string.Equals(commentPolicy["mode"]?.GetValue<string>(), "strict", StringComparison.Ordinal);
+                JsonObject[] commentEligible = members.OfType<JsonObject>().Where(member =>
+                    string.Equals(Text(member, "attribution"), "unexpected", StringComparison.Ordinal)
+                    && member["suppression"] is null
+                    && (strict || member["defaultCommentEligible"]?.GetValue<bool>() != false)).ToArray();
+                int eligibleCallSites = commentEligible.Sum(member => Number(member, "callSiteCount"));
+                commentPolicy["eligibleUnexpectedMembers"] = commentEligible.Length;
+                commentPolicy["eligibleUnexpectedCallSites"] = eligibleCallSites;
+                commentPolicy["suppressedUnexpectedMembers"] = actionableMembers + suppressedMembers - commentEligible.Length;
+                commentPolicy["suppressedUnexpectedCallSites"] = actionableCallSites + suppressedCallSites - eligibleCallSites;
+            }
+
             root["baseline"] = new JsonObject
             {
                 ["schema"] = baseline.Schema,

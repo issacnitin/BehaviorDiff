@@ -98,7 +98,7 @@ namespace BehaviorDiff.Cli
                 foreach (JsonElement member in members.EnumerateArray()
                     .Where(member => String(member, "attribution") == "unexpected"
                         && Int(member, "untestedCallSiteCount") > 0
-                        && !BaselinePolicy.IsSuppressed(member)))
+                        && FindingPolicy.IsCommentEligible(findings, member)))
                 {
                     CauseAnchor? anchor = FindCauseAnchor(patches);
                     if (anchor is null)
@@ -226,7 +226,7 @@ namespace BehaviorDiff.Cli
             using AnthropicExplainer explainer = _explainerFactory(apiKey);
             JsonElement[] unexpected = members.EnumerateArray()
                 .Where(item => String(item, "attribution") == "unexpected"
-                    && !BaselinePolicy.IsSuppressed(item))
+                    && FindingPolicy.IsCommentEligible(findings, item))
                 .ToArray();
             foreach (JsonElement member in unexpected)
             {
@@ -544,15 +544,26 @@ namespace BehaviorDiff.Cli
             }
 
             JsonElement summary = findings.GetProperty("summary");
-            int unexpectedMembers = BaselinePolicy.ActionableUnexpectedMembers(summary);
+            JsonElement[] unexpected = FindingPolicy.EligibleUnexpected(findings);
+            int unexpectedMembers = unexpected.Length;
             if (unexpectedMembers == 0)
             {
                 int suppressed = Int(summary, "suppressedMembers");
-                builder.AppendLine(suppressed > 0
-                    ? "## BehaviorDiff: no unsuppressed behavior changes outside this diff"
-                    : "## BehaviorDiff: no behavior changes outside this diff");
+                int rawUnexpected = Int(summary, "unexpectedMembers");
+                int lowerConfidence = Math.Max(0, rawUnexpected - suppressed);
+                builder.AppendLine(lowerConfidence > 0
+                    ? "## BehaviorDiff: no high-confidence findings to comment"
+                    : suppressed > 0
+                        ? "## BehaviorDiff: no unsuppressed behavior changes outside this diff"
+                        : "## BehaviorDiff: no behavior changes outside this diff");
                 builder.AppendLine();
-                if (suppressed > 0)
+                if (lowerConfidence > 0)
+                {
+                    builder.AppendLine("**" + lowerConfidence
+                        + " lower-confidence or nondeterministic finding(s) remain in `findings.json`; "
+                        + "use strict mode to include them in comments.**");
+                }
+                else if (suppressed > 0)
                 {
                     builder.AppendLine("**Every unexpected finding was acknowledged or ignored by the repository baseline.**");
                 }
@@ -567,10 +578,6 @@ namespace BehaviorDiff.Cli
             }
             else
             {
-                JsonElement[] unexpected = findings.GetProperty("members").EnumerateArray()
-                    .Where(member => String(member, "attribution") == "unexpected"
-                        && !BaselinePolicy.IsSuppressed(member))
-                    .ToArray();
                 JsonElement[] gaps = unexpected
                     .Where(member => Int(member, "untestedCallSiteCount") > 0)
                     .ToArray();
@@ -614,6 +621,7 @@ namespace BehaviorDiff.Cli
                 builder.AppendLine(CoverageFooter(findings, lead, repository, headSha));
             }
 
+            AppendCommentPolicy(builder, findings);
             AppendBaselinePolicy(builder, findings, repository, headSha);
             builder.AppendLine();
             builder.Append(marker);
@@ -890,6 +898,25 @@ namespace BehaviorDiff.Cli
             }
         }
 
+        private static void AppendCommentPolicy(StringBuilder builder, JsonElement findings)
+        {
+            if (!findings.TryGetProperty("commentPolicy", out JsonElement policy))
+            {
+                return;
+            }
+
+            int raw = Int(findings.GetProperty("summary"), "unexpectedMembers");
+            int baselineSuppressed = findings.TryGetProperty("baseline", out JsonElement baseline)
+                ? Int(baseline, "suppressedMembers")
+                : 0;
+            int eligible = FindingPolicy.EligibleUnexpected(findings).Length;
+            int confidenceSuppressed = Math.Max(0, raw - baselineSuppressed - eligible);
+            builder.AppendLine();
+            builder.AppendLine("Comment policy: **" + String(policy, "mode") + "**; " + eligible
+                + " shown, " + confidenceSuppressed
+                + " lower-confidence or nondeterministic finding(s) retained only in `findings.json`.");
+        }
+
         private static string ShortMember(string memberName)
         {
             int paren = memberName.IndexOf('(');
@@ -940,7 +967,7 @@ namespace BehaviorDiff.Cli
 
             JsonElement[] selected = members.EnumerateArray()
                 .Where(member => String(member, "attribution") == attribution
-                    && !BaselinePolicy.IsSuppressed(member))
+                    && (attribution != "unexpected" || FindingPolicy.IsCommentEligible(findings, member)))
                 .ToArray();
             if (selected.Length == 0)
             {
@@ -971,13 +998,8 @@ namespace BehaviorDiff.Cli
         private static string RenderBudgetFallback(JsonElement findings, string marker)
         {
             JsonElement summary = findings.GetProperty("summary");
-            bool clean = BaselinePolicy.ActionableUnexpectedMembers(summary) == 0;
-            JsonElement[] unexpected = findings.TryGetProperty("members", out JsonElement findingMembers)
-                ? findingMembers.EnumerateArray()
-                    .Where(item => String(item, "attribution") == "unexpected"
-                        && !BaselinePolicy.IsSuppressed(item))
-                    .ToArray()
-                : Array.Empty<JsonElement>();
+            JsonElement[] unexpected = FindingPolicy.EligibleUnexpected(findings);
+            bool clean = unexpected.Length == 0;
             int gaps = unexpected.Count(item => Int(item, "untestedCallSiteCount") > 0);
             int covered = unexpected.Length - gaps;
             var builder = new StringBuilder();
@@ -997,7 +1019,7 @@ namespace BehaviorDiff.Cli
             {
                 foreach (JsonElement member in members.EnumerateArray()
                     .Where(item => String(item, "attribution") == "unexpected"
-                        && !BaselinePolicy.IsSuppressed(item))
+                        && FindingPolicy.IsCommentEligible(findings, item))
                     .Take(100))
                 {
                     string line = "- " + Code(String(member, "memberName")) + " at " + Code(Source(member))

@@ -64,12 +64,18 @@ JSON
     GITHUB_OUTPUT="$output" \
     BEHAVIORDIFF_EXCLUDE_NAMESPACES=src/sorting/rule-ordering.js \
         /usr/local/bin/behaviordiff-entrypoint __action \
-        "$repo" "$work" "$findings" "$root/node-cache" 1d warn-only false
+        "$repo" "$work" "$findings" "$root/node-cache" 1d warn-only false true
 
     assert_analyzed_findings "$findings"
     grep -qx 'analysis-exit=1' "$output"
     grep -qx 'status=analyzed' "$output"
     grep -qx 'verdict=findings' "$output"
+        node - "$findings" <<'NODE'
+const artifact = require(process.argv[2]);
+if (artifact.commentPolicy?.mode !== 'strict') {
+    throw new Error(`expected strict comment policy, got ${artifact.commentPolicy?.mode}`);
+}
+NODE
     echo 'CONTAINER_NODE_ACTION_ANALYSIS: PASS'
 }
 

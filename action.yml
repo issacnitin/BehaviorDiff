@@ -33,6 +33,10 @@ inputs:
     description: Post the findings to the GitHub pull request.
     required: false
     default: 'true'
+  strict:
+    description: Include lower-confidence and nondeterministic findings in comments.
+    required: false
+    default: 'false'
 outputs:
   analysis-exit:
     description: BehaviorDiff analysis exit code before posting policy.
@@ -54,3 +58,4 @@ runs:
     - ${{ inputs.cache-retention }}
     - ${{ inputs.gate }}
     - ${{ inputs.post }}
+    - ${{ inputs.strict }}

@@ -15,6 +15,7 @@ $cases = @(
         HeadlineCallSites = 3
         UntestedCallSites = 2
         UnexpectedMembers = 1
+        DefaultCommentEligible = $false
     }
     @{
         Change = 'retry'
@@ -30,6 +31,7 @@ $cases = @(
         HeadlineCallSites = 2
         UntestedCallSites = 1
         UnexpectedMembers = 1
+        DefaultCommentEligible = $false
     }
     @{
         Change = 'config'
@@ -45,6 +47,7 @@ $cases = @(
         HeadlineCallSites = 2
         UntestedCallSites = 1
         UnexpectedMembers = 1
+        DefaultCommentEligible = $false
     }
 )
 
@@ -125,7 +128,8 @@ foreach ($case in $cases) {
     $finding = $findings.members | Where-Object memberName -eq $case.Headline
     if ($null -eq $finding `
         -or $finding.callSiteCount -ne $case.HeadlineCallSites `
-        -or $finding.untestedCallSiteCount -ne $case.UntestedCallSites) {
+        -or $finding.untestedCallSiteCount -ne $case.UntestedCallSites `
+        -or $finding.defaultCommentEligible -ne $case.DefaultCommentEligible) {
         throw "$($case.Change): canonical findings lost the untested headline evidence"
     }
     if ($findings.summary.unexpectedMembers -ne $case.UnexpectedMembers `
@@ -139,15 +143,40 @@ foreach ($case in $cases) {
     if ($LASTEXITCODE -ne 0) { throw "$($case.Change): comment preview failed: $LASTEXITCODE" }
     $comment = $commentOutput -join "`n"
     $comment | Set-Content (Join-Path $work 'comment.md')
-    $gapWord = if ($case.UnexpectedMembers -eq 1) { 'gap' } else { 'gaps' }
-    $expectedHeading = '^## BehaviorDiff: {0} behavior {1} outside this diff' -f `
-        $case.UnexpectedMembers, $gapWord
-    if ($comment -notmatch $expectedHeading `
-        -or $comment -notmatch '<details><summary>Why, and the evidence</summary>' `
-        -or $comment -match 'Unexpected means' `
-        -or $comment -match 'k__BackingField') {
-        throw "$($case.Change): concise comment contract drifted"
+    $strictComment = $null
+    if ($case.DefaultCommentEligible) {
+        $gapWord = if ($case.UnexpectedMembers -eq 1) { 'gap' } else { 'gaps' }
+        $expectedHeading = '^## BehaviorDiff: {0} behavior {1} outside this diff' -f `
+            $case.UnexpectedMembers, $gapWord
+        if ($comment -notmatch $expectedHeading `
+            -or $comment -notmatch '<details><summary>Why, and the evidence</summary>' `
+            -or $comment -match 'Unexpected means' `
+            -or $comment -match 'k__BackingField') {
+            throw "$($case.Change): high-confidence concise comment contract drifted"
+        }
+    } else {
+        if ($comment -notmatch '^## BehaviorDiff: no high-confidence findings to comment' `
+            -or $comment -notmatch 'lower-confidence or nondeterministic finding\(s\) remain' `
+            -or $comment -match [regex]::Escape($case.Headline)) {
+            throw "$($case.Change): default confidence suppression contract drifted"
+        }
+
+        $strictPath = Join-Path $work 'findings-strict-preview.json'
+        $strict = Get-Content $findingsPath -Raw | ConvertFrom-Json
+        $strict.commentPolicy.mode = 'strict'
+        $strict.commentPolicy.eligibleUnexpectedMembers = $strict.summary.unexpectedMembers
+        $strict.commentPolicy.eligibleUnexpectedCallSites = $strict.summary.unexpectedCallSites
+        $strict.commentPolicy.suppressedUnexpectedMembers = 0
+        $strict.commentPolicy.suppressedUnexpectedCallSites = 0
+        $strict | ConvertTo-Json -Depth 100 | Set-Content $strictPath
+        $strictComment = @(& dotnet run --project (Join-Path $PSScriptRoot 'CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+            -c Release -- $strictPath 2>&1) -join "`n"
+        if ($LASTEXITCODE -ne 0 -or $strictComment -notmatch '^## BehaviorDiff: 1 behavior gap outside this diff' `
+            -or $strictComment -notmatch '<details><summary>Why, and the evidence</summary>') {
+            throw "$($case.Change): strict confidence comment contract drifted"
+        }
     }
+    $evidenceComment = if ($case.DefaultCommentEligible) { $comment } else { $strictComment }
 
 
     if ($case.Change -eq 'retry') {
@@ -188,11 +217,11 @@ foreach ($case in $cases) {
 
     if ($case.Change -eq 'sort') {
         if ($finding.assertionReactionSummary -ne '3 tests executed this; 1 test had an assertion react.' `
-            -or $comment -notmatch 'DiscountEngine\.SelectDiscount.*changed, but this PR didn''t edit it' `
-            -or $comment -notmatch 'SelectDiscount returned "CLEARANCE_40", now returns "SEASONAL_15"' `
-            -or $comment -notmatch 'CheckoutTotals\.Compute returned 60, now returns 85' `
-            -or $comment -notmatch '2 of the 3 tests that executed this did not assert on the change' `
-            -or $comment -notmatch '_0 of 1 edited files exercised') {
+            -or $evidenceComment -notmatch 'DiscountEngine\.SelectDiscount.*changed, but this PR didn''t edit it' `
+            -or $evidenceComment -notmatch 'SelectDiscount returned "CLEARANCE_40", now returns "SEASONAL_15"' `
+            -or $evidenceComment -notmatch 'CheckoutTotals\.Compute returned 60, now returns 85' `
+            -or $evidenceComment -notmatch '2 of the 3 tests that executed this did not assert on the change' `
+            -or $evidenceComment -notmatch '_0 of 1 edited files exercised') {
             throw 'sort: concise consequence-first comment drifted'
         }
 
@@ -249,12 +278,12 @@ foreach ($case in $cases) {
     }
 
     if ($case.Change -eq 'retry' `
-        -and $comment -notmatch 'A payment that previously succeeded after retries now fails prematurely') {
+        -and $evidenceComment -notmatch 'A payment that previously succeeded after retries now fails prematurely') {
         throw 'retry: concise comment lost the payment consequence lead'
     }
 
     if ($case.Change -eq 'config' `
-        -and $comment -notmatch 'An order totaling 40 now qualifies for free shipping') {
+        -and $evidenceComment -notmatch 'An order totaling 40 now qualifies for free shipping') {
         throw 'config: concise comment lost the free-shipping consequence lead'
     }
 

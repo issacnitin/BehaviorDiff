@@ -70,9 +70,16 @@ namespace BehaviorDiff.Engine
             string prSha = string.Empty;
             string mergeBaseSha = string.Empty;
             int exitCode = 0;
+            bool strict = false;
 
             for (int i = 1; i < args.Length; i++)
             {
+                if (args[i] == "--strict")
+                {
+                    strict = true;
+                    continue;
+                }
+
                 if (i + 1 >= args.Length)
                 {
                     Console.Error.WriteLine("Missing value for " + args[i]);
@@ -107,7 +114,8 @@ namespace BehaviorDiff.Engine
                 exitCode,
                 baseSha,
                 prSha,
-                mergeBaseSha);
+                mergeBaseSha,
+                strictCommentPolicy: strict);
             return ExitOk;
         }
 

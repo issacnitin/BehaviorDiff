@@ -74,6 +74,7 @@ namespace BehaviorDiff.Cli
             TimeSpan? traceRetention = null;
             bool keep = false;
             bool noBaseline = false;
+            bool strict = false;
             var positional = new List<string>();
 
             for (int i = firstOption; i < args.Length; i++)
@@ -93,6 +94,7 @@ namespace BehaviorDiff.Cli
                     case "--no-cache": cacheDirectory = null; break;
                     case "--keep-traces": traceRetention = ParseDuration(Next(args, ref i)); break;
                     case "--keep": keep = true; break;
+                    case "--strict": strict = true; break;
                     case "-h":
                     case "--help":
                         Usage();
@@ -159,7 +161,8 @@ namespace BehaviorDiff.Cli
                     cacheDirectory,
                     cacheRetention,
                     traceRetention,
-                    warmOnly);
+                    warmOnly,
+                    strict);
                 return pipeline.Run();
             }
             catch (CliException ex)
@@ -224,7 +227,7 @@ namespace BehaviorDiff.Cli
 
         private static void Usage()
         {
-            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--work <dir>] [--findings <file>] [--baseline <file>|--no-baseline] [--cache-dir <dir>] [--cache-retention <12h|7d>] [--keep-traces <12h|7d>] [--keep]");
+            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--work <dir>] [--findings <file>] [--baseline <file>|--no-baseline] [--strict] [--cache-dir <dir>] [--cache-retention <12h|7d>] [--keep-traces <12h|7d>] [--keep]");
             Console.WriteLine("       behaviordiff warm <repo> --target <ref> --cache-dir <dir> [--cache-retention <12h|7d>] [--work <dir>] [--keep]");
             Console.WriteLine("       behaviordiff detect-language <repo>");
             Console.WriteLine("       behaviordiff [<repo>] --ci=azuredevops [--work <dir>] [--findings <file>] [--keep]");
@@ -254,6 +257,7 @@ namespace BehaviorDiff.Cli
         private readonly TraceCacheSession _cache;
         private readonly bool _warmOnly;
         private readonly TimeSpan? _traceRetention;
+        private readonly bool _strict;
         private readonly PipelineTimings _timings = new PipelineTimings();
 
         internal ResolvedRefs? ResolvedRefs { get; private set; }
@@ -270,7 +274,8 @@ namespace BehaviorDiff.Cli
             string? cacheDirectory,
             TimeSpan cacheRetention,
             TimeSpan? traceRetention,
-            bool warmOnly)
+            bool warmOnly,
+            bool strict)
         {
             _repo = repo;
             _baseRef = baseRef;
@@ -286,6 +291,7 @@ namespace BehaviorDiff.Cli
                 _timings);
             _traceRetention = traceRetention;
             _warmOnly = warmOnly;
+            _strict = strict;
         }
 
         internal int Run()
@@ -754,7 +760,8 @@ namespace BehaviorDiff.Cli
                 _timings.CacheRestoreMilliseconds,
                 _timings.CacheStoreMilliseconds,
                 _timings.DiffMilliseconds,
-                _timings.FrontierMilliseconds);
+                _timings.FrontierMilliseconds,
+                _strict);
             int policyExitCode = exitCode;
             if (_baseline is not null)
             {

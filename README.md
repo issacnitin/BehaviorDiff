@@ -175,6 +175,8 @@ Useful options:
 --ci=azuredevops        Resolve refs from Azure Pipelines variables
 ```
 
+PR comments use a high-confidence policy by default. A finding is high-confidence only when its frontier is verified, every compared digest is exact, an edited file appears on its recorded call path, and the same member showed no baseline-run or manifest nondeterminism. Every finding remains in `findings.json` with `confidence`, `confidenceFactors`, `nondeterminism`, and `commentSuppressionReasons`; comments show how many lower-confidence findings were retained only in the artifact. Pass `--strict` to include all unsuppressed findings in comments. The GitHub Action exposes the same behavior through `strict: 'true'`, and Azure Pipelines through `behaviorDiffStrict: 'true'`.
+
 Exit codes:
 
 | Code | Meaning |

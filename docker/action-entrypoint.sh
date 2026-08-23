@@ -8,12 +8,18 @@ cache_dir="${4:-/github/workspace/.behaviordiff/cache}"
 cache_retention="${5:-1d}"
 gate="${6:-warn-only}"
 post="${7:-true}"
+strict="${8:-false}"
 
 mkdir -p "$(dirname "$findings")" "$cache_dir"
 
+analysis_args=("$repo" --ci=github --work "$work" --findings "$findings"
+    --cache-dir "$cache_dir" --cache-retention "$cache_retention")
+if [[ "${strict,,}" == "true" ]]; then
+    analysis_args+=(--strict)
+fi
+
 set +e
-behaviordiff "$repo" --ci=github --work "$work" --findings "$findings" \
-    --cache-dir "$cache_dir" --cache-retention "$cache_retention"
+behaviordiff "${analysis_args[@]}"
 analysis_exit=$?
 set -e
 

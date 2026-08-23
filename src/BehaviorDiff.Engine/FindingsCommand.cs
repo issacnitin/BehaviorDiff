@@ -38,7 +38,8 @@ namespace BehaviorDiff.Engine
             long cacheRestoreMilliseconds = 0,
             long cacheStoreMilliseconds = 0,
             long diffMilliseconds = 0,
-            long frontierMilliseconds = 0)
+            long frontierMilliseconds = 0,
+            bool strictCommentPolicy = false)
         {
             using JsonDocument divergenceSet = JsonDocument.Parse(File.ReadAllText(divergenceSetPath));
             using JsonDocument frontierReport = JsonDocument.Parse(File.ReadAllText(frontierReportPath));
@@ -55,6 +56,8 @@ namespace BehaviorDiff.Engine
                 frontierReport.RootElement.GetProperty("attributionInputs").GetProperty("changedFiles")
                     .EnumerateArray().Select(value => value.GetString() ?? string.Empty),
                 StringComparer.Ordinal);
+            var noiseMethods = Methods(divergenceSet.RootElement, "noiseExclusions");
+            var manifestNoiseMethods = Methods(divergenceSet.RootElement, "manifestNoise");
 
             var members = nodes
                 .GroupBy(node => String(node, "methodFullName"), StringComparer.Ordinal)
@@ -65,13 +68,20 @@ namespace BehaviorDiff.Engine
                     observations,
                     baseCallTree,
                     prCallTree,
-                    changedFiles))
+                    changedFiles,
+                    noiseMethods,
+                    manifestNoiseMethods))
                 .ToArray();
 
             int unexpectedMembers = members.Count(member => member.Attribution == "unexpected");
             int expectedMembers = members.Count(member => member.Attribution == "expected");
             int unexpectedCallSites = members.Where(member => member.Attribution == "unexpected").Sum(member => member.CallSiteCount);
             int expectedCallSites = members.Where(member => member.Attribution == "expected").Sum(member => member.CallSiteCount);
+            int defaultEligibleMembers = members.Count(member => member.Attribution == "unexpected" && member.DefaultCommentEligible);
+            int defaultEligibleCallSites = members.Where(member => member.Attribution == "unexpected" && member.DefaultCommentEligible)
+                .Sum(member => member.CallSiteCount);
+            int commentEligibleMembers = strictCommentPolicy ? unexpectedMembers : defaultEligibleMembers;
+            int commentEligibleCallSites = strictCommentPolicy ? unexpectedCallSites : defaultEligibleCallSites;
 
             var artifact = new
             {
@@ -83,6 +93,14 @@ namespace BehaviorDiff.Engine
                 exitCode,
                 exitReason = unexpectedMembers == 0 ? "analyzed_no_unexpected" : "unexpected_findings",
                 refs = new { baseSha, prSha, mergeBaseSha },
+                commentPolicy = new
+                {
+                    mode = strictCommentPolicy ? "strict" : "high-confidence",
+                    eligibleUnexpectedMembers = commentEligibleMembers,
+                    eligibleUnexpectedCallSites = commentEligibleCallSites,
+                    suppressedUnexpectedMembers = unexpectedMembers - commentEligibleMembers,
+                    suppressedUnexpectedCallSites = unexpectedCallSites - commentEligibleCallSites,
+                },
                 baseTraceCache = new
                 {
                     status = cacheStatus,
@@ -106,6 +124,12 @@ namespace BehaviorDiff.Engine
                 {
                     unexpectedMembers,
                     unexpectedCallSites,
+                    highConfidenceUnexpectedMembers = defaultEligibleMembers,
+                    highConfidenceUnexpectedCallSites = defaultEligibleCallSites,
+                    nondeterministicUnexpectedMembers = members.Count(member =>
+                        member.Attribution == "unexpected" && member.Nondeterminism.Classification != "none"),
+                    defaultCommentSuppressedMembers = unexpectedMembers - defaultEligibleMembers,
+                    defaultCommentSuppressedCallSites = unexpectedCallSites - defaultEligibleCallSites,
                     expectedMembers,
                     expectedCallSites,
                     untestedMembers = members.Count(member => member.UntestedCallSiteCount > 0),
@@ -161,7 +185,9 @@ namespace BehaviorDiff.Engine
             IReadOnlyList<JsonElement> divergences,
             IReadOnlyList<JsonElement> baseCallTree,
             IReadOnlyList<JsonElement> prCallTree,
-            IReadOnlySet<string> changedFiles)
+            IReadOnlySet<string> changedFiles,
+            IReadOnlySet<string> noiseMethods,
+            IReadOnlySet<string> manifestNoiseMethods)
         {
             JsonElement first = group.First();
             string? filePath = NullableString(first, "filePath");
@@ -197,6 +223,36 @@ namespace BehaviorDiff.Engine
                 baseCallTree,
                 prCallTree,
                 changedFiles);
+            string[] changedFilesReachingMember = evidence.SelectMany(item => item.ChangedFilesOnPath)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(path => path, StringComparer.Ordinal)
+                .ToArray();
+            bool verified = String(first, "classification") == "frontier";
+            bool exact = evidence.Length > 0
+                && evidence.All(item => string.Equals(item.DigestConfidence, "Exact", StringComparison.Ordinal));
+            bool reachable = changedFilesReachingMember.Length > 0;
+            var nondeterminismReasons = new List<string>();
+            if (noiseMethods.Contains(group.Key))
+            {
+                nondeterminismReasons.Add("same member varied between baseline runs");
+            }
+
+            if (manifestNoiseMethods.Contains(group.Key))
+            {
+                nondeterminismReasons.Add("same member's instrumentation state varied between baseline runs");
+            }
+
+            string[] commentSuppressionReasons = new[]
+            {
+                verified ? null : "unverified_frontier",
+                exact ? null : "non_exact_digest",
+                reachable ? null : "no_edited_file_reachability",
+                nondeterminismReasons.Count == 0 ? null : "baseline_nondeterminism",
+            }.Where(reason => reason is not null).Select(reason => reason!).ToArray();
+            bool defaultCommentEligible = commentSuppressionReasons.Length == 0;
+            string confidence = defaultCommentEligible
+                ? "high"
+                : nondeterminismReasons.Count > 0 || !exact ? "low" : "medium";
 
             return new FindingMember
             {
@@ -213,11 +269,22 @@ namespace BehaviorDiff.Engine
                 ObservingTests = observingTests,
                 TestsWithAssertionReaction = testsWithAssertionReaction,
                 AssertionReactionSummary = AssertionReactionSummary(executingTestCount, testsWithAssertionReaction),
-                ChangedFilesReachingMember = evidence.SelectMany(item => item.ChangedFilesOnPath)
-                    .Distinct(StringComparer.Ordinal)
-                    .OrderBy(path => path, StringComparer.Ordinal)
-                    .ToArray(),
-                Verified = String(first, "classification") == "frontier",
+                ChangedFilesReachingMember = changedFilesReachingMember,
+                Verified = verified,
+                Confidence = confidence,
+                ConfidenceFactors = new FindingConfidenceFactors
+                {
+                    VerifiedFrontier = verified,
+                    ExactDigest = exact,
+                    EditedFileReachable = reachable,
+                },
+                DefaultCommentEligible = defaultCommentEligible,
+                CommentSuppressionReasons = commentSuppressionReasons,
+                Nondeterminism = new FindingNondeterminism
+                {
+                    Classification = nondeterminismReasons.Count == 0 ? "none" : "baseline-observed",
+                    Reasons = nondeterminismReasons.ToArray(),
+                },
                 Symptoms = group.SelectMany(node => Strings(node, "symptoms")).Distinct(StringComparer.Ordinal).ToArray(),
                 DowngradeReasons = group.SelectMany(node => Strings(node, "downgradeReasons")).Distinct(StringComparer.Ordinal).ToArray(),
                 DescendantsCompared = group.Sum(node => Int(node, "descendantKeysCompared")),
@@ -462,6 +529,11 @@ namespace BehaviorDiff.Engine
                 ? values.EnumerateArray().Select(value => value.GetString() ?? string.Empty)
                 : Enumerable.Empty<string>();
 
+        private static HashSet<string> Methods(JsonElement root, string property) =>
+            root.TryGetProperty(property, out JsonElement values) && values.ValueKind == JsonValueKind.Array
+                ? new HashSet<string>(values.EnumerateArray().Select(value => String(value, "methodFullName")), StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+
         private sealed class FindingMember
         {
             public string MemberName { get; init; } = string.Empty;
@@ -477,12 +549,30 @@ namespace BehaviorDiff.Engine
             public string AssertionReactionSummary { get; init; } = string.Empty;
             public string[] ChangedFilesReachingMember { get; init; } = Array.Empty<string>();
             public bool Verified { get; init; }
+            public string Confidence { get; init; } = string.Empty;
+            public FindingConfidenceFactors ConfidenceFactors { get; init; } = new();
+            public bool DefaultCommentEligible { get; init; }
+            public string[] CommentSuppressionReasons { get; init; } = Array.Empty<string>();
+            public FindingNondeterminism Nondeterminism { get; init; } = new();
             public string[] Symptoms { get; init; } = Array.Empty<string>();
             public string[] DowngradeReasons { get; init; } = Array.Empty<string>();
             public int DescendantsCompared { get; init; }
             public int UntestedCallSiteCount { get; init; }
             public FindingEvidence[] Evidence { get; init; } = Array.Empty<FindingEvidence>();
             public FindingConsequence[] Consequences { get; init; } = Array.Empty<FindingConsequence>();
+        }
+
+        private sealed class FindingConfidenceFactors
+        {
+            public bool VerifiedFrontier { get; init; }
+            public bool ExactDigest { get; init; }
+            public bool EditedFileReachable { get; init; }
+        }
+
+        private sealed class FindingNondeterminism
+        {
+            public string Classification { get; init; } = "none";
+            public string[] Reasons { get; init; } = Array.Empty<string>();
         }
 
         private sealed class FindingConsequence
