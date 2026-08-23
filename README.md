@@ -108,6 +108,8 @@ docker run --rm \
 
 The normal image entrypoint is `behaviordiff`; no PowerShell wrapper is involved. The unified CLI currently orchestrates .NET, Java, and Node/TypeScript repositories. The same image exposes the Go source rewriter as `behaviordiff-go-rewrite`; Go is not yet wired into the unified base/PR CLI pipeline.
 
+The verified Linux/amd64 image is 587,777,802 bytes (560.5 MiB) and contains .NET SDK 8.0.424, OpenJDK 17.0.17, Maven 3.9.11, Node 24.19.0, npm 11.17.0, and Go 1.27.0. The container workflow reports the exact size for every published build.
+
 ### Install the GitHub release
 
 Download the package from the [latest release](https://github.com/issacnitin/BehaviorDiff/releases/latest), then install it from the download directory:

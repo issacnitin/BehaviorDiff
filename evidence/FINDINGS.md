@@ -76,6 +76,12 @@ The warm run reduced end-to-end wall time by 84.1%, from 5 minutes 39.705 second
 
 The run exercised member lifecycle changes, generated members that could not be attributed through normal Git paths, and nondeterministic residual behavior in unedited caches. Peak diff working set was 1.33 GB against 416 MB of parsed traces. Memory currently scales with event count because parsed events are retained for comparison.
 
+## Container packaging
+
+The single Linux/amd64 image was built with the production Dockerfile and inspected at 587,777,802 bytes (560.5 MiB). Its executable inventory was .NET SDK 8.0.424, OpenJDK 17.0.17, Maven 3.9.11, Node 24.19.0, npm 11.17.0, and Go 1.27.0. The image also contains the .NET tracer and Cecil weaver, shaded Java agent, production Node tracer, Go source rewriter, CLI, and engine.
+
+The Docker-only proof creates fresh Git histories from the Node and Java sort fixtures, runs complete base/PR analyses, and requires analyzed findings from both. The Node path enters through the published Action dispatch and verifies its outputs; the Java path enters through the normal image CLI. The host proof command invokes only Bash and Docker.
+
 ## Conformance gates
 
 Each language tracer is built twice independently, traces an unchanged language-owned reference project, and feeds those runs to the real engine. The reusable harness requires a matched-key floor, identical subject method sets, identical per-key event counts, contiguous identical entry ordinals, usable source attribution, and ten digest proofs.

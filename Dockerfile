@@ -40,7 +40,8 @@ COPY src/BehaviorDiff.Tracer/ src/BehaviorDiff.Tracer/
 COPY src/BehaviorDiff.Tracer.Xunit/ src/BehaviorDiff.Tracer.Xunit/
 COPY src/BehaviorDiff.Cli/ src/BehaviorDiff.Cli/
 COPY tools/Weaver/ tools/Weaver/
-RUN dotnet restore src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj
+RUN dotnet restore src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj \
+    --source https://www.nuget.org/api/v2/ -p:NuGetAudit=false
 RUN dotnet publish src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj \
     --configuration Release --no-restore --output /out --nologo
 RUN dotnet publish tools/Weaver/Weaver.csproj \

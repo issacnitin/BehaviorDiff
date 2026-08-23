@@ -38,25 +38,36 @@ NODE
 run_node_proof() {
     local repo="$root/node-repo"
     local work="$root/node-work"
+    local findings="$work/findings.json"
+    local event="$root/github-event.json"
+    local output="$root/github-output.txt"
     initialize_fixture NodeSortDemo "$repo"
     local base
     base="$(git -C "$repo" rev-parse HEAD)"
-    sed -i 's|a.priority - b.priority|(a.priority - b.priority) || a.code.localeCompare(b.code)|' \
+    sed -i 's@a.priority - b.priority@(a.priority - b.priority) || a.code.localeCompare(b.code)@' \
         "$repo/src/sorting/rule-ordering.js"
     git -C "$repo" add src/sorting/rule-ordering.js
     git -C "$repo" commit --quiet -m 'pr: make priority ties deterministic by code'
     local pr
     pr="$(git -C "$repo" rev-parse HEAD)"
 
-    set +e
+    cat > "$event" <<JSON
+{"number":1,"pull_request":{"base":{"sha":"$base"},"head":{"sha":"$pr"}}}
+JSON
+
+    GITHUB_EVENT_PATH="$event" \
+    GITHUB_REPOSITORY=behaviordiff/container-proof \
+    GITHUB_WORKSPACE="$repo" \
+    GITHUB_OUTPUT="$output" \
     BEHAVIORDIFF_EXCLUDE_NAMESPACES=src/sorting/rule-ordering.js \
-        behaviordiff "$repo" --base "$base" --pr "$pr" --work "$work" \
-        --findings "$work/findings.json"
-    local exit_code=$?
-    set -e
-    [[ $exit_code -eq 1 ]] || { echo "Node container analysis exited $exit_code, expected 1" >&2; exit 1; }
-    assert_analyzed_findings "$work/findings.json"
-    echo 'CONTAINER_NODE_ANALYSIS: PASS'
+        /usr/local/bin/behaviordiff-entrypoint __action \
+        "$repo" "$work" "$findings" "$root/node-cache" 1d warn-only false
+
+    assert_analyzed_findings "$findings"
+    grep -qx 'analysis-exit=1' "$output"
+    grep -qx 'status=analyzed' "$output"
+    grep -qx 'verdict=findings' "$output"
+    echo 'CONTAINER_NODE_ACTION_ANALYSIS: PASS'
 }
 
 run_java_proof() {
