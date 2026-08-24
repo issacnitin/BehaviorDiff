@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -74,6 +75,7 @@ final class ClassRewriterTest {
         RuntimeHooks.setSink((frame, returnValue, throwable) ->
             completions.add(new Completion(frame, returnValue, throwable)));
         Object fixture = loadRewritten(CorrelationFixture.class);
+        assertEquals(0, completions.size());
         completions.clear();
 
         assertEquals(5, invoke(fixture, "first", new Class<?>[0]));
@@ -183,6 +185,73 @@ final class ClassRewriterTest {
         assertEquals("done", successful.returnValue);
         assertInstanceOf(IllegalStateException.class, failed.throwable);
         assertNull(failed.returnValue);
+    }
+
+    @Test
+    void tracerFailureCannotCorruptTheApplicationCallStack() throws Exception {
+        RuntimeHooks.setSink((frame, returnValue, throwable) -> {
+            throw new IllegalStateException("simulated trace write failure");
+        });
+        Object fixture = loadRewrittenFixture();
+
+        assertEquals(4, invoke(fixture, "normal", new Class<?>[] { int.class }, 3));
+        assertEquals(5, invoke(fixture, "normal", new Class<?>[] { int.class }, 4));
+    }
+
+    @Test
+    void skippedInnerCompletionCannotCorruptTheApplicationCallStack() {
+        CallFrame outer = enter("outer");
+        enter("inner");
+
+        RuntimeHooks.exit(outer, null, null);
+
+        CallFrame recovered = enter("recovered");
+        assertEquals(0, recovered.callDepth());
+        assertEquals(0, recovered.parentCallId());
+        RuntimeHooks.exit(recovered, null, null);
+    }
+
+    @Test
+    void traceOverflowWritesOnlyCompleteEventsAndAccountsForDrops() throws Exception {
+        Path configured = repositoryRoot.resolve("run.ndjson");
+        TraceSession session = TraceSession.start(configured.toString(), 1);
+        RuntimeHooks.initialize(session);
+
+        CallFrame retained = enter("retained");
+        RuntimeHooks.exit(retained, null, null);
+        CallFrame dropped = enter("dropped");
+        assertNull(dropped.argumentsDigest());
+        RuntimeHooks.exit(dropped, null, null);
+        session.close();
+
+        Path trace = Files.list(repositoryRoot)
+            .filter(path -> path.getFileName().toString().matches("run\\.\\d+\\.ndjson"))
+            .findFirst()
+            .orElseThrow();
+        Path manifest = Files.list(repositoryRoot)
+            .filter(path -> path.getFileName().toString().matches("run\\.\\d+\\.manifest\\.ndjson"))
+            .findFirst()
+            .orElseThrow();
+        List<String> events = Files.readAllLines(trace);
+        assertEquals(1, events.size());
+        assertTrue(events.get(0).startsWith("{\"testId\":"));
+        String manifestText = Files.readString(manifest);
+        assertTrue(manifestText.contains(
+            "\"kind\":\"writer\",\"enqueued\":2,\"written\":1,\"dropped\":1,\"capacity\":1"));
+    }
+
+    private static CallFrame enter(String methodFullName) {
+        return RuntimeHooks.enter(
+            methodFullName,
+            new Object[0],
+            new String[0],
+            null,
+            "unresolved",
+            0,
+            false,
+            false,
+            true,
+            "test");
     }
 
     private static Object loadRewrittenFixture() throws Exception {

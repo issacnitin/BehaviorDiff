@@ -20,7 +20,10 @@ import java.util.UUID;
 import java.util.concurrent.atomic.LongAdder;
 
 public final class StructuralDigest {
+    private static final char[] HEX = "0123456789abcdef".toCharArray();
     private static final int MAX_DEPTH = 6;
+    private static final int MAX_ELEMENTS = 16;
+    private static final int MAX_VALUES = 1024;
     private static final int RENDERED_CAP = 2000;
     private static final LongAdder VALUES_DIGESTED = new LongAdder();
     private static final LongAdder DEPTH_LIMITED = new LongAdder();
@@ -59,6 +62,14 @@ public final class StructuralDigest {
     }
 
     private static void write(Object value, StringBuilder output, Context context, int depth) {
+        if (!context.takeValue()) {
+            if (!context.limitWritten) {
+                if (!context.redact) DEPTH_LIMITED.increment();
+                output.append("<depth:budget>");
+                context.limitWritten = true;
+            }
+            return;
+        }
         if (!context.redact) VALUES_DIGESTED.increment();
         if (value == null) {
             output.append("null");
@@ -149,7 +160,8 @@ public final class StructuralDigest {
     private static void writeArray(Object value, StringBuilder output, Context context, int depth, int reference) {
         int length = Array.getLength(value);
         output.append("Array#").append(reference).append('[').append(length).append("){ ");
-        for (int index = 0; index < length; index++) {
+        int count = Math.min(length, MAX_ELEMENTS);
+        for (int index = 0; index < count; index++) {
             if (index > 0) {
                 output.append(", ");
             }
@@ -159,6 +171,9 @@ public final class StructuralDigest {
             } else {
                 write(Array.get(value, index), output, context, depth + 1);
             }
+        }
+        if (length > count) {
+            appendEntryLimit(output, length - count, context);
         }
         output.append(" }");
     }
@@ -173,11 +188,15 @@ public final class StructuralDigest {
             Object[] elements = (Object[]) CollectionInternals.ARRAY_LIST_ELEMENTS.get(value);
             int size = CollectionInternals.ARRAY_LIST_SIZE.getInt(value);
             output.append("ShapeRule:ArrayList#").append(reference).append('[').append(size).append("){ ");
-            for (int index = 0; index < size; index++) {
+            int count = Math.min(size, MAX_ELEMENTS);
+            for (int index = 0; index < count; index++) {
                 if (index > 0) {
                     output.append(", ");
                 }
                 write(elements[index], output, context, depth + 1);
+            }
+            if (size > count) {
+                appendEntryLimit(output, size - count, context);
             }
             output.append(" }");
         } catch (ReflectiveOperationException exception) {
@@ -300,6 +319,11 @@ public final class StructuralDigest {
             .append(exception.getClass().getSimpleName()).append('>');
     }
 
+    private static void appendEntryLimit(StringBuilder output, int omitted, Context context) {
+        if (!context.redact) DEPTH_LIMITED.increment();
+        output.append(", <depth:entries:").append(omitted).append('>');
+    }
+
     private static String escape(String value) {
         return '"' + value.replace("\\", "\\\\").replace("\"", "\\\"") + '"';
     }
@@ -309,7 +333,8 @@ public final class StructuralDigest {
             byte[] bytes = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
             StringBuilder output = new StringBuilder("sha256:");
             for (byte item : bytes) {
-                output.append(String.format("%02x", item & 0xff));
+                int valueByte = item & 0xff;
+                output.append(HEX[valueByte >>> 4]).append(HEX[valueByte & 0xf]);
             }
             return output.toString();
         } catch (NoSuchAlgorithmException exception) {
@@ -321,10 +346,16 @@ public final class StructuralDigest {
         private final IdentityHashMap<Object, Integer> references = new IdentityHashMap<>();
         private final boolean redact;
         private final String[] parameterNames;
+        private int remainingValues = MAX_VALUES;
+        private boolean limitWritten;
 
         private Context(boolean redact, String[] parameterNames) {
             this.redact = redact;
             this.parameterNames = parameterNames;
+        }
+
+        private boolean takeValue() {
+            return remainingValues-- > 0;
         }
     }
 

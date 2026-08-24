@@ -135,7 +135,8 @@ final class ClassRewriter {
             MethodVisitor delegate = super.visitMethod(access, name, descriptor, signature, exceptions);
             if (delegate == null
                 || (access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0
-                || name.equals("<clinit>")) {
+                || name.equals("<clinit>")
+                || name.equals("<init>") && sourceMetadata.isHarness()) {
                 return delegate;
             }
 

@@ -180,6 +180,22 @@ namespace BehaviorDiff.Cli
                     refs?.MergeBaseSha);
                 return ex.ExitCode;
             }
+            catch (DiffInputException ex)
+            {
+                string reason = ex.GetType().Name + ": " + ex.Message;
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("REFUSED: " + reason);
+                ResolvedRefs? refs = pipeline?.ResolvedRefs;
+                FindingsCommand.WriteInvalid(
+                    findingsPath,
+                    "refused",
+                    ExitCodes.RunInvalid,
+                    reason,
+                    refs?.BaseSha,
+                    refs?.PrSha,
+                    refs?.MergeBaseSha);
+                return ExitCodes.RunInvalid;
+            }
             catch (Exception ex)
             {
                 string reason = ex.GetType().Name + ": " + ex.Message;

@@ -3,10 +3,13 @@ package io.behaviordiff.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -24,6 +27,13 @@ final class StructuralDigestTest {
 
         assertTrue(result.rendered().contains("value=Integer:42"));
         assertEquals(List.of(), SideEffectValue.calls);
+    }
+
+    @Test
+    void emitsLowercaseSha256Digest() {
+        assertEquals(
+            "sha256:af9476e2d2e9766ffa8aa350ccd6504c42cfb33bf3329b91ba7c2001ff8486d3",
+            StructuralDigest.compute("value").digest());
     }
 
     @Test
@@ -95,6 +105,29 @@ final class StructuralDigestTest {
         assertEquals(left.rendered(), right.rendered());
         assertTrue(left.rendered().endsWith("<truncated>"));
         assertNotEquals(left.digest(), right.digest());
+    }
+
+    @Test
+    void boundsLargeNestedPrimitiveArrays() {
+        char[][] value = new char[10_000][];
+        Arrays.fill(value, new char[10_000]);
+
+        DigestResult result = assertTimeoutPreemptively(
+            Duration.ofSeconds(2),
+            () -> StructuralDigest.compute(value));
+
+        assertTrue(result.rendered().contains("<depth:entries:9984>"));
+    }
+
+    @Test
+    void boundsTotalDigestWork() {
+        long limitsBefore = StructuralDigest.depthLimited();
+
+        assertTimeoutPreemptively(
+            Duration.ofSeconds(2),
+            () -> StructuralDigest.compute(new char[16][16][16]));
+
+        assertTrue(StructuralDigest.depthLimited() > limitsBefore);
     }
 
     @Test

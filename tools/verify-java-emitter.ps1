@@ -16,7 +16,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Java agent package failed' }
 $trace = Join-Path $work 'run.ndjson'
 & java `
     --add-opens java.base/java.util=ALL-UNNAMED `
-    "-javaagent:$agent=include=sample.emitter;trace=$trace" `
+    "-javaagent:$agent=include=sample.emitter;trace=$trace;repositoryRoot=$repo" `
     -cp (Join-Path $target 'test-classes') `
     sample.emitter.EmitterMain
 if ($LASTEXITCODE -ne 0) { throw "Java emitter fixture failed: $LASTEXITCODE" }
@@ -52,8 +52,15 @@ $root = @($events | Where-Object { $_.methodFullName -like '*EmitterMain.root*' 
 $nested = @($events | Where-Object { $_.methodFullName -like '*EmitterMain.nested*' })
 $thrown = @($events | Where-Object { $_.methodFullName -like '*EmitterMain.throwsNow*' })
 $future = @($events | Where-Object { $_.methodFullName -like '*EmitterMain.future*' })
+$constructors = @($events | Where-Object { $_.methodFullName -like '*EmitterMain.<init>*' })
+$constructorCoverage = @($members | Where-Object { $_.method -like '*EmitterMain.<init>*' })
 if ($root.Count -ne 1 -or $nested.Count -ne 1 -or $root[0].testId -ne $nested[0].testId) {
     throw 'Java structural test correlation failed'
+}
+if ($constructors.Count -ne 0 -or $constructorCoverage.Count -ne 1 `
+    -or $constructorCoverage[0].status -ne 'Skipped' `
+    -or $constructorCoverage[0].detail -ne 'Java: TestClassConstructor') {
+    throw 'Java test-class constructor exclusion is not reconciled'
 }
 if ($thrown.Count -ne 1 -or $thrown[0].exceptionType -ne 'java.lang.IllegalStateException' `
     -or $null -ne $thrown[0].returnDigest) {

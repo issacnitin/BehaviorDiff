@@ -6,6 +6,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 public final class RuntimeHooks {
     interface Sink {
@@ -17,6 +18,7 @@ public final class RuntimeHooks {
     private static final ConcurrentHashMap<String, AtomicInteger> ROOT_ORDINALS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, AtomicInteger> CALL_ORDINALS = new ConcurrentHashMap<>();
     private static volatile Sink sink = (frame, returnValue, throwable) -> { };
+    private static volatile BooleanSupplier accepting = () -> true;
 
     private RuntimeHooks() {
     }
@@ -53,7 +55,9 @@ public final class RuntimeHooks {
             testRoot,
             ordinal,
             Thread.currentThread().getId(),
-            StructuralDigest.computeArguments(arguments, filePath, parameterNames),
+            accepting.getAsBoolean()
+                ? StructuralDigest.computeArguments(arguments, filePath, parameterNames)
+                : null,
             returnsVoid,
             module);
         stack.push(frame);
@@ -62,21 +66,25 @@ public final class RuntimeHooks {
 
     public static void exit(CallFrame frame, Object returnValue, Throwable throwable) {
         pop(frame);
-        sink.completed(frame, returnValue, throwable);
+        complete(frame, returnValue, throwable);
     }
 
     public static void exitFuture(CallFrame frame, CompletableFuture<?> future) {
         pop(frame);
+        if (future == null) {
+            complete(frame, null, null);
+            return;
+        }
         future.whenCompleteAsync((returnValue, throwable) ->
-            sink.completed(frame, returnValue, unwrapCompletion(throwable)));
+            complete(frame, returnValue, unwrapCompletion(throwable)));
     }
 
     private static void pop(CallFrame frame) {
         Deque<CallFrame> stack = CALL_STACK.get();
-        CallFrame current = stack.poll();
-        if (current != frame) {
+        if (stack.peek() != frame) {
             stack.clear();
-            throw new IllegalStateException("BehaviorDiff call stack is unbalanced at " + frame.methodFullName());
+        } else {
+            stack.pop();
         }
         if (stack.isEmpty()) {
             CALL_STACK.remove();
@@ -90,18 +98,28 @@ public final class RuntimeHooks {
         return throwable;
     }
 
+    private static void complete(CallFrame frame, Object returnValue, Throwable throwable) {
+        try {
+            sink.completed(frame, returnValue, throwable);
+        } catch (RuntimeException ignored) {
+            // Instrumentation must not turn a completed application call into a second exceptional exit.
+        }
+    }
+
     private static int next(ConcurrentHashMap<String, AtomicInteger> counters, String key) {
         return counters.computeIfAbsent(key, ignored -> new AtomicInteger()).getAndIncrement();
     }
 
     static void initialize(TraceSession traceSession) {
         setSink(traceSession::writeEvent);
+        accepting = traceSession::accepting;
     }
 
     static void setSink(Sink replacement) {
         CALL_STACK.remove();
         ROOT_ORDINALS.clear();
         CALL_ORDINALS.clear();
+        accepting = () -> true;
         sink = replacement == null ? (frame, returnValue, throwable) -> { } : replacement;
     }
 }

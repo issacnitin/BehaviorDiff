@@ -22,24 +22,34 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
 final class TraceSession {
+    private static final long MAX_EVENTS = 100_000;
     private static final TraceSession DISABLED = new TraceSession();
 
     private final boolean enabled;
     private final Path tracePath;
     private final Path manifestPath;
     private final BufferedWriter traceWriter;
+    private final long maxEvents;
     private final Map<String, ModuleCoverage> modules = new ConcurrentHashMap<>();
     private final LongAdder written = new LongAdder();
+    private final LongAdder dropped = new LongAdder();
+    private boolean closed;
 
     private TraceSession() {
         enabled = false;
         tracePath = null;
         manifestPath = null;
         traceWriter = null;
+        maxEvents = 0;
     }
 
     private TraceSession(String configuredPath) throws IOException {
+        this(configuredPath, MAX_EVENTS);
+    }
+
+    private TraceSession(String configuredPath, long maxEvents) throws IOException {
         enabled = true;
+        this.maxEvents = maxEvents;
         long processId = ProcessHandle.current().pid();
         tracePath = decorate(configuredPath, processId, "");
         manifestPath = decorate(configuredPath, processId, ".manifest");
@@ -61,18 +71,26 @@ final class TraceSession {
     }
 
     static TraceSession start(String configuredPath) {
+        return start(configuredPath, MAX_EVENTS);
+    }
+
+    static TraceSession start(String configuredPath, long maxEvents) {
         if (configuredPath == null || configuredPath.trim().isEmpty()) {
             return disabled();
         }
         try {
-            return new TraceSession(configuredPath);
+            return new TraceSession(configuredPath, maxEvents);
         } catch (IOException exception) {
             throw new IllegalStateException("BehaviorDiff cannot open Java trace output: " + configuredPath, exception);
         }
     }
 
     synchronized void writeEvent(CallFrame frame, Object returnValue, Throwable throwable) {
-        if (!enabled) {
+        if (!enabled || closed) {
+            return;
+        }
+        if (!accepting()) {
+            dropped.increment();
             return;
         }
         DigestResult returnDigest = throwable == null && !frame.returnsVoid()
@@ -117,6 +135,10 @@ final class TraceSession {
         }
     }
 
+    synchronized boolean accepting() {
+        return enabled && !closed && written.sum() < maxEvents;
+    }
+
     void registerClass(
         String moduleName,
         String className,
@@ -128,6 +150,7 @@ final class TraceSession {
             return;
         }
         ModuleCoverage module = modules.computeIfAbsent(moduleName, ModuleCoverage::new);
+        boolean harness = hasTestRoots(classBytes);
         new ClassReader(classBytes).accept(new ClassVisitor(Opcodes.ASM9) {
             private String sourceFile;
             private final Map<String, Integer> lines = new LinkedHashMap<>();
@@ -168,7 +191,8 @@ final class TraceSession {
                     public void visitEnd() {
                         boolean noBody = (access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0;
                         boolean initializer = name.equals("<clinit>");
-                        boolean skipped = excluded || noBody || initializer;
+                        boolean harnessConstructor = harness && name.equals("<init>");
+                        boolean skipped = excluded || noBody || initializer || harnessConstructor;
                         String resolvedSourcePath = sourceResolver.resolve(
                             outputLocation, className, sourceFile);
                         String resolution = sourceFile == null || lines.isEmpty()
@@ -183,8 +207,8 @@ final class TraceSession {
                         module.members.add(new MemberCoverage(
                             className.replace('/', '.') + "." + name + descriptor,
                             skipped,
-                            excluded ? "ExcludedByScope" : initializer ? "Unobservable" : noBody ? "DeclaredExternally" : null,
-                            excluded ? "Java: ExcludedPackage" : initializer ? "Java: ClassInitializer" : noBody ? "Java: NoCode" : null,
+                            excluded ? "ExcludedByScope" : initializer || harnessConstructor ? "Unobservable" : noBody ? "DeclaredExternally" : null,
+                            excluded ? "Java: ExcludedPackage" : initializer ? "Java: ClassInitializer" : harnessConstructor ? "Java: TestClassConstructor" : noBody ? "Java: NoCode" : null,
                             returnKind,
                             roots.getOrDefault(key, false),
                             resolution));
@@ -194,10 +218,38 @@ final class TraceSession {
         }, ClassReader.SKIP_FRAMES);
     }
 
-    private synchronized void close() {
-        if (!enabled) {
+    private static boolean hasTestRoots(byte[] classBytes) {
+        boolean[] found = new boolean[1];
+        new ClassReader(classBytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(
+                int access,
+                String name,
+                String descriptor,
+                String signature,
+                String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public org.objectweb.asm.AnnotationVisitor visitAnnotation(String annotation, boolean visible) {
+                        if (annotation.equals("Lorg/junit/Test;")
+                            || annotation.equals("Lorg/junit/jupiter/api/Test;")
+                            || annotation.equals("Lorg/junit/jupiter/params/ParameterizedTest;")
+                            || annotation.equals("Lorg/testng/annotations/Test;")) {
+                            found[0] = true;
+                        }
+                        return null;
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        return found[0];
+    }
+
+    synchronized void close() {
+        if (!enabled || closed) {
             return;
         }
+        closed = true;
         try {
             traceWriter.flush();
             traceWriter.close();
@@ -247,8 +299,9 @@ final class TraceSession {
                     + StructuralDigest.blocklisted() + ",\"errored\":"
                     + StructuralDigest.errored() + ",\"renderedTruncated\":" + StructuralDigest.renderedTruncated() + "}");
                 long count = written.sum();
-                writeLine(manifest, "{\"kind\":\"writer\",\"enqueued\":" + count + ",\"written\":" + count
-                    + ",\"dropped\":0,\"capacity\":0}");
+                long droppedCount = dropped.sum();
+                writeLine(manifest, "{\"kind\":\"writer\",\"enqueued\":" + (count + droppedCount)
+                    + ",\"written\":" + count + ",\"dropped\":" + droppedCount + ",\"capacity\":1}");
             }
         } catch (IOException exception) {
             throw new IllegalStateException("BehaviorDiff failed to finalize Java trace", exception);

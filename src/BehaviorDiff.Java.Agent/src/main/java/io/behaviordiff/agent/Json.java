@@ -1,6 +1,8 @@
 package io.behaviordiff.agent;
 
 final class Json {
+    private static final char[] HEX = "0123456789abcdef".toCharArray();
+
     private Json() {
     }
 
@@ -21,7 +23,11 @@ final class Json {
                 case '\t': output.append("\\t"); break;
                 default:
                     if (character < 0x20) {
-                        output.append(String.format("\\u%04x", (int) character));
+                        output.append("\\u")
+                            .append(HEX[(character >>> 12) & 0xf])
+                            .append(HEX[(character >>> 8) & 0xf])
+                            .append(HEX[(character >>> 4) & 0xf])
+                            .append(HEX[character & 0xf]);
                     } else {
                         output.append(character);
                     }
