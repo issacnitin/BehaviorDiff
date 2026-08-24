@@ -151,15 +151,34 @@ Three base runs are the current operating point. They captured roughly 97% of th
 
 ## Comment confidence benchmark
 
-The maintained demo suite measures the default comment policy against three known behavioral changes. Each finding remains actionable in `findings.json`; default comments suppress it because the recorded call path does not reach the edited file, while strict comments retain the full evidence.
+The maintained demo suite measures the default comment policy against three known behavioral changes. A finding is default-eligible when it is frontier-verified, Exact, stable across the baseline runs, and connected to the change by an ancestor or descendant divergence in the call tree. The edited helper is deliberately excluded in each demo and contributes zero traced members; that absence is not a disqualifier.
 
-| Demo | Confidence | Unexpected members / call sites | Default comment | Strict comment | Suppression reason |
-| --- | --- | ---: | --- | --- | --- |
-| Stable sort | medium | 1 / 3 | suppressed | visible | `no_edited_file_reachability` |
-| Retry fallback | medium | 1 / 2 | suppressed | visible | `no_edited_file_reachability` |
-| Configuration threshold | medium | 1 / 2 | suppressed | visible | `no_edited_file_reachability` |
+| Demo | Confidence | Unexpected members / call sites | Default comment | Edited traced members |
+| --- | --- | ---: | --- | ---: |
+| Stable sort | high | 1 / 3 | visible | 0 |
+| Retry fallback | high | 1 / 2 | visible | 0 |
+| Configuration threshold | high | 1 / 2 | visible | 0 |
 
-None of the three findings was classified as baseline nondeterministic. This benchmark records what the conservative policy suppresses; it does not relax edited-file reachability to make the demos high-confidence.
+None of the three findings was classified as baseline nondeterministic. Independent Java and Node stable-sort proofs also render one high-confidence default finding each while the edited helper emits no events.
+
+## Real-repository comment policy measurement
+
+The fresh empirical cohort pinned merged pull requests by base and head SHA across three public repositories in .NET and Java. Each analyzed case used three baseline runs, one pull-request run, the production CLI, and the default confidence policy. Two refused attempts were replaced to retain 20 analyzed rows; refusals remain visible and are not counted as clean.
+
+| Outcome | Pull requests | Rate among analyzed |
+| --- | ---: | ---: |
+| Default comment | 0 | 0 / 20 (0%) |
+| Raw behavioral findings | 20 | 20 / 20 (100%) |
+| Analyzed | 20 | 100% |
+| Refused | 2 | excluded |
+
+The analyzed rows comprise 15 FluentValidation PRs, four JSON-java PRs, and GuardClauses #350: 16 .NET and four Java cases. They contain 463 raw unexpected members across 6,210 call sites and zero default-eligible members.
+
+All 20 analyzed rows lacked causal connectivity. Eighteen also had baseline nondeterminism, 17 had non-Exact evidence, and 16 had an unverified frontier. No would-post comments existed to classify. Unlike the former reachability rule, the same policy makes every maintained known-true fixture default-visible, so the zero comment rate is measured with positive-control sensitivity restored. It remains a comment-rate result, not a precision estimate.
+
+[`comment-policy-results.csv`](comment-policy-results.csv) retains the 20 analyzed outcomes and the two excluded refusals. [`comment-policy-summary.json`](comment-policy-summary.json) records the aggregate denominators and rates. The broader pinned candidate manifest remains in [`comment-policy-merged-prs.csv`](comment-policy-merged-prs.csv).
+
+[`comment-policy-audit.md`](comment-policy-audit.md) records known-true sensitivity, the two refusals, GuardClauses correlation repair, and Commons Text trace-integrity repair.
 
 ## Public stable-sort demonstration
 

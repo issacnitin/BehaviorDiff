@@ -1,0 +1,32 @@
+{
+  "schema": "behaviordiff.comment-policy-measurement/3",
+  "attemptedPrs": 22,
+  "analyzedPrs": 20,
+  "refusedPrs": 2,
+  "failedPrs": 0,
+  "defaultCommentPrs": 0,
+  "defaultCommentRateAmongAnalyzed": 0.0,
+  "rawFindingPrs": 20,
+  "rawFindingRateAmongAnalyzed": 1.0,
+  "rawUnexpectedMembers": 463,
+  "rawUnexpectedCallSites": 6210,
+  "eligibleUnexpectedMembers": 0,
+  "eligibleUnexpectedCallSites": 0,
+  "sampledRepositories": 3,
+  "sampledLanguages": 2,
+  "knownTrueFixtures": 5,
+  "knownTrueDefaultVisible": 5,
+  "analyzedByLanguage": {
+    "dotnet": 16,
+    "java": 4
+  },
+  "analyzedByRepository": {
+    "ardalis/GuardClauses": 1,
+    "FluentValidation/FluentValidation": 15,
+    "stleary/JSON-java": 4
+  },
+  "refusedByReason": {
+    "no_changed_member_attribution": 1,
+    "orphan_call_tree": 1
+  }
+}
