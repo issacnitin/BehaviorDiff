@@ -182,7 +182,7 @@ namespace BehaviorDiff.Tracer
         /// <summary>Closes every woven assembly's coverage and writes the manifest. Called before writer stats.</summary>
         internal static void WriteManifest(string path)
         {
-            if (string.IsNullOrEmpty(path) || s_assemblies.Length == 0)
+            if (string.IsNullOrEmpty(path))
             {
                 return;
             }

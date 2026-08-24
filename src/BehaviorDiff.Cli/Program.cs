@@ -920,7 +920,12 @@ namespace BehaviorDiff.Cli
         {
             ProcessResult result = Shell.Run(
                 "dotnet",
-                new[] { "build", tree, "-c", "Release", "--nologo", "-v", "quiet", "-p:DebugType=portable" },
+                new[]
+                {
+                    "build", tree, "-c", "Release", "--nologo", "-v", "quiet",
+                    "-p:DebugType=portable",
+                    "-p:EnableSourceControlManagerQueries=false",
+                },
                 tree);
 
             if (!result.Ok)
@@ -942,6 +947,7 @@ namespace BehaviorDiff.Cli
                 {
                     "build", project.Path, "-c", "Release", "--nologo", "-v", "quiet",
                     "-p:DebugType=portable",
+                    "-p:EnableSourceControlManagerQueries=false",
                 };
                 if (!project.UsesExistingTracerXunit)
                 {

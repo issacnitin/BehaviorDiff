@@ -64,6 +64,8 @@ namespace BehaviorDiff.Weaver
                 var members = new List<MethodBase>();
                 members.AddRange(type.GetMethods(MemberFlags));
                 members.AddRange(type.GetConstructors(MemberFlags));
+                bool testClass = members.Exists(member =>
+                    MethodSelector.IsTestRoot(member, options.TestAttributeNames));
 
                 foreach (MethodBase member in members)
                 {
@@ -77,7 +79,8 @@ namespace BehaviorDiff.Weaver
                         Token = member.MetadataToken,
                         FullName = MethodSelector.BuildFullName(member, parameters),
                         ReturnKind = MethodSelector.ClassifyReturn(member),
-                        IsTestRoot = MethodSelector.IsTestRoot(member, options.TestAttributeNames),
+                        IsTestRoot = MethodSelector.IsTestRoot(member, options.TestAttributeNames)
+                            || testClass && member is ConstructorInfo,
                         SkipReason = reason == SkipReason.None ? null : NeutralReason(reason),
                         SkipDetail = reason == SkipReason.None ? null : ".NET: " + reason.ToString(),
                     };

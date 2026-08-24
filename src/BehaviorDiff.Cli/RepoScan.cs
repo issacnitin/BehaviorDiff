@@ -37,6 +37,9 @@ namespace BehaviorDiff.Cli
         private static readonly Regex Excluded =
             new(@"<BehaviorDiffExclude>\s*true\s*</BehaviorDiffExclude>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        private static readonly Regex ProjectNamespace =
+            new(@"<(?:RootNamespace|AssemblyName)>\s*([^<$\s][^<]*)\s*</(?:RootNamespace|AssemblyName)>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         /// <summary>
         /// Identifies which projects the tracer must reach and whether anything would defeat Step 0.
         /// </summary>
@@ -101,6 +104,17 @@ namespace BehaviorDiff.Cli
                 {
                     int dot = name.IndexOf('.');
                     result.NamespacePrefixes.Add(dot < 0 ? name : name.Substring(0, dot));
+                }
+
+                foreach (Match match in ProjectNamespace.Matches(text))
+                {
+                    string declaredName = match.Groups[1].Value.Trim();
+                    int declaredDot = declaredName.IndexOf('.');
+                    string prefix = declaredDot < 0 ? declaredName : declaredName.Substring(0, declaredDot);
+                    if (!string.Equals(prefix, "BehaviorDiff", StringComparison.Ordinal))
+                    {
+                        result.NamespacePrefixes.Add(prefix);
+                    }
                 }
             }
 
@@ -207,24 +221,10 @@ namespace BehaviorDiff.Cli
             return kit;
         }
 
-        // The assembly-level attribute is what stamps events with a TestId; the module initializer only
-        // moves patching earlier, and is omitted on targets that predate ModuleInitializerAttribute.
+        // The assembly-level attribute stamps events with a TestId. Cecil emits session initialization
+        // directly into each woven module, so this source remains compatible with older C# versions.
         private const string Bootstrap = """
             [assembly: BehaviorDiff.Tracer.TraceTest]
-
-            #if NET5_0_OR_GREATER
-            namespace BehaviorDiff.Injected
-            {
-                internal static class BehaviorDiffBootstrap
-                {
-                    [System.Runtime.CompilerServices.ModuleInitializer]
-                    internal static void Initialize()
-                    {
-                        BehaviorDiff.Tracer.TraceSession.InitializeFromEnvironment();
-                    }
-                }
-            }
-            #endif
             """;
 
         private const string Targets = """
