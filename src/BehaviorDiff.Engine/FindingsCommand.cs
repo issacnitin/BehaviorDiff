@@ -195,8 +195,10 @@ namespace BehaviorDiff.Engine
             var frontierByTest = group
                 .GroupBy(node => String(node, "testId"), StringComparer.Ordinal)
                 .ToDictionary(nodes => nodes.Key, nodes => nodes.First(), StringComparer.Ordinal);
-            var evidence = divergences
+            var memberDivergences = divergences
                 .Where(divergence => string.Equals(String(divergence, "methodFullName"), group.Key, StringComparison.Ordinal))
+                .ToArray();
+            var evidence = memberDivergences
                 .Select(divergence => DescribeEvidence(
                     divergence,
                     frontierByTest,
@@ -230,7 +232,12 @@ namespace BehaviorDiff.Engine
             bool verified = String(first, "classification") == "frontier";
             bool exact = evidence.Length > 0
                 && evidence.All(item => string.Equals(item.DigestConfidence, "Exact", StringComparison.Ordinal));
-            bool reachable = changedFilesReachingMember.Length > 0;
+            bool causallyConnected = HasCausalConnectivity(
+                group.Key,
+                memberDivergences,
+                divergences,
+                baseCallTree,
+                prCallTree);
             var nondeterminismReasons = new List<string>();
             if (noiseMethods.Contains(group.Key))
             {
@@ -246,7 +253,7 @@ namespace BehaviorDiff.Engine
             {
                 verified ? null : "unverified_frontier",
                 exact ? null : "non_exact_digest",
-                reachable ? null : "no_edited_file_reachability",
+                causallyConnected ? null : "no_causal_connectivity",
                 nondeterminismReasons.Count == 0 ? null : "baseline_nondeterminism",
             }.Where(reason => reason is not null).Select(reason => reason!).ToArray();
             bool defaultCommentEligible = commentSuppressionReasons.Length == 0;
@@ -276,7 +283,7 @@ namespace BehaviorDiff.Engine
                 {
                     VerifiedFrontier = verified,
                     ExactDigest = exact,
-                    EditedFileReachable = reachable,
+                    CausallyConnected = causallyConnected,
                 },
                 DefaultCommentEligible = defaultCommentEligible,
                 CommentSuppressionReasons = commentSuppressionReasons,
@@ -292,6 +299,104 @@ namespace BehaviorDiff.Engine
                 Evidence = evidence,
                 Consequences = consequences,
             };
+        }
+
+        private static bool HasCausalConnectivity(
+            string memberName,
+            IReadOnlyList<JsonElement> memberDivergences,
+            IReadOnlyList<JsonElement> divergences,
+            IReadOnlyList<JsonElement> baseCallTree,
+            IReadOnlyList<JsonElement> prCallTree)
+        {
+            foreach (JsonElement divergence in memberDivergences)
+            {
+                int ordinal = NullableInt(divergence, "ordinal") ?? -1;
+                if (ordinal < 0)
+                {
+                    continue;
+                }
+
+                string testId = String(divergence, "testId");
+                JsonElement[] relatedDivergences = divergences
+                    .Where(candidate =>
+                        string.Equals(String(candidate, "testId"), testId, StringComparison.Ordinal)
+                        && !string.Equals(String(candidate, "methodFullName"), memberName, StringComparison.Ordinal)
+                        && (NullableInt(candidate, "ordinal") ?? -1) >= 0)
+                    .ToArray();
+                if (relatedDivergences.Length == 0)
+                {
+                    continue;
+                }
+
+                if (HasRelatedDivergence(baseCallTree, testId, memberName, ordinal, relatedDivergences)
+                    || HasRelatedDivergence(prCallTree, testId, memberName, ordinal, relatedDivergences))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool HasRelatedDivergence(
+            IReadOnlyList<JsonElement> callTree,
+            string testId,
+            string memberName,
+            int ordinal,
+            IReadOnlyList<JsonElement> relatedDivergences)
+        {
+            var byCall = callTree.ToDictionary(
+                node => CallIdentity(String(node, "process"), Long(node, "callId")),
+                node => node,
+                StringComparer.Ordinal);
+            JsonElement[] targets = callTree
+                .Where(node => string.Equals(String(node, "testId"), testId, StringComparison.Ordinal)
+                    && string.Equals(String(node, "methodFullName"), memberName, StringComparison.Ordinal)
+                    && NullableInt(node, "ordinal") == ordinal)
+                .ToArray();
+
+            foreach (JsonElement target in targets)
+            {
+                HashSet<string> targetAncestors = AncestorIdentities(target, byCall);
+                foreach (JsonElement relatedDivergence in relatedDivergences)
+                {
+                    string relatedMember = String(relatedDivergence, "methodFullName");
+                    int relatedOrdinal = NullableInt(relatedDivergence, "ordinal")!.Value;
+                    foreach (JsonElement related in callTree.Where(node =>
+                        string.Equals(String(node, "testId"), testId, StringComparison.Ordinal)
+                        && string.Equals(String(node, "methodFullName"), relatedMember, StringComparison.Ordinal)
+                        && NullableInt(node, "ordinal") == relatedOrdinal))
+                    {
+                        string targetIdentity = CallIdentity(String(target, "process"), Long(target, "callId"));
+                        string relatedIdentity = CallIdentity(String(related, "process"), Long(related, "callId"));
+                        if (targetAncestors.Contains(relatedIdentity)
+                            || AncestorIdentities(related, byCall).Contains(targetIdentity))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static HashSet<string> AncestorIdentities(
+            JsonElement node,
+            IReadOnlyDictionary<string, JsonElement> byCall)
+        {
+            var ancestors = new HashSet<string>(StringComparer.Ordinal);
+            JsonElement current = node;
+            while (NullableLong(current, "parentCallId") is long parentCallId)
+            {
+                string identity = CallIdentity(String(current, "process"), parentCallId);
+                if (!ancestors.Add(identity) || !byCall.TryGetValue(identity, out current))
+                {
+                    break;
+                }
+            }
+
+            return ancestors;
         }
 
         private static FindingConsequence[] DescribeConsequences(
@@ -566,7 +671,7 @@ namespace BehaviorDiff.Engine
         {
             public bool VerifiedFrontier { get; init; }
             public bool ExactDigest { get; init; }
-            public bool EditedFileReachable { get; init; }
+            public bool CausallyConnected { get; init; }
         }
 
         private sealed class FindingNondeterminism

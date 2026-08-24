@@ -203,17 +203,18 @@ if ($document.members[0].callSiteCount -lt 1) { throw 'member rollup has no call
 if ($document.members[0].evidence.Count -lt 1) { throw 'member has no per-member evidence' }
 if ($Mutate -and $Change -eq 'sort') {
     $member = $document.members[0]
-    if ($member.confidence -ne 'medium' -or $member.defaultCommentEligible `
+    if ($member.confidence -ne 'high' -or -not $member.defaultCommentEligible `
         -or -not $member.confidenceFactors.verifiedFrontier `
         -or -not $member.confidenceFactors.exactDigest `
-        -or $member.confidenceFactors.editedFileReachable `
-        -or $member.commentSuppressionReasons -notcontains 'no_edited_file_reachability' `
+        -or -not $member.confidenceFactors.causallyConnected `
+        -or $member.changedFilesReachingMember.Count -ne 0 `
+        -or $member.commentSuppressionReasons.Count -ne 0 `
         -or $member.nondeterminism.classification -ne 'none') {
-        throw "sort finding did not expose missing edited-file reachability: $($member | ConvertTo-Json -Compress -Depth 5)"
+        throw "sort finding did not expose causal connectivity: $($member | ConvertTo-Json -Compress -Depth 5)"
     }
     if ($document.commentPolicy.mode -ne 'high-confidence' `
-        -or $document.commentPolicy.eligibleUnexpectedMembers -ne 0 `
-        -or $document.summary.highConfidenceUnexpectedMembers -ne 0) {
+        -or $document.commentPolicy.eligibleUnexpectedMembers -ne 1 `
+        -or $document.summary.highConfidenceUnexpectedMembers -ne 1) {
         throw "default comment policy counts are wrong: $($document.commentPolicy | ConvertTo-Json -Compress)"
     }
 
@@ -241,9 +242,8 @@ if ($Mutate -and $Change -eq 'sort') {
     $strictAzure = @(& dotnet run --project $preview -c Release -- --provider=azuredevops $strictFindings 2>&1) -join "`n"
     if ($LASTEXITCODE -ne 0) { throw "strict Azure preview failed: $LASTEXITCODE" }
     foreach ($rendered in @($defaultGitHub, $defaultAzure)) {
-        if ($rendered -match [regex]::Escape($shortMember) `
-            -or $rendered -notmatch 'lower-confidence or nondeterministic finding\(s\) remain') {
-            throw "default comment did not suppress/explain medium finding: $rendered"
+        if ($rendered -notmatch [regex]::Escape($shortMember)) {
+            throw "default comment did not include causally connected finding: $rendered"
         }
     }
     foreach ($rendered in @($strictGitHub, $strictAzure)) {
@@ -252,22 +252,21 @@ if ($Mutate -and $Change -eq 'sort') {
         }
     }
 
-    $policyDivergenceSet = Join-Path $work 'divergence-set-policy.json'
-    $policyFindings = Join-Path $work 'findings-policy.json'
+    $isolatedDivergenceSet = Join-Path $work 'divergence-set-isolated.json'
+    $isolatedFindings = Join-Path $work 'findings-isolated.json'
     $divergenceDocument = Get-Content $out -Raw | ConvertFrom-Json
-    foreach ($node in @($divergenceDocument.callTree) + @($divergenceDocument.prCallTree)) {
-        $node.filePath = $changed[0]
-    }
-    $divergenceDocument | ConvertTo-Json -Depth 100 | Set-Content $policyDivergenceSet
+    $divergenceDocument.divergences = @($divergenceDocument.divergences | Where-Object methodFullName -eq $member.memberName)
+    $divergenceDocument | ConvertTo-Json -Depth 100 | Set-Content $isolatedDivergenceSet
     & dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
-        findings --divergences $policyDivergenceSet --frontier $report --out $policyFindings --exit-code $findingsExit `
+        findings --divergences $isolatedDivergenceSet --frontier $report --out $isolatedFindings --exit-code $findingsExit `
         --base-sha proof-base --pr-sha proof-pr --merge-base proof-merge-base
     if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE }
-    $policy = Get-Content $policyFindings -Raw | ConvertFrom-Json
-    if ($policy.members[0].confidence -ne 'high' -or -not $policy.members[0].defaultCommentEligible `
-        -or -not $policy.members[0].confidenceFactors.editedFileReachable `
-        -or $policy.commentPolicy.eligibleUnexpectedMembers -ne 1) {
-        throw "verified/exact/reachable finding was not high-confidence: $($policy | ConvertTo-Json -Compress -Depth 6)"
+    $isolated = Get-Content $isolatedFindings -Raw | ConvertFrom-Json
+    if ($isolated.members[0].confidence -ne 'medium' -or $isolated.members[0].defaultCommentEligible `
+        -or $isolated.members[0].confidenceFactors.causallyConnected `
+        -or $isolated.members[0].commentSuppressionReasons -notcontains 'no_causal_connectivity' `
+        -or $isolated.commentPolicy.eligibleUnexpectedMembers -ne 0) {
+        throw "isolated finding was not suppressed: $($isolated | ConvertTo-Json -Compress -Depth 6)"
     }
 
     $noisyDivergenceSet = Join-Path $work 'divergence-set-noisy.json'

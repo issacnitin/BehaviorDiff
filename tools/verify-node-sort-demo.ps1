@@ -270,24 +270,51 @@ try {
     Assert-True (@($repeatMessages | Select-Object -Unique).Count -eq 1) `
         'Fresh PR Node assertion messages were not identical'
 
-    Write-Host '=== Production deterministic GitHub comment ===' -ForegroundColor Cyan
+    Write-Host '=== Production deterministic GitHub comments ===' -ForegroundColor Cyan
     $commentPath = Join-Path $cliWork 'comment.md'
     $commentOutput = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj') `
         -c Release -- $findingsPath)
     if ($LASTEXITCODE -ne 0) { throw "CommentPreview failed: $LASTEXITCODE" }
     $commentText = $commentOutput -join "`n"
     $commentText | Set-Content $commentPath
+    Assert-True ($findings.commentPolicy.mode -eq 'high-confidence' `
+        -and $findings.commentPolicy.eligibleUnexpectedMembers -eq 1 `
+        -and $findings.commentPolicy.suppressedUnexpectedMembers -eq 0 `
+        -and [bool]$finding[0].defaultCommentEligible `
+        -and [bool]$finding[0].confidenceFactors.causallyConnected `
+        -and @($finding[0].commentSuppressionReasons).Count -eq 0) `
+        'Node default comment policy did not include the causally connected known-true finding'
     Assert-True ($commentText -match 'src/pricing/checkout-totals\.js#CheckoutTotals\.compute' `
         -and $commentText -match 'DiscountEngine\.selectDiscount' `
         -and $commentText -match 'Z_CLEARANCE' -and $commentText -match 'A_SEASONAL' `
-        -and $commentText -match 'CheckoutTotals\.compute' `
-        -and $commentText -match 'number:60' -and $commentText -match 'number:85' `
-        -and $commentText -match '2 of the 3 tests that executed this did not assert on the change' `
-        -and $commentText -notmatch 'SampleApp|Commerce\.Pricing|Infrastructure\.Collections|io\.behaviordiff|\.java') `
-        'Rendered Node comment lost required evidence or contains Java/.NET demo contamination'
-    Write-Host '--- complete rendered comment ---'
+        -and $commentText -match 'number:60' -and $commentText -match 'number:85') `
+        'Node default comment lost the known-true finding'
+    Write-Host '--- complete default rendered comment ---'
     Write-Host $commentText
-    Write-Host '--- end rendered comment ---'
+    Write-Host '--- end default rendered comment ---'
+
+    $strictPath = Join-Path $cliWork 'findings-strict-preview.json'
+    $strictCommentPath = Join-Path $cliWork 'comment-strict.md'
+    $strict = Get-Content $findingsPath -Raw | ConvertFrom-Json
+    $strict.commentPolicy.mode = 'strict'
+    $strict.commentPolicy.eligibleUnexpectedMembers = $strict.summary.unexpectedMembers
+    $strict.commentPolicy.eligibleUnexpectedCallSites = $strict.summary.unexpectedCallSites
+    $strict.commentPolicy.suppressedUnexpectedMembers = 0
+    $strict.commentPolicy.suppressedUnexpectedCallSites = 0
+    $strict | ConvertTo-Json -Depth 100 | Set-Content $strictPath
+    $strictCommentOutput = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+        -c Release -- $strictPath)
+    if ($LASTEXITCODE -ne 0) { throw "Strict CommentPreview failed: $LASTEXITCODE" }
+    $strictCommentText = $strictCommentOutput -join "`n"
+    $strictCommentText | Set-Content $strictCommentPath
+    Assert-True ($strictCommentText -match 'src/pricing/checkout-totals\.js#CheckoutTotals\.compute' `
+        -and $strictCommentText -match 'DiscountEngine\.selectDiscount' `
+        -and $strictCommentText -match 'Z_CLEARANCE' -and $strictCommentText -match 'A_SEASONAL' `
+        -and $strictCommentText -match 'CheckoutTotals\.compute' `
+        -and $strictCommentText -match 'number:60' -and $strictCommentText -match 'number:85' `
+        -and $strictCommentText -match '2 of the 3 tests that executed this did not assert on the change' `
+        -and $strictCommentText -notmatch 'SampleApp|Commerce\.Pricing|Infrastructure\.Collections|io\.behaviordiff|\.java') `
+        'Strict Node comment lost required evidence or contains Java/.NET demo contamination'
 
     $apiKey = Get-ApiKey
     if (-not [string]::IsNullOrWhiteSpace($apiKey)) {
@@ -327,7 +354,8 @@ try {
     Write-Host "  test reactions            : 1 reacted / 2 unasserted"
     Write-Host "  deterministic PR repeats  : $($repeatMessages.Count)/5 identical failures"
     Write-Host "  manifest noise/tool gaps  : $($frontier.counts.manifestNoiseCancelled) / $($frontier.counts.toolingGaps)"
-    Write-Host "  rendered comment          : $commentPath"
+    Write-Host "  default comment           : visible ($commentPath)"
+    Write-Host "  strict comment            : visible ($strictCommentPath)"
     Write-Host "  model explainer           : $modelExplainer"
     Write-Host 'verify-node-sort-demo: PASS' -ForegroundColor Green
 } finally {

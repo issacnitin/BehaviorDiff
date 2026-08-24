@@ -15,7 +15,7 @@ $cases = @(
         HeadlineCallSites = 3
         UntestedCallSites = 2
         UnexpectedMembers = 1
-        DefaultCommentEligible = $false
+        DefaultCommentEligible = $true
     }
     @{
         Change = 'retry'
@@ -31,7 +31,7 @@ $cases = @(
         HeadlineCallSites = 2
         UntestedCallSites = 1
         UnexpectedMembers = 1
-        DefaultCommentEligible = $false
+        DefaultCommentEligible = $true
     }
     @{
         Change = 'config'
@@ -47,7 +47,7 @@ $cases = @(
         HeadlineCallSites = 2
         UntestedCallSites = 1
         UnexpectedMembers = 1
-        DefaultCommentEligible = $false
+        DefaultCommentEligible = $true
     }
 )
 

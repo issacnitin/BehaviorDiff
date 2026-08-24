@@ -1125,10 +1125,10 @@ namespace BehaviorDiff.Cli
             builder.AppendLine("**Source**");
             builder.AppendLine("- " + Code(source));
             builder.AppendLine();
-            builder.AppendLine("**Edited-file reachability**");
+            builder.AppendLine("**Changed files on recorded paths**");
             string[] changedFiles = Strings(member, "changedFilesReachingMember").ToArray();
             builder.AppendLine(changedFiles.Length == 0
-                ? "- No edited file appears on these recorded test-to-member paths."
+                ? "- None of these recorded test-to-member paths includes an edited file."
                 : "- " + string.Join(", ", changedFiles.Select(Code)));
             if (explanation is not null)
             {
