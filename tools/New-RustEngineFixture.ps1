@@ -3,7 +3,7 @@
 param(
     [Parameter(Mandatory)]
     [string]$OutputDirectory,
-    [ValidateSet('none', 'writer', 'ordinal')]
+    [ValidateSet('none', 'writer', 'ordinal', 'volume')]
     [string]$Fault = 'none'
 )
 
@@ -37,7 +37,7 @@ function New-Event(
         returnRendered = $ReturnRendered
         exceptionType = $null
         threadId = 1
-        isHarness = $false
+        isHarness = $Fault -eq 'volume'
     }
 }
 

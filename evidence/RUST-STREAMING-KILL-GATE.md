@@ -36,7 +36,7 @@ The shadow `stream-diff` implementation then produced a semantically identical D
 
 | Stage | Peak RSS | Wall clock |
 | --- | ---: | ---: |
-| Streaming Rust diff | 185,917,440 bytes (177.305 MiB) | 78,908.979 ms |
+| Streaming Rust diff | 186,429,440 bytes (177.793 MiB) | 81,308.790 ms |
 | Shared C# frontier | 331,595,776 bytes (316.234 MiB) | 7,962.990 ms |
 | Shared C# findings | 392,015,872 bytes (373.855 MiB) | 15,356.680 ms |
 
@@ -49,7 +49,24 @@ Correctness remained exact:
 - frontier report byte-identical modulo `generatedUtc`;
 - final `findings.json` byte-identical modulo `generatedUtc`.
 
-The completed path therefore passes the 500 MiB requirement. Its diff is materially slower than both qualified implementations, so the result is a memory success rather than a throughput improvement. Production dispatch remains on the old qualified Rust `diff` command until the streaming command passes the complete retained corpus gate.
+The completed path therefore passes the 500 MiB requirement. Its diff is materially slower than both qualified implementations, so the result is a memory success rather than a throughput improvement.
+
+## Complete retained-corpus qualification
+
+The shadow implementation subsequently passed the complete retained corpus gate:
+
+- generated normal fixture: semantic DivergenceSet equivalence;
+- generated writer-accounting and ordinal faults: identical input errors, direct exit 2, and byte-identical refused findings modulo `generatedUtc`;
+- generated all-harness volume fault: all seven refusal reasons identical, direct exit 4, and byte-identical refused findings modulo `generatedUtc`;
+- .NET, Java, Node, and Go conformance corpora: equivalent results;
+- retained .NET sort, retry, and config changes: equivalent DivergenceSets, frontiers, and findings;
+- FluentValidation #2136: exact counts and completed-path results recorded above;
+- JSON-java #1061, #1062, #1065, and #1068: equivalent DivergenceSets and byte-identical frontier/findings artifacts modulo `generatedUtc`;
+- Commons Text #764: identical writer-accounting refusal and byte-identical refused findings modulo `generatedUtc`.
+
+JSON-java #1068 produced the largest final artifact. Its streaming-path findings file and the retained reference were both exactly `223,596,124` bytes and byte-identical outside the `generatedUtc` values. The shared C# findings process reached an observed peak working set of `998,559,744` bytes (952.301 MiB). This exceptional output-cardinality cost is above 500 MiB, but it does not alter the explicitly FluentValidation-scoped completed-path gate. It is retained here so the production qualification does not imply a corpus-independent findings memory bound.
+
+After this qualification, explicit `--engine=rust` dispatch moved from `diff` to `stream-diff`. C# remains the default engine, and the old Rust `diff` command remains available as a qualified fallback.
 
 Run the hard gate with:
 

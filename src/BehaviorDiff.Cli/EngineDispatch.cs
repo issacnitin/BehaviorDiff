@@ -76,7 +76,7 @@ namespace BehaviorDiff.Cli
 
         private static IEnumerable<string> Arguments(DiffOptions options)
         {
-            yield return "diff";
+            yield return "stream-diff";
             yield return "--base1";
             yield return options.Base1;
             yield return "--base2";

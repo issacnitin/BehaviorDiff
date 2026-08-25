@@ -568,12 +568,15 @@ fn load_run(
     };
     let mut member_indexes = HashMap::new();
     let mut assembly_indexes = HashMap::new();
+    let mut ordinal_error = None;
     for (file_index, trace_path) in trace_files.iter().enumerate() {
         let process_name = trace_path
             .file_stem()
             .and_then(|value| value.to_str())
             .unwrap_or_default();
         let process = strings.intern(process_name)?;
+        let mut process_ordinals: HashMap<Key, Vec<i32>> = HashMap::new();
+        let mut process_keys = Vec::new();
         let file = File::open(trace_path).map_err(|error| error.to_string())?;
         let mut reader = BufReader::with_capacity(256 * 1024, file);
         let mut line = String::new();
@@ -605,6 +608,12 @@ fn load_run(
             }
             let test = strings.intern(&event.test_id)?;
             let method = strings.intern(&event.method_full_name)?;
+            let key = Key { test, method };
+            let ordinals = process_ordinals.entry(key).or_default();
+            if ordinals.is_empty() {
+                process_keys.push(key);
+            }
+            ordinals.push(event.ordinal);
             let path = match event.file_path.as_deref() {
                 Some(value) => strings.intern(&normalize_path(value, root))?,
                 None => u32::MAX,
@@ -636,7 +645,7 @@ fn load_run(
                 run.subject_events += 1
             }
             run.calls
-                .entry(Key { test, method })
+                .entry(key)
                 .or_insert_with(|| Calls {
                     is_harness: event.is_harness,
                     signatures: Vec::new(),
@@ -671,6 +680,29 @@ fn load_run(
             &mut member_indexes,
             &mut assembly_indexes,
         );
+        if ordinal_error.is_none() {
+            for key in process_keys {
+                let ordinals = process_ordinals
+                    .get_mut(&key)
+                    .expect("first-seen ordinal key must exist");
+                ordinals.sort_unstable();
+                if ordinals
+                    .iter()
+                    .enumerate()
+                    .any(|(expected, ordinal)| *ordinal != expected as i32)
+                {
+                    ordinal_error = Some(format!(
+                        "Run '{name}' has a duplicate or non-contiguous call ordinal for {process_name}|{}|{}.",
+                        strings.resolve(key.test),
+                        strings.resolve(key.method)
+                    ));
+                    break;
+                }
+            }
+        }
+    }
+    if let Some(error) = ordinal_error {
+        return Err(error);
     }
     for calls in run.calls.values_mut() {
         calls.signatures.sort_by_key(|signature| signature.ordinal);

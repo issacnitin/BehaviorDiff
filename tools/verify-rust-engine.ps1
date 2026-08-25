@@ -9,7 +9,7 @@ param(
     [string]$Base3Directory,
     [string]$ChangedFiles,
     [string]$OutputDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-rust-engine-equivalence'),
-    [ValidateSet('none', 'writer', 'ordinal')]
+    [ValidateSet('none', 'writer', 'ordinal', 'volume')]
     [string]$FixtureFault = 'none',
     [switch]$CompareFindings,
 
