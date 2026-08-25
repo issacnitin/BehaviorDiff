@@ -151,7 +151,7 @@ $base2Exit = Invoke-Suite $baseBin (Join-Path $work 'base_run2')
 if ($base2Exit -ne 0) { throw "base_run2 tests failed: $base2Exit" }
 Write-Host '  base_run2 done'
 $prExit = Invoke-Suite $prBin (Join-Path $work 'pr_run')
-$expectedPrExit = if ($Mutate -and $Change -in @('sort', 'retry', 'config', 'config-high', 'downgrade')) { 1 } else { 0 }
+$expectedPrExit = if ($Mutate -and $Change -in @('discount', 'sort', 'retry', 'config', 'config-high', 'downgrade')) { 1 } else { 0 }
 if ($prExit -ne $expectedPrExit) {
     throw "pr_run test exit was $prExit, expected $expectedPrExit for change '$Change'"
 }
