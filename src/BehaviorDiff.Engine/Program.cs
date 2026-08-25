@@ -34,6 +34,8 @@ namespace BehaviorDiff.Engine
                         return Frontier(args);
                     case "findings":
                         return Findings(args);
+                    case "findings-invalid":
+                        return InvalidFindings(args);
                     case "--help":
                     case "-h":
                         PrintUsage();
@@ -116,6 +118,49 @@ namespace BehaviorDiff.Engine
                 prSha,
                 mergeBaseSha,
                 strictCommentPolicy: strict);
+            return ExitOk;
+        }
+
+        private static int InvalidFindings(string[] args)
+        {
+            string output = string.Empty;
+            string status = string.Empty;
+            string reason = string.Empty;
+            string baseSha = string.Empty;
+            string prSha = string.Empty;
+            string mergeBaseSha = string.Empty;
+            int exitCode = 0;
+
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine("Missing value for " + args[i]);
+                    return ExitUsage;
+                }
+
+                switch (args[i])
+                {
+                    case "--out": output = args[++i]; break;
+                    case "--status": status = args[++i]; break;
+                    case "--reason": reason = args[++i]; break;
+                    case "--exit-code": exitCode = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
+                    case "--base-sha": baseSha = args[++i]; break;
+                    case "--pr-sha": prSha = args[++i]; break;
+                    case "--merge-base": mergeBaseSha = args[++i]; break;
+                    default:
+                        Console.Error.WriteLine("Unknown option " + args[i]);
+                        return ExitUsage;
+                }
+            }
+
+            if (output.Length == 0 || status.Length == 0 || reason.Length == 0)
+            {
+                Console.Error.WriteLine("usage: findings-invalid --status <refused|failed> --exit-code <code> --reason <text> --out <findings.json>");
+                return ExitUsage;
+            }
+
+            FindingsCommand.WriteInvalid(output, status, exitCode, reason, baseSha, prSha, mergeBaseSha);
             return ExitOk;
         }
 

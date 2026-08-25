@@ -120,12 +120,14 @@ New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 Remove-Item $dotnetOutput, $rustOutput -Force -ErrorAction SilentlyContinue
 
 $dotnetArguments = New-DiffArguments $dotnetOutput
-& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- @dotnetArguments
+$dotnetLog = @(& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- @dotnetArguments 2>&1)
 $dotnetExit = $LASTEXITCODE
+$dotnetLog | ForEach-Object { Write-Host $_ }
 
 $rustManifest = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml'
-& cargo run --quiet --manifest-path $rustManifest -- @(New-DiffArguments $rustOutput)
+$rustLog = @(& cargo run --quiet --manifest-path $rustManifest -- @(New-DiffArguments $rustOutput) 2>&1)
 $rustExit = $LASTEXITCODE
+$rustLog | ForEach-Object { Write-Host $_ }
 
 if ($dotnetExit -ne $rustExit) {
     throw "diff exit codes differ: .NET=$dotnetExit Rust=$rustExit"
@@ -136,7 +138,40 @@ if ($dotnetExit -ne 0) {
         throw "a refused diff emitted an artifact: .NET=$(Test-Path $dotnetOutput) Rust=$(Test-Path $rustOutput)"
     }
 
-    Write-Host "PASS: both engines refused with exit $dotnetExit and emitted no artifact."
+    if (-not $CompareFindings -or $dotnetExit -ne 4) {
+        Write-Host "PASS: both engines refused with exit $dotnetExit and emitted no artifact."
+        exit 0
+    }
+
+    function Get-RefusalReason([object[]]$Lines) {
+        $reasons = @($Lines | ForEach-Object { [string]$_ } | Where-Object { $_.StartsWith('  - ') } |
+            ForEach-Object { $_.Substring(4) })
+        if ($reasons.Count -eq 0) {
+            throw 'a refused diff emitted no structured refusal reasons'
+        }
+
+        return $reasons -join [Environment]::NewLine
+    }
+
+    $dotnetReason = Get-RefusalReason $dotnetLog
+    $rustReason = Get-RefusalReason $rustLog
+    if ($dotnetReason -cne $rustReason) {
+        throw "diff refusal reasons differ.`n.NET: $dotnetReason`nRust: $rustReason"
+    }
+
+    $dotnetFindings = Join-Path $OutputDirectory 'dotnet-findings.json'
+    $rustFindings = Join-Path $OutputDirectory 'rust-findings.json'
+    foreach ($findings in @($dotnetFindings, $rustFindings)) {
+        & dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
+            findings-invalid --status refused --exit-code 3 --reason $dotnetReason --out $findings `
+            --base-sha $BaseSha --pr-sha $PrSha --merge-base $MergeBaseSha
+        if ($LASTEXITCODE -ne 0) {
+            throw "failed to write refused findings: $findings"
+        }
+    }
+
+    Compare-JsonText -DotNetPath $dotnetFindings -RustPath $rustFindings -NormalizeGeneratedUtc
+    Write-Host "PASS: both engines refused with direct exit $dotnetExit, mapped to CLI exit 3, and refused findings are byte-equivalent (generatedUtc excluded)."
     exit 0
 }
 
