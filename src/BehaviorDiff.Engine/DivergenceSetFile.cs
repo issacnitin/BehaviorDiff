@@ -164,7 +164,8 @@ namespace BehaviorDiff.Engine
                 throw new DiffInputException("DivergenceSet not found: " + path);
             }
 
-            DivergenceSetFile? file = JsonSerializer.Deserialize<DivergenceSetFile>(File.ReadAllText(path));
+            using FileStream stream = File.OpenRead(path);
+            DivergenceSetFile? file = JsonSerializer.Deserialize<DivergenceSetFile>(stream);
             if (file is null)
             {
                 throw new DiffInputException("DivergenceSet is empty: " + path);

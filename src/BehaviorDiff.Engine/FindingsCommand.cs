@@ -43,8 +43,10 @@ namespace BehaviorDiff.Engine
             long frontierMilliseconds = 0,
             bool strictCommentPolicy = false)
         {
-            using JsonDocument divergenceSet = JsonDocument.Parse(File.ReadAllText(divergenceSetPath));
-            using JsonDocument frontierReport = JsonDocument.Parse(File.ReadAllText(frontierReportPath));
+            using FileStream divergenceStream = File.OpenRead(divergenceSetPath);
+            using FileStream frontierStream = File.OpenRead(frontierReportPath);
+            using JsonDocument divergenceSet = JsonDocument.Parse(divergenceStream);
+            using JsonDocument frontierReport = JsonDocument.Parse(frontierStream);
 
             JsonElement frontier = frontierReport.RootElement.GetProperty("frontier");
             JsonElement divergences = divergenceSet.RootElement.GetProperty("divergences");
