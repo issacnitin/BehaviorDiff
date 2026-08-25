@@ -1,7 +1,8 @@
 use crate::model::{LoadedEvent, RunData, TraceEvent};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct CallKey {
     pub(crate) test_id: String,
     pub(crate) method_full_name: String,
@@ -13,6 +14,19 @@ impl CallKey {
             test_id: event.test_id.clone(),
             method_full_name: event.method_full_name.clone(),
         }
+    }
+}
+
+impl Ord for CallKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        format!("{}|{}", self.test_id, self.method_full_name)
+            .cmp(&format!("{}|{}", other.test_id, other.method_full_name))
+    }
+}
+
+impl PartialOrd for CallKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -237,6 +251,20 @@ fn first_difference(base: &TraceEvent, pr: &TraceEvent) -> Option<&'static str> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn call_keys_follow_dotnet_combined_string_order() {
+        let key_10 = CallKey {
+            test_id: "volume#10".to_owned(),
+            method_full_name: "method".to_owned(),
+        };
+        let key_100 = CallKey {
+            test_id: "volume#100".to_owned(),
+            method_full_name: "method".to_owned(),
+        };
+
+        assert!(key_100 < key_10);
+    }
 
     #[test]
     fn partial_markers_are_distinct_and_sorted() {
