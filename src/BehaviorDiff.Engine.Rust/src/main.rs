@@ -4,6 +4,7 @@ mod engine;
 mod loader;
 mod matcher;
 mod model;
+mod stream_probe;
 
 const EXIT_OK: i32 = 0;
 const EXIT_USAGE: i32 = 2;
@@ -43,6 +44,23 @@ fn run(args: Vec<String>) -> i32 {
                     EXIT_USAGE
                 }
             },
+            Err(message) => {
+                eprintln!("{message}");
+                EXIT_USAGE
+            }
+        },
+        "stream-probe" => match parse_diff_options(&args[1..]) {
+            Ok(options) if !options.base3.is_empty() => match stream_probe::run(&options) {
+                Ok(()) => EXIT_OK,
+                Err(message) => {
+                    eprintln!("Input error: {message}");
+                    EXIT_USAGE
+                }
+            },
+            Ok(_) => {
+                eprintln!("stream-probe requires --base3");
+                EXIT_USAGE
+            }
             Err(message) => {
                 eprintln!("{message}");
                 EXIT_USAGE
@@ -96,6 +114,9 @@ fn print_usage() {
     println!("BehaviorDiff.Engine.Rust");
     println!(
         "usage: behaviordiff-engine diff --base1 <dir> --base2 <dir> --pr <dir> --out <file.json>"
+    );
+    println!(
+        "       behaviordiff-engine stream-probe --base1 <dir> --base2 <dir> --base3 <dir> --pr <dir> --out <report.json>"
     );
 }
 
