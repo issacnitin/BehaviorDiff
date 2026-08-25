@@ -9,6 +9,7 @@ Prerequisites:
 - .NET 8 SDK (the version in `global.json` is preferred)
 - Git
 - PowerShell 7 for the executable proof scripts
+- Rust stable for changes to the Rust diff engine
 
 ```powershell
 git clone https://github.com/issacnitin/BehaviorDiff.git
@@ -30,6 +31,17 @@ pwsh -File tools/verify-coverage.ps1
 pwsh -File tools/verify-anthropic.ps1
 pwsh -File tools/verify-demo-fixtures.ps1
 pwsh -File tools/verify-pipeline.ps1
+```
+
+For changes to the Rust diff engine, run its compiler checks and the cross-engine equivalence gate. The verifier generates fixed success, noise, tooling-gap, partial-digest, and divergence inputs by default.
+
+```powershell
+cargo fmt --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml -- --check
+cargo clippy --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml
+pwsh -File tools/verify-rust-engine.ps1
+pwsh -File tools/verify-rust-engine.ps1 -FixtureFault writer
+pwsh -File tools/verify-rust-engine.ps1 -FixtureFault ordinal
 ```
 
 Keep pull requests focused. Include a regression proof for behavioral changes and explain any new refusal condition or observability limitation.
