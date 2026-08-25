@@ -4,6 +4,7 @@ mod engine;
 mod loader;
 mod matcher;
 mod model;
+mod stream_diff;
 mod stream_probe;
 
 const EXIT_OK: i32 = 0;
@@ -66,6 +67,19 @@ fn run(args: Vec<String>) -> i32 {
                 EXIT_USAGE
             }
         },
+        "stream-diff" => match parse_diff_options(&args[1..]) {
+            Ok(options) => match stream_diff::run(&options) {
+                Ok(exit_code) => exit_code,
+                Err(message) => {
+                    eprintln!("Input error: {message}");
+                    EXIT_USAGE
+                }
+            },
+            Err(message) => {
+                eprintln!("{message}");
+                EXIT_USAGE
+            }
+        },
         _ => {
             eprintln!("Unknown command '{command}'.");
             print_usage();
@@ -117,6 +131,9 @@ fn print_usage() {
     );
     println!(
         "       behaviordiff-engine stream-probe --base1 <dir> --base2 <dir> --base3 <dir> --pr <dir> --out <report.json>"
+    );
+    println!(
+        "       behaviordiff-engine stream-diff --base1 <dir> --base2 <dir> --base3 <dir> --pr <dir> --out <set.json>"
     );
 }
 

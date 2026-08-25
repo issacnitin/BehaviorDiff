@@ -36,6 +36,8 @@ namespace BehaviorDiff.Engine
                         return Findings(args);
                     case "findings-invalid":
                         return InvalidFindings(args);
+                    case "semantic-hash":
+                        return SemanticHash(args);
                     case "--help":
                     case "-h":
                         PrintUsage();
@@ -118,6 +120,60 @@ namespace BehaviorDiff.Engine
                 prSha,
                 mergeBaseSha,
                 strictCommentPolicy: strict);
+            return ExitOk;
+        }
+
+        private static int SemanticHash(string[] args)
+        {
+            string input = string.Empty;
+            bool topLevel = false;
+            string extract = string.Empty;
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (args[i] == "--top-level")
+                {
+                    topLevel = true;
+                    continue;
+                }
+
+                if (args[i] == "--extract" && i + 1 < args.Length)
+                {
+                    extract = args[++i];
+                    continue;
+                }
+
+                if (args[i] == "--in" && i + 1 < args.Length)
+                {
+                    input = args[++i];
+                }
+                else
+                {
+                    Console.Error.WriteLine("usage: semantic-hash --in <artifact.json>");
+                    return ExitUsage;
+                }
+            }
+
+            if (input.Length == 0)
+            {
+                Console.Error.WriteLine("usage: semantic-hash --in <artifact.json>");
+                return ExitUsage;
+            }
+
+            if (extract.Length > 0)
+            {
+                Console.WriteLine(JsonSemanticHash.ExtractTopLevel(input, extract));
+            }
+            else if (topLevel)
+            {
+                foreach (KeyValuePair<string, string> property in JsonSemanticHash.ComputeTopLevel(input))
+                {
+                    Console.WriteLine(property.Key + "=" + property.Value);
+                }
+            }
+            else
+            {
+                Console.WriteLine(JsonSemanticHash.Compute(input));
+            }
             return ExitOk;
         }
 

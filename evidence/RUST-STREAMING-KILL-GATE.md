@@ -30,6 +30,27 @@ The isolated pre-frontier probe passed on the retained FluentValidation #2136 co
 
 The probe validated each trace's writer accounting and failed on malformed or invalid event identity rather than skipping records. This result authorizes completed-path work; it does not qualify the streaming implementation for production dispatch.
 
+## Completed-path FluentValidation result
+
+The shadow `stream-diff` implementation then produced a semantically identical DivergenceSet and ran through the shared frontier/findings stages:
+
+| Stage | Peak RSS | Wall clock |
+| --- | ---: | ---: |
+| Streaming Rust diff | 185,917,440 bytes (177.305 MiB) | 78,908.979 ms |
+| Shared C# frontier | 331,595,776 bytes (316.234 MiB) | 7,962.990 ms |
+| Shared C# findings | 392,015,872 bytes (373.855 MiB) | 15,356.680 ms |
+
+Correctness remained exact:
+
+- `423,974` events consumed;
+- `53,245` matched keys;
+- `2,649` noise keys;
+- all DivergenceSet top-level sections semantically identical to C# after excluding only `generatedUtc`;
+- frontier report byte-identical modulo `generatedUtc`;
+- final `findings.json` byte-identical modulo `generatedUtc`.
+
+The completed path therefore passes the 500 MiB requirement. Its diff is materially slower than both qualified implementations, so the result is a memory success rather than a throughput improvement. Production dispatch remains on the old qualified Rust `diff` command until the streaming command passes the complete retained corpus gate.
+
 Run the hard gate with:
 
 ```powershell

@@ -12,6 +12,9 @@ param(
     [ValidateSet('none', 'writer', 'ordinal')]
     [string]$FixtureFault = 'none',
     [switch]$CompareFindings,
+
+    [ValidateSet('diff', 'stream-diff')]
+    [string]$RustCommand = 'diff',
     [string]$BaseSha = 'proof-base',
     [string]$PrSha = 'proof-pr',
     [string]$MergeBaseSha = 'proof-merge-base'
@@ -39,27 +42,6 @@ elseif ($explicitInputs.Count -ne 5) {
 }
 elseif ($FixtureFault -ne 'none') {
     throw '-FixtureFault can only be used with the generated fixture.'
-}
-
-function ConvertTo-CanonicalValue([object]$Value) {
-    if ($null -eq $Value) {
-        return $null
-    }
-
-    if ($Value -is [System.Management.Automation.PSCustomObject]) {
-        $canonical = [ordered]@{}
-        foreach ($property in $Value.PSObject.Properties | Sort-Object Name) {
-            $canonical[$property.Name] = ConvertTo-CanonicalValue $property.Value
-        }
-
-        return $canonical
-    }
-
-    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
-        return @($Value | ForEach-Object { ConvertTo-CanonicalValue $_ })
-    }
-
-    return $Value
 }
 
 function New-DiffArguments([string]$Output) {
@@ -125,7 +107,9 @@ $dotnetExit = $LASTEXITCODE
 $dotnetLog | ForEach-Object { Write-Host $_ }
 
 $rustManifest = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml'
-$rustLog = @(& cargo run --quiet --manifest-path $rustManifest -- @(New-DiffArguments $rustOutput) 2>&1)
+$rustArguments = @(New-DiffArguments $rustOutput)
+$rustArguments[0] = $RustCommand
+$rustLog = @(& cargo run --quiet --release --manifest-path $rustManifest -- @rustArguments 2>&1)
 $rustExit = $LASTEXITCODE
 $rustLog | ForEach-Object { Write-Host $_ }
 
@@ -202,14 +186,13 @@ if ($dotnetExit -ne 0) {
     exit 0
 }
 
-$dotnetArtifact = Get-Content $dotnetOutput -Raw | ConvertFrom-Json
-$rustArtifact = Get-Content $rustOutput -Raw | ConvertFrom-Json
-$dotnetArtifact.PSObject.Properties.Remove('generatedUtc')
-$rustArtifact.PSObject.Properties.Remove('generatedUtc')
-
-$dotnetCanonical = ConvertTo-CanonicalValue $dotnetArtifact | ConvertTo-Json -Depth 100 -Compress
-$rustCanonical = ConvertTo-CanonicalValue $rustArtifact | ConvertTo-Json -Depth 100 -Compress
-if ($dotnetCanonical -cne $rustCanonical) {
+$dotnetHash = (& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
+    semantic-hash --in $dotnetOutput).Trim()
+if ($LASTEXITCODE -ne 0) { throw "failed to hash .NET divergence set: $LASTEXITCODE" }
+$rustHash = (& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
+    semantic-hash --in $rustOutput).Trim()
+if ($LASTEXITCODE -ne 0) { throw "failed to hash Rust divergence set: $LASTEXITCODE" }
+if ($dotnetHash -cne $rustHash) {
     throw "normalized divergence sets differ: $dotnetOutput vs $rustOutput"
 }
 
