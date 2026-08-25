@@ -17,6 +17,7 @@
     <RepositoryUrl>https://github.com/issacnitin/BehaviorDiff.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddWeaverRuntimeDependenciesToPackage</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
   <ItemGroup>
@@ -47,9 +48,15 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
         <None Include="..\..\tools\Weaver\bin\$(Configuration)\net8.0\behaviordiff-weaver.dll"
           Pack="true" PackagePath="tools\net8.0\any" />
-        <None Include="..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil*.dll"
-          Pack="true" PackagePath="tools\net8.0\any" />
   </ItemGroup>
+
+  <Target Name="AddWeaverRuntimeDependenciesToPackage">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil*.dll">
+        <PackagePath>tools\net8.0\any</PackagePath>
+      </TfmSpecificPackageFile>
+    </ItemGroup>
+  </Target>
 
   <ItemGroup Condition="'$(CrossLanguageTracerRoot)' != '' and Exists('$(CrossLanguageTracerRoot)')">
     <_CrossLanguageTracerFiles Include="$(CrossLanguageTracerRoot)\**\*" />
@@ -57,6 +64,13 @@
           Pack="true"
           PackagePath="tools\net8.0\any\tracers\%(RecursiveDir)"
           Link="tracers\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RustEngineRoot)' != '' and Exists('$(RustEngineRoot)')">
+    <_RustEngineFiles Include="$(RustEngineRoot)\**\*" />
+    <None Include="@(_RustEngineFiles)"
+          Link="engines\rust\%(RecursiveDir)%(Filename)%(Extension)"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

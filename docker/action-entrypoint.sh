@@ -9,11 +9,12 @@ cache_retention="${5:-1d}"
 gate="${6:-warn-only}"
 post="${7:-true}"
 strict="${8:-false}"
+engine="${9:-csharp}"
 
 mkdir -p "$(dirname "$findings")" "$cache_dir"
 
 analysis_args=("$repo" --ci=github --work "$work" --findings "$findings"
-    --cache-dir "$cache_dir" --cache-retention "$cache_retention")
+    --cache-dir "$cache_dir" --cache-retention "$cache_retention" --engine "$engine")
 if [[ "${strict,,}" == "true" ]]; then
     analysis_args+=(--strict)
 fi

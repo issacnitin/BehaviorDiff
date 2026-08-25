@@ -8,15 +8,16 @@ BehaviorDiff finds **runtime behavior changes that ordinary source review misses
 
 It builds two Git revisions, observes their tests, learns a noise baseline from three base runs, and reports the first changed behavior in each call tree. A source diff tells you what was edited. BehaviorDiff tells you what the edit did, including effects in files the pull request never touched.
 
-The architecture has one language-neutral engine and one tracer per runtime:
+The architecture has one language-neutral trace contract, one tracer per runtime, and selectable C# or Rust diff implementations:
 
 ```mermaid
 flowchart LR
   D[.NET / Cecil] --> T[behaviordiff.trace/1]
   J[Java / javaagent + ASM] --> T
   N[Node / CJS + ESM + Babel] --> T
-  T --> E[Matching, noise, frontier, attribution]
-  E --> F[findings.json]
+  T --> E[C# or Rust matching and noise]
+  E --> A[Shared C# frontier and attribution]
+  A --> F[findings.json]
   F --> P[GitHub, Azure DevOps, MCP]
 ```
 
@@ -108,7 +109,7 @@ docker run --rm \
 
 The normal image entrypoint is `behaviordiff`; no PowerShell wrapper is involved. The unified CLI currently orchestrates .NET, Java, and Node/TypeScript repositories. The same image exposes the Go source rewriter as `behaviordiff-go-rewrite`; Go is not yet wired into the unified base/PR CLI pipeline.
 
-The verified Linux/amd64 image is 587,777,802 bytes (560.5 MiB) and contains .NET SDK 8.0.424, OpenJDK 17.0.17, Maven 3.9.11, Node 24.19.0, npm 11.17.0, and Go 1.27.0. The container workflow reports the exact size for every published build.
+The verified Linux/amd64 image is 588,122,113 bytes (560.9 MiB) and contains .NET SDK 8.0.424, OpenJDK 17.0.17, Maven 3.9.11, Node 24.19.0, npm 11.17.0, Go 1.27.0, and the Rust diff engine. The container workflow reports the exact size for every published build.
 
 ### Install the GitHub release
 
@@ -135,7 +136,7 @@ dotnet tool install --global BehaviorDiff.Tool `
 behaviordiff --help
 ```
 
-The packaging wrapper builds and stages the shaded Java agent and the Node tracer with its production dependencies before passing `CrossLanguageTracerRoot` to `dotnet pack`. An ordinary `dotnet build` remains independent of Maven and npm.
+The packaging wrapper builds and stages the shaded Java agent, the Node tracer with its production dependencies, and the current host's Rust diff engine before packing the tool. An ordinary `dotnet build` remains independent of Maven, npm, and Cargo.
 
 To update an existing source installation:
 
@@ -159,6 +160,7 @@ BehaviorDiff needs a repository path and two Git refs. The target repository mus
 behaviordiff C:\src\my-service `
   --base origin/main `
   --pr HEAD `
+  --engine csharp `
   --findings C:\temp\behaviordiff\findings.json
 ```
 
@@ -167,6 +169,7 @@ Useful options:
 ```text
 --work <directory>      Override the temporary work directory
 --findings <file>       Write canonical machine-readable findings
+--engine <name>         Select csharp or rust for matching/noise diff; defaults to csharp
 --cache-dir <directory> Override the local base-trace cache directory
 --cache-retention <n>    Expire cached traces after a stated window, for example 12h or 7d
 --keep-traces <n>        Opt in to retaining working traces for a stated window
@@ -175,7 +178,9 @@ Useful options:
 --ci=azuredevops        Resolve refs from Azure Pipelines variables
 ```
 
-PR comments use a high-confidence policy by default. A finding is high-confidence only when its frontier is verified, every compared digest is exact, an ancestor or descendant divergence connects it to the change through the call tree, and the same member showed no baseline-run or manifest nondeterminism. An edited file contributing zero traced members does not by itself disqualify the finding. Every finding remains in `findings.json` with `confidence`, `confidenceFactors`, `nondeterminism`, and `commentSuppressionReasons`; comments show how many lower-confidence findings were retained only in the artifact. Pass `--strict` to include all unsuppressed findings in comments. The GitHub Action exposes the same behavior through `strict: 'true'`, and Azure Pipelines through `behaviorDiffStrict: 'true'`.
+The Rust option replaces engine part 1: trace loading, matching, noise filtering, and divergence construction. Frontier detection, attribution, findings generation, and comment rendering remain the shared C# implementation. The default remains `csharp`. `BEHAVIORDIFF_RUST_ENGINE` can override the packaged native executable for development diagnostics.
+
+PR comments use a high-confidence policy by default. A finding is high-confidence only when its frontier is verified, every compared digest is exact, an ancestor or descendant divergence connects it to the change through the call tree, and the same member showed no baseline-run or manifest nondeterminism. An edited file contributing zero traced members does not by itself disqualify the finding. Every finding remains in `findings.json` with `confidence`, `confidenceFactors`, `nondeterminism`, and `commentSuppressionReasons`; comments show how many lower-confidence findings were retained only in the artifact. Pass `--strict` to include all unsuppressed findings in comments. The GitHub Action exposes the same behavior through `strict: 'true'`, and Azure Pipelines through `behaviorDiffStrict: 'true'`. The Action's `engine` input accepts `csharp` or `rust` and defaults to `csharp`.
 
 Exit codes:
 
@@ -224,6 +229,17 @@ On a hit, PR analysis restores the three baseline samples and performs only the 
 On the 99,000-event-per-run FluentValidation scale case, a cold four-run analysis took 339.705 seconds and the subsequent cache-hit analysis took 53.962 seconds: an 84.1% reduction, or 6.3 times faster. The warm run spent 13.264 seconds building, 2.729 seconds weaving, 11.844 seconds in its single instrumented run, 10.386 seconds diffing, and 6.503 seconds finding the frontier. These are measurements from one Windows development machine, not performance guarantees; full methodology and the cold-run breakdown are in [evidence/FINDINGS.md](evidence/FINDINGS.md).
 
 Every analyzed `findings.json` includes `timings` for build, weave, instrumented runs, cache restore/store, engine diff, engine frontier, and their measured total. This makes CI cost visible without parsing console output.
+
+The qualified Rust prototype is not a memory optimization yet. On the retained FluentValidation #2136 corpus (602,256,055 event-trace bytes plus 5,853,647 manifest bytes, 53,245 matched keys), three direct-process repetitions measured:
+
+| Stage | Median wall | Peak RSS | RSS / trace bytes |
+| --- | ---: | ---: | ---: |
+| C# diff | 11.932 s | 1,962.8 MiB | 3.4174x |
+| Rust diff | 17.517 s | 2,050.6 MiB | 3.5702x |
+| Shared frontier over C# output | 9.351 s | 704.3 MiB | 1.2263x |
+| Shared frontier over Rust output | 8.961 s | 690.3 MiB | 1.2019x |
+
+Rust used 4.5% more peak RSS and took 46.8% longer in diff. Both implementations retain the whole comparison in memory. The frontier rows are not separate C# and Rust implementations; they measure the same C# frontier against byte-equivalent divergence sets. Reproduce the measurement with `tools/measure-engine-cost.ps1`.
 
 Warm a target branch from a nightly job without running a synthetic PR comparison:
 
@@ -406,6 +422,7 @@ See [evidence/FINDINGS.md](evidence/FINDINGS.md) for measured instrumentation an
 | --- | --- |
 | `src/BehaviorDiff.Cli` | Repository orchestration and PR providers |
 | `src/BehaviorDiff.Engine` | Matching, noise filtering, frontier analysis, findings |
+| `src/BehaviorDiff.Engine.Rust` | Optional Rust implementation of matching and noise-filtered divergence construction |
 | `src/BehaviorDiff.Tracer` | Runtime hooks, value rendering, coverage manifests |
 | `src/BehaviorDiff.Java.Agent` | Java agent, ASM rewriting, JVM canonicalizer |
 | `src/BehaviorDiff.Node` | CommonJS/ESM hooks, Babel rewriting, Node canonicalizer and test adapters |

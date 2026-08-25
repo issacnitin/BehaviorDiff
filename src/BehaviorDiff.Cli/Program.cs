@@ -75,6 +75,7 @@ namespace BehaviorDiff.Cli
             bool keep = false;
             bool noBaseline = false;
             bool strict = false;
+            AnalysisEngine engine = AnalysisEngine.CSharp;
             var positional = new List<string>();
 
             for (int i = firstOption; i < args.Length; i++)
@@ -95,6 +96,14 @@ namespace BehaviorDiff.Cli
                     case "--keep-traces": traceRetention = ParseDuration(Next(args, ref i)); break;
                     case "--keep": keep = true; break;
                     case "--strict": strict = true; break;
+                    case "--engine":
+                        if (!EngineDispatch.TryParse(Next(args, ref i), out engine))
+                        {
+                            Console.Error.WriteLine("Engine must be 'csharp' or 'rust'.");
+                            return ExitCodes.BuildOrTestFailure;
+                        }
+
+                        break;
                     case "-h":
                     case "--help":
                         Usage();
@@ -103,6 +112,14 @@ namespace BehaviorDiff.Cli
                         if (args[i].StartsWith("--ci=", StringComparison.Ordinal))
                         {
                             ciProvider = args[i].Substring("--ci=".Length);
+                        }
+                        else if (args[i].StartsWith("--engine=", StringComparison.Ordinal))
+                        {
+                            if (!EngineDispatch.TryParse(args[i].Substring("--engine=".Length), out engine))
+                            {
+                                Console.Error.WriteLine("Engine must be 'csharp' or 'rust'.");
+                                return ExitCodes.BuildOrTestFailure;
+                            }
                         }
                         else
                         {
@@ -162,7 +179,8 @@ namespace BehaviorDiff.Cli
                     cacheRetention,
                     traceRetention,
                     warmOnly,
-                    strict);
+                    strict,
+                    engine);
                 return pipeline.Run();
             }
             catch (CliException ex)
@@ -243,7 +261,7 @@ namespace BehaviorDiff.Cli
 
         private static void Usage()
         {
-            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--work <dir>] [--findings <file>] [--baseline <file>|--no-baseline] [--strict] [--cache-dir <dir>] [--cache-retention <12h|7d>] [--keep-traces <12h|7d>] [--keep]");
+            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--engine=csharp|rust] [--work <dir>] [--findings <file>] [--baseline <file>|--no-baseline] [--strict] [--cache-dir <dir>] [--cache-retention <12h|7d>] [--keep-traces <12h|7d>] [--keep]");
             Console.WriteLine("       behaviordiff warm <repo> --target <ref> --cache-dir <dir> [--cache-retention <12h|7d>] [--work <dir>] [--keep]");
             Console.WriteLine("       behaviordiff detect-language <repo>");
             Console.WriteLine("       behaviordiff [<repo>] --ci=azuredevops [--work <dir>] [--findings <file>] [--keep]");
@@ -274,6 +292,7 @@ namespace BehaviorDiff.Cli
         private readonly bool _warmOnly;
         private readonly TimeSpan? _traceRetention;
         private readonly bool _strict;
+        private readonly AnalysisEngine _engine;
         private readonly PipelineTimings _timings = new PipelineTimings();
 
         internal ResolvedRefs? ResolvedRefs { get; private set; }
@@ -291,7 +310,8 @@ namespace BehaviorDiff.Cli
             TimeSpan cacheRetention,
             TimeSpan? traceRetention,
             bool warmOnly,
-            bool strict)
+            bool strict,
+            AnalysisEngine engine)
         {
             _repo = repo;
             _baseRef = baseRef;
@@ -308,6 +328,7 @@ namespace BehaviorDiff.Cli
             _traceRetention = traceRetention;
             _warmOnly = warmOnly;
             _strict = strict;
+            _engine = engine;
         }
 
         internal int Run()
@@ -318,6 +339,7 @@ namespace BehaviorDiff.Cli
             Console.WriteLine("  repo : " + _repo);
             Console.WriteLine("  work : " + _work);
             Console.WriteLine("  mode : " + (_warmOnly ? "warm base trace cache" : "analyze PR"));
+            Console.WriteLine("  engine: " + EngineDispatch.Name(_engine));
 
             if (!Directory.Exists(Path.Combine(_repo, ".git")) && !File.Exists(Path.Combine(_repo, ".git")))
             {
@@ -708,7 +730,7 @@ namespace BehaviorDiff.Cli
                 ChangedFiles = changedList,
                 Output = divergenceSet,
             };
-            int diffExit = DiffCommand.Run(diffOptions);
+            int diffExit = EngineDispatch.RunDiff(_engine, diffOptions);
             diffStopwatch.Stop();
             _timings.DiffMilliseconds += diffStopwatch.ElapsedMilliseconds;
             if (diffExit != 0)

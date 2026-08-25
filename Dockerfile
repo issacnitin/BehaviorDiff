@@ -4,6 +4,7 @@ ARG DOTNET_IMAGE=mcr.microsoft.com/dotnet/sdk:8.0-noble
 ARG JAVA_IMAGE=maven:3.9.11-eclipse-temurin-17
 ARG NODE_IMAGE=node:24-bookworm-slim
 ARG GO_IMAGE=golang:1.27-bookworm
+ARG RUST_IMAGE=rust:1.98-bookworm
 
 FROM ${JAVA_IMAGE} AS java-build
 WORKDIR /source
@@ -30,6 +31,17 @@ COPY src/BehaviorDiff.Go/go.mod ./
 RUN go mod download
 COPY src/BehaviorDiff.Go/ .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/behaviordiff-go-rewrite ./cmd/behaviordiff-go-rewrite
+
+FROM ${RUST_IMAGE} AS rust-build
+ARG TARGETARCH
+WORKDIR /source
+COPY src/BehaviorDiff.Engine.Rust/Cargo.toml src/BehaviorDiff.Engine.Rust/Cargo.lock ./
+RUN mkdir src && printf 'fn main() {}\n' > src/main.rs && cargo build --release --locked && rm -rf src
+COPY src/BehaviorDiff.Engine.Rust/src/ ./src/
+RUN cargo build --release --locked \
+    && case "$TARGETARCH" in amd64) rid=linux-x64 ;; arm64) rid=linux-arm64 ;; *) exit 1 ;; esac \
+    && mkdir -p "/out/$rid" \
+    && cp target/release/behaviordiff-engine "/out/$rid/behaviordiff-engine"
 
 FROM ${DOTNET_IMAGE} AS dotnet-build
 WORKDIR /source
@@ -74,6 +86,7 @@ COPY --from=dotnet-build /out/ /opt/behaviordiff/
 COPY --from=java-build /out/behaviordiff-java-agent.jar /opt/behaviordiff/tracers/java/behaviordiff-java-agent.jar
 COPY --from=node-build /out/ /opt/behaviordiff/tracers/node/
 COPY --from=go-build /out/behaviordiff-go-rewrite /usr/local/bin/behaviordiff-go-rewrite
+COPY --from=rust-build /out/ /opt/behaviordiff/engines/rust/
 COPY docker/behaviordiff.sh /usr/local/bin/behaviordiff
 COPY docker/action-entrypoint.sh /usr/local/bin/behaviordiff-action
 COPY docker/entrypoint.sh /usr/local/bin/behaviordiff-entrypoint
@@ -86,7 +99,8 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     PATH=/opt/java/openjdk/bin:/usr/local/go/bin:${PATH}
 
 RUN chmod +x /usr/local/bin/behaviordiff /usr/local/bin/behaviordiff-action \
-        /usr/local/bin/behaviordiff-entrypoint /usr/local/bin/behaviordiff-go-rewrite \
+    /usr/local/bin/behaviordiff-entrypoint /usr/local/bin/behaviordiff-go-rewrite \
+    /opt/behaviordiff/engines/rust/*/behaviordiff-engine \
     && dotnet --info >/dev/null \
     && java -version \
     && mvn --version \

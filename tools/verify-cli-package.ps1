@@ -10,6 +10,7 @@ $work = if ($ownsWork) {
     Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-cli-package-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
 $tracers = Join-Path $work 'tracers'
+$rustEngine = Join-Path $work 'rust-engine'
 $packages = Join-Path $work 'packages'
 $toolPath = Join-Path $work 'tool'
 $cliProject = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
@@ -114,10 +115,14 @@ try {
     Write-Host '=== Stage cross-language tracers ===' -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot 'Stage-CrossLanguageTracers.ps1') -OutputDirectory $tracers
     if ($LASTEXITCODE -ne 0) { throw "Tracer staging failed with exit code $LASTEXITCODE" }
+    Write-Host '=== Stage Rust engine ===' -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot 'Stage-RustEngine.ps1') -OutputDirectory $rustEngine
+    if ($LASTEXITCODE -ne 0) { throw "Rust engine staging failed with exit code $LASTEXITCODE" }
 
     Write-Host '=== Pack CLI ===' -ForegroundColor Cyan
     Invoke-Checked 'CLI pack' {
-        & dotnet pack $cliProject -c Release -o $packages --nologo "-p:CrossLanguageTracerRoot=$tracers"
+        & dotnet pack $cliProject -c Release -o $packages --nologo `
+            "-p:CrossLanguageTracerRoot=$tracers" "-p:RustEngineRoot=$rustEngine"
     }
     $package = Get-ChildItem $packages -Filter 'BehaviorDiff.Tool.*.nupkg' -File |
         Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
@@ -130,6 +135,10 @@ try {
     } finally {
         $archive.Dispose()
     }
+    $rustOs = if ($IsWindows) { 'win' } elseif ($IsLinux) { 'linux' } else { 'osx' }
+    $rustArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+    $rustFile = if ($IsWindows) { 'behaviordiff-engine.exe' } else { 'behaviordiff-engine' }
+    $rustPackageEntry = "tools/net8.0/any/engines/rust/$rustOs-$rustArchitecture/$rustFile"
     $requiredEntries = @(
         'tools/net8.0/any/tracers/java/behaviordiff-java-agent.jar',
         'tools/net8.0/any/tracers/node/register.cjs',
@@ -141,7 +150,9 @@ try {
         'tools/net8.0/any/tracers/node/src/source-map.cjs',
         'tools/net8.0/any/tracers/node/adapters/jest.cjs',
         'tools/net8.0/any/tracers/node/adapters/vitest.mjs',
-        'tools/net8.0/any/tracers/node/node_modules/@babel/parser/package.json'
+        'tools/net8.0/any/tracers/node/node_modules/@babel/parser/package.json',
+        'tools/net8.0/any/Mono.Cecil.dll',
+        $rustPackageEntry
     )
     $missing = @($requiredEntries | Where-Object { $_ -notin $entries })
     if ($missing.Count -ne 0) { throw "Package entries are missing: $($missing -join ', ')" }

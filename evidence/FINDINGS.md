@@ -76,9 +76,22 @@ The warm run reduced end-to-end wall time by 84.1%, from 5 minutes 39.705 second
 
 The run exercised member lifecycle changes, generated members that could not be attributed through normal Git paths, and nondeterministic residual behavior in unedited caches. Peak diff working set was 1.33 GB against 416 MB of parsed traces. Memory currently scales with event count because parsed events are retained for comparison.
 
+### C# versus Rust diff prototype
+
+The qualified Rust diff prototype was measured on the later retained FluentValidation #2136 corpus with 53,245 matched keys, 602,256,055 event-trace bytes, and 5,853,647 manifest bytes. Each executable ran directly for three repetitions; wall time is the median, peak RSS is the maximum sampled working set, and amplification uses event-trace bytes as its denominator:
+
+| Stage | Median wall | Peak RSS | Amplification over input trace bytes |
+| --- | ---: | ---: | ---: |
+| C# diff | 11.932 s | 2,058,170,368 bytes (1,962.8 MiB) | 3.4174x |
+| Rust diff | 17.517 s | 2,150,195,200 bytes (2,050.6 MiB) | 3.5702x |
+| C# frontier over C# output | 9.351 s | 738,562,048 bytes (704.3 MiB) | 1.2263x |
+| C# frontier over Rust output | 8.961 s | 723,832,832 bytes (690.3 MiB) | 1.2019x |
+
+Rust did not improve memory: it peaked 4.5% higher and its diff was 46.8% slower. The port retained the same whole-comparison materialization strategy. Rust currently implements diff only, so both frontier rows use the same C# frontier implementation over equivalent engine outputs. [`measure-engine-cost.ps1`](../tools/measure-engine-cost.ps1) writes the per-iteration JSON record.
+
 ## Container packaging
 
-The single Linux/amd64 image was built with the production Dockerfile and inspected at 587,777,802 bytes (560.5 MiB). Its executable inventory was .NET SDK 8.0.424, OpenJDK 17.0.17, Maven 3.9.11, Node 24.19.0, npm 11.17.0, and Go 1.27.0. The image also contains the .NET tracer and Cecil weaver, shaded Java agent, production Node tracer, Go source rewriter, CLI, and engine.
+The single Linux/amd64 image was built with the production Dockerfile and inspected at 588,122,113 bytes (560.9 MiB). Its executable inventory was .NET SDK 8.0.424, OpenJDK 17.0.17, Maven 3.9.11, Node 24.19.0, npm 11.17.0, Go 1.27.0, and the Rust diff engine. The image also contains the .NET tracer and Cecil weaver, shaded Java agent, production Node tracer, Go source rewriter, CLI, and both diff implementations.
 
 The Docker-only proof creates fresh Git histories from the Node and Java sort fixtures, runs complete base/PR analyses, and requires analyzed findings from both. The Node path enters through the published Action dispatch and verifies its outputs; the Java path enters through the normal image CLI. The host proof command invokes only Bash and Docker.
 
@@ -135,7 +148,7 @@ A second Java proof and a Node proof edited intentionally excluded helpers, forc
 
 No live network post or live model request is part of this proof. It exercises production rendering and MCP query code locally on freshly generated artifacts.
 
-The packaged CLI proof installs the generated .NET tool without source-tree tracer overrides. The package was 4.42 MiB with 1,034 entries; the installed tool completed four Java runs (1,564 events) and four Node runs (1,228 events), both with clean analyzed findings.
+The packaged CLI proof installs the generated .NET tool without source-tree tracer overrides. The Rust-enabled package was 4.89 MiB with 1,036 entries; the installed tool completed four Java runs (1,084 events) and four Node runs (1,228 events), both with clean analyzed findings.
 
 ## Noise baseline
 
