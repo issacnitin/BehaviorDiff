@@ -138,7 +138,7 @@ if ($dotnetExit -ne 0) {
         throw "a refused diff emitted an artifact: .NET=$(Test-Path $dotnetOutput) Rust=$(Test-Path $rustOutput)"
     }
 
-    if (-not $CompareFindings -or $dotnetExit -ne 4) {
+    if (-not $CompareFindings) {
         Write-Host "PASS: both engines refused with exit $dotnetExit and emitted no artifact."
         exit 0
     }
@@ -153,8 +153,35 @@ if ($dotnetExit -ne 0) {
         return $reasons -join [Environment]::NewLine
     }
 
-    $dotnetReason = Get-RefusalReason $dotnetLog
-    $rustReason = Get-RefusalReason $rustLog
+    if ($dotnetExit -eq 4) {
+        $dotnetReason = Get-RefusalReason $dotnetLog
+        $rustReason = Get-RefusalReason $rustLog
+    }
+    elseif ($dotnetExit -eq 2) {
+        function Get-InputError([object[]]$Lines) {
+            $errors = @($Lines | ForEach-Object { [string]$_ } |
+                Where-Object { $_.StartsWith('Input error: ') })
+            if ($errors.Count -ne 1) {
+                throw "an input-error diff emitted $($errors.Count) input error lines instead of one"
+            }
+
+            return $errors[0]
+        }
+
+        $dotnetError = Get-InputError $dotnetLog
+        $rustError = Get-InputError $rustLog
+        if ($dotnetError -cne $rustError) {
+            throw "diff input errors differ.`n.NET: $dotnetError`nRust: $rustError"
+        }
+
+        $dotnetReason = 'DiffInputException: ' + $dotnetError.Substring('Input error: '.Length)
+        $rustReason = $dotnetReason
+    }
+    else {
+        Write-Host "PASS: both engines refused with exit $dotnetExit and emitted no artifact."
+        exit 0
+    }
+
     if ($dotnetReason -cne $rustReason) {
         throw "diff refusal reasons differ.`n.NET: $dotnetReason`nRust: $rustReason"
     }
