@@ -10,7 +10,11 @@ param(
     [string]$ChangedFiles,
     [string]$OutputDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-rust-engine-equivalence'),
     [ValidateSet('none', 'writer', 'ordinal')]
-    [string]$FixtureFault = 'none'
+    [string]$FixtureFault = 'none',
+    [switch]$CompareFindings,
+    [string]$BaseSha = 'proof-base',
+    [string]$PrSha = 'proof-pr',
+    [string]$MergeBaseSha = 'proof-merge-base'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -79,6 +83,39 @@ function New-DiffArguments([string]$Output) {
     return $arguments
 }
 
+function Compare-JsonText(
+    [Parameter(Mandatory)] [string]$DotNetPath,
+    [Parameter(Mandatory)] [string]$RustPath,
+    [switch]$NormalizeGeneratedUtc
+) {
+    $dotnetText = Get-Content $DotNetPath -Raw
+    $rustText = Get-Content $RustPath -Raw
+    if ($NormalizeGeneratedUtc) {
+        $pattern = '(?m)^(\s*"generatedUtc"\s*:\s*)"[^"]*"'
+        $dotnetText = [regex]::Replace($dotnetText, $pattern, '$1"<normalized>"')
+        $rustText = [regex]::Replace($rustText, $pattern, '$1"<normalized>"')
+    }
+
+    if ($dotnetText -ceq $rustText) {
+        return
+    }
+
+    $limit = [Math]::Min($dotnetText.Length, $rustText.Length)
+    $index = 0
+    while ($index -lt $limit -and $dotnetText[$index] -ceq $rustText[$index]) {
+        $index++
+    }
+
+    $contextStart = [Math]::Max(0, $index - 100)
+    $dotnetContext = $dotnetText.Substring(
+        $contextStart,
+        [Math]::Min(300, $dotnetText.Length - $contextStart))
+    $rustContext = $rustText.Substring(
+        $contextStart,
+        [Math]::Min(300, $rustText.Length - $contextStart))
+    throw "JSON text differs at character $index.`n.NET: $dotnetContext`nRust: $rustContext"
+}
+
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 Remove-Item $dotnetOutput, $rustOutput -Force -ErrorAction SilentlyContinue
 
@@ -114,4 +151,57 @@ if ($dotnetCanonical -cne $rustCanonical) {
     throw "normalized divergence sets differ: $dotnetOutput vs $rustOutput"
 }
 
-Write-Host 'PASS: exit codes and divergence sets are equivalent (generatedUtc excluded).'
+if (-not $CompareFindings) {
+    Write-Host 'PASS: exit codes and divergence sets are equivalent (generatedUtc excluded).'
+    exit 0
+}
+
+if (-not $ChangedFiles) {
+    $ChangedFiles = Join-Path $OutputDirectory 'changed-files.txt'
+    Set-Content $ChangedFiles -Value @()
+}
+
+$dotnetFrontier = Join-Path $OutputDirectory 'dotnet-frontier-report.json'
+$rustFrontier = Join-Path $OutputDirectory 'rust-frontier-report.json'
+Remove-Item $dotnetFrontier, $rustFrontier -Force -ErrorAction SilentlyContinue
+
+& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
+    frontier --in $dotnetOutput --changed-files $ChangedFiles --out $dotnetFrontier
+$dotnetFrontierExit = $LASTEXITCODE
+& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
+    frontier --in $rustOutput --changed-files $ChangedFiles --out $rustFrontier
+$rustFrontierExit = $LASTEXITCODE
+if ($dotnetFrontierExit -ne $rustFrontierExit) {
+    throw "frontier exit codes differ: .NET=$dotnetFrontierExit Rust=$rustFrontierExit"
+}
+
+if ($dotnetFrontierExit -ne 0) {
+    if ((Test-Path $dotnetFrontier) -or (Test-Path $rustFrontier)) {
+        throw "a refused frontier emitted an artifact: .NET=$(Test-Path $dotnetFrontier) Rust=$(Test-Path $rustFrontier)"
+    }
+
+    Write-Host "PASS: diff artifacts are equivalent and both frontier runs refused with exit $dotnetFrontierExit."
+    exit 0
+}
+
+Compare-JsonText -DotNetPath $dotnetFrontier -RustPath $rustFrontier -NormalizeGeneratedUtc
+$frontier = Get-Content $dotnetFrontier -Raw | ConvertFrom-Json
+$findingsExit = if ($frontier.counts.unexpected -gt 0) { 1 } else { 0 }
+$dotnetFindings = Join-Path $OutputDirectory 'dotnet-findings.json'
+$rustFindings = Join-Path $OutputDirectory 'rust-findings.json'
+Remove-Item $dotnetFindings, $rustFindings -Force -ErrorAction SilentlyContinue
+
+foreach ($item in @(
+    @{ Divergences = $dotnetOutput; Frontier = $dotnetFrontier; Findings = $dotnetFindings },
+    @{ Divergences = $rustOutput; Frontier = $rustFrontier; Findings = $rustFindings }
+)) {
+    & dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
+        findings --divergences $item.Divergences --frontier $item.Frontier --out $item.Findings `
+        --exit-code $findingsExit --base-sha $BaseSha --pr-sha $PrSha --merge-base $MergeBaseSha
+    if ($LASTEXITCODE -ne 0) {
+        throw "findings generation failed for $($item.Divergences): $LASTEXITCODE"
+    }
+}
+
+Compare-JsonText -DotNetPath $dotnetFindings -RustPath $rustFindings -NormalizeGeneratedUtc
+Write-Host 'PASS: diff, frontier, and findings are byte-equivalent (generatedUtc excluded).'
