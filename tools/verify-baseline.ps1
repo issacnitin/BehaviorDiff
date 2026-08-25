@@ -33,10 +33,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "CLI build failed: $LASTEXITCODE" }
 
     $members = @(
-        [ordered]@{ memberName = 'Acme.Pricing.Accepted()'; attribution = 'unexpected'; filePath = 'src/pricing/accepted.cs'; line = 10; callSiteCount = 2; untestedCallSiteCount = 0; distinctTestCount = 1; assertionReactionSummary = '1 test executed this; 1 test had an assertion react.' },
-        [ordered]@{ memberName = 'Acme.Generated.Value()'; attribution = 'unexpected'; filePath = 'generated/value.cs'; line = 20; callSiteCount = 3; untestedCallSiteCount = 0; distinctTestCount = 1; assertionReactionSummary = '1 test executed this; 1 test had an assertion react.' },
-        [ordered]@{ memberName = 'Legacy.Cache.Read()'; attribution = 'unexpected'; filePath = 'src/cache/read.cs'; line = 30; callSiteCount = 4; untestedCallSiteCount = 0; distinctTestCount = 1; assertionReactionSummary = '1 test executed this; 1 test had an assertion react.' },
-        [ordered]@{ memberName = 'Acme.Active.Remains()'; attribution = 'unexpected'; filePath = 'src/active/remains.cs'; line = 40; callSiteCount = 5; untestedCallSiteCount = 0; distinctTestCount = 1; assertionReactionSummary = '1 test executed this; 1 test had an assertion react.' }
+        [ordered]@{ memberName = 'Acme.Pricing.Accepted()'; attribution = 'unexpected'; filePath = 'src/pricing/accepted.cs'; line = 10; callSiteCount = 2; untestedCallSiteCount = 0; distinctTestCount = 1; assertionReactionSummary = '1 test executed this; 1 test had an assertion react.'; evidence = @([ordered]@{ baseDigest = 'sha256:accepted-base'; prDigest = 'sha256:accepted-pr' }) },
+        [ordered]@{ memberName = 'Acme.Generated.Value()'; attribution = 'unexpected'; filePath = 'generated/value.cs'; line = 20; callSiteCount = 3; untestedCallSiteCount = 0; distinctTestCount = 1; assertionReactionSummary = '1 test executed this; 1 test had an assertion react.'; evidence = @([ordered]@{ baseDigest = 'sha256:generated-base'; prDigest = 'sha256:generated-pr' }) },
+        [ordered]@{ memberName = 'Legacy.Cache.Read()'; attribution = 'unexpected'; filePath = 'src/cache/read.cs'; line = 30; callSiteCount = 4; untestedCallSiteCount = 0; distinctTestCount = 1; assertionReactionSummary = '1 test executed this; 1 test had an assertion react.'; evidence = @([ordered]@{ baseDigest = 'sha256:cache-base'; prDigest = 'sha256:cache-pr' }) },
+        [ordered]@{ memberName = 'Acme.Active.Remains()'; attribution = 'unexpected'; filePath = 'src/active/remains.cs'; line = 40; callSiteCount = 5; untestedCallSiteCount = 0; distinctTestCount = 1; assertionReactionSummary = '1 test executed this; 1 test had an assertion react.'; evidence = @([ordered]@{ baseDigest = 'sha256:active-base'; prDigest = 'sha256:active-pr' }) }
     )
     $artifact = [ordered]@{
         schema = 'behaviordiff.findings/1'
@@ -70,19 +70,27 @@ try {
     $baseline = Join-Path $work '.behaviordiff/baseline.yml'
     New-Item -ItemType Directory -Path (Split-Path -Parent $baseline) -Force | Out-Null
     [IO.File]::WriteAllText($baseline, @"
-schema: behaviordiff.baseline/1
+schema: behaviordiff.baseline/2
 acknowledgements:
   - id: accepted-pricing
     member: Acme.Pricing.Accepted()
     path: src/pricing/accepted.cs
+    baseDigest: 'sha256:accepted-base'
+    prDigest: 'sha256:accepted-pr'
     reason: Known accepted behavior
     expires: $future
   - id: expired-active
     member: Acme.Active.Remains()
+    path: src/active/remains.cs
+    baseDigest: 'sha256:active-base'
+    prDigest: 'sha256:active-pr'
     reason: Expired acknowledgement must not suppress
     expires: $yesterday
   - id: stale-missing
     member: Acme.Missing.NoLongerReported()
+    path: src/missing/no-longer-reported.cs
+    baseDigest: 'sha256:missing-base'
+    prDigest: 'sha256:missing-pr'
     reason: This entry should be stale
 ignorePaths:
   - id: generated-output
@@ -110,6 +118,8 @@ ignoreMembers:
         'Per-member suppression metadata count is wrong'
     Assert-True (@($applied.baseline.staleEntries).Count -eq 1 `
         -and $applied.baseline.staleEntries[0].ruleId -eq 'stale-missing') 'Stale rule was not reported'
+    Assert-True (@($applied.baseline.digestMismatchEntries).Count -eq 0) `
+        'Matching acknowledgement was incorrectly reported as changed behavior'
     Assert-True (@($applied.baseline.expiredEntries).Count -eq 1 `
         -and $applied.baseline.expiredEntries[0].ruleId -eq 'expired-active') 'Expired rule was not reported'
 
@@ -117,7 +127,7 @@ ignoreMembers:
     Copy-Item $findings $reapplyFindings
     $emptyBaseline = Join-Path $work 'empty-baseline.yml'
     [IO.File]::WriteAllText($emptyBaseline, @"
-schema: behaviordiff.baseline/1
+schema: behaviordiff.baseline/2
 acknowledgements: []
 ignorePaths: []
 ignoreMembers: []
@@ -147,12 +157,27 @@ ignoreMembers: []
             'Suppressed member leaked into rendered summary'
         Assert-True ($rendered -match '3 member\(s\), 9 call site\(s\) suppressed') `
             'Rendered summary omitted suppressed counts'
-        Assert-True ($rendered -match '1 stale, 1 expired') 'Rendered summary omitted stale/expired counts'
+        Assert-True ($rendered -match '1 stale, 0 changed, 1 expired') `
+            'Rendered summary omitted stale/changed/expired counts'
         Assert-True ($rendered -match 'stale-missing') 'Rendered summary omitted the stale rule id'
         Assert-True ($rendered -match '\.behaviordiff[/\\]baseline.yml') 'Rendered summary omitted baseline path'
     }
     Assert-True (($github -join "`n") -match 'github.com/acme/repo/blob/proof-pr/.behaviordiff/baseline.yml') `
         'GitHub summary omitted the committed baseline link'
+
+    Write-Host '=== changed behavior resurfaces ===' -ForegroundColor Cyan
+    $changedFindings = Join-Path $work 'changed-findings.json'
+    $changed = $original | ConvertFrom-Json
+    $changed.members[0].evidence[0].prDigest = 'sha256:accepted-pr-v2'
+    $changed | ConvertTo-Json -Depth 10 | Set-Content $changedFindings
+    Invoke-Cli @('baseline', 'apply', '--findings', $changedFindings, '--baseline', $baseline) 1 | Out-Null
+    $changedApplied = Get-Content $changedFindings -Raw | ConvertFrom-Json
+    Assert-True ($changedApplied.summary.actionableUnexpectedMembers -eq 2 `
+        -and $changedApplied.summary.suppressedMembers -eq 2) `
+        'Changed behavior did not resurface while broad ignores remained suppressed'
+    Assert-True (@($changedApplied.baseline.digestMismatchEntries).Count -eq 1 `
+        -and $changedApplied.baseline.digestMismatchEntries[0].ruleId -eq 'accepted-pricing') `
+        'Changed behavior was not reported as a digest mismatch'
 
     Write-Host '=== write and merge acknowledgements ===' -ForegroundColor Cyan
     $writeFindings = Join-Path $work 'write-findings.json'

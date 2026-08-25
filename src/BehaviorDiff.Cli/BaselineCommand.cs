@@ -71,7 +71,8 @@ namespace BehaviorDiff.Cli
                 + result.ActionableCallSites + " call site(s)");
             Console.WriteLine("  suppressed          : " + result.SuppressedMembers + " member(s), "
                 + result.SuppressedCallSites + " call site(s)");
-            Console.WriteLine("  stale / expired     : " + result.StaleEntries + " / " + result.ExpiredEntries);
+            Console.WriteLine("  stale / changed / expired: " + result.StaleEntries + " / "
+                + result.DigestMismatchEntries + " / " + result.ExpiredEntries);
         }
 
         private static int Write(string findingsPath, string baselinePath, int? expiryDays)
@@ -89,7 +90,8 @@ namespace BehaviorDiff.Cli
                 ? BaselinePolicy.Read(baselinePath)
                 : new BaselineDocument();
             var existing = new HashSet<string>(
-                baseline.Acknowledgements.Select(rule => Key(rule.Member, rule.Path)),
+                baseline.Acknowledgements.Select(rule => Key(
+                    rule.Member, rule.Path, rule.BaseDigest, rule.PrDigest)),
                 StringComparer.Ordinal);
             var ids = new HashSet<string>(
                 baseline.Acknowledgements.Select(rule => rule.Id)
@@ -105,20 +107,30 @@ namespace BehaviorDiff.Cli
             {
                 string memberName = Text(member, "memberName");
                 string? filePath = NullableText(member, "filePath");
-                if (!existing.Add(Key(memberName, filePath)))
+                if (filePath is null)
                 {
-                    continue;
+                    throw new CliException("Cannot acknowledge member without a source path: " + memberName);
                 }
 
-                baseline.Acknowledgements.Add(new BaselineAcknowledgement
+                foreach ((string baseDigest, string prDigest) in BehaviorPairs(member))
                 {
-                    Id = UniqueId(ids, memberName, filePath),
-                    Member = memberName,
-                    Path = filePath,
-                    Reason = "Acknowledged from findings.json; review before committing.",
-                    Expires = expiry,
-                });
-                added++;
+                    if (!existing.Add(Key(memberName, filePath, baseDigest, prDigest)))
+                    {
+                        continue;
+                    }
+
+                    baseline.Acknowledgements.Add(new BaselineAcknowledgement
+                    {
+                        Id = UniqueId(ids, memberName, filePath, baseDigest, prDigest),
+                        Member = memberName,
+                        Path = filePath,
+                        BaseDigest = baseDigest,
+                        PrDigest = prDigest,
+                        Reason = "Acknowledged from findings.json; review before committing.",
+                        Expires = expiry,
+                    });
+                    added++;
+                }
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(baselinePath)!);
@@ -130,9 +142,15 @@ namespace BehaviorDiff.Cli
             return ExitCodes.NoUnexpected;
         }
 
-        private static string UniqueId(HashSet<string> ids, string member, string? path)
+        private static string UniqueId(
+            HashSet<string> ids,
+            string member,
+            string path,
+            string baseDigest,
+            string prDigest)
         {
-            string digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Key(member, path))))
+            string digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                Key(member, path, baseDigest, prDigest))))
                 .ToLowerInvariant().Substring(0, 12);
             string candidate = "ack-" + digest;
             int suffix = 2;
@@ -145,7 +163,35 @@ namespace BehaviorDiff.Cli
             return candidate;
         }
 
-        private static string Key(string member, string? path) => member + "\n" + (path ?? string.Empty);
+        private static string Key(
+            string member,
+            string? path,
+            string baseDigest,
+            string prDigest) =>
+            member + "\n" + (path ?? string.Empty) + "\n" + baseDigest + "\n" + prDigest;
+
+        private static IEnumerable<(string BaseDigest, string PrDigest)> BehaviorPairs(JsonElement member)
+        {
+            if (!member.TryGetProperty("evidence", out JsonElement evidence)
+                || evidence.ValueKind != JsonValueKind.Array)
+            {
+                throw new CliException("Cannot acknowledge member without behavior evidence: "
+                    + Text(member, "memberName"));
+            }
+
+            (string BaseDigest, string PrDigest)[] pairs = evidence.EnumerateArray()
+                .Select(item => (Text(item, "baseDigest"), Text(item, "prDigest")))
+                .Where(pair => pair.Item1.Length > 0 && pair.Item2.Length > 0)
+                .Distinct()
+                .ToArray();
+            if (pairs.Length == 0)
+            {
+                throw new CliException("Cannot acknowledge member without behavior digests: "
+                    + Text(member, "memberName"));
+            }
+
+            return pairs;
+        }
 
         private static int ParseDays(string value)
         {

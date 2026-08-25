@@ -13,7 +13,7 @@ namespace BehaviorDiff.Cli
 {
     internal sealed class BaselineDocument
     {
-        public string Schema { get; set; } = "behaviordiff.baseline/1";
+        public string Schema { get; set; } = "behaviordiff.baseline/2";
 
         public List<BaselineAcknowledgement> Acknowledgements { get; set; } = new();
 
@@ -29,6 +29,10 @@ namespace BehaviorDiff.Cli
         public string Member { get; set; } = string.Empty;
 
         public string? Path { get; set; }
+
+        public string BaseDigest { get; set; } = string.Empty;
+
+        public string PrDigest { get; set; } = string.Empty;
 
         public string Reason { get; set; } = string.Empty;
 
@@ -52,6 +56,7 @@ namespace BehaviorDiff.Cli
         int SuppressedMembers,
         int SuppressedCallSites,
         int StaleEntries,
+        int DigestMismatchEntries,
         int ExpiredEntries)
     {
         internal int ExitCode => ActionableMembers == 0 ? ExitCodes.NoUnexpected : ExitCodes.UnexpectedFound;
@@ -99,34 +104,66 @@ namespace BehaviorDiff.Cli
                 }
 
                 member.Remove("suppression");
-                RuleState? match = rules.FirstOrDefault(rule => !rule.Expired && rule.Matches(member));
+                RuleState? broadMatch = rules.FirstOrDefault(rule =>
+                    !rule.Expired && rule.Kind != "acknowledgement" && rule.Matches(member));
                 int callSites = Number(member, "callSiteCount");
-                if (match is null)
+                if (broadMatch is not null)
+                {
+                    broadMatch.MatchCount++;
+                    broadMatch.ScopeMatchCount++;
+                    suppressedMembers++;
+                    suppressedCallSites += callSites;
+                    member["suppression"] = Suppression(broadMatch);
+                    continue;
+                }
+
+                BehaviorPair[] currentPairs = BehaviorPairs(member);
+                RuleState[] acknowledgementCandidates = rules.Where(rule =>
+                    !rule.Expired && rule.Kind == "acknowledgement" && rule.MatchesScope(member)).ToArray();
+                foreach (RuleState candidate in acknowledgementCandidates)
+                {
+                    candidate.ScopeMatchCount++;
+                }
+
+                RuleState[] matchedAcknowledgements = acknowledgementCandidates.Where(rule =>
+                    currentPairs.Any(rule.MatchesPair)).ToArray();
+                foreach (RuleState match in matchedAcknowledgements)
+                {
+                    match.MatchCount++;
+                }
+
+                bool fullyAcknowledged = currentPairs.Length > 0
+                    && currentPairs.All(pair => matchedAcknowledgements.Any(rule => rule.MatchesPair(pair)));
+                if (!fullyAcknowledged)
                 {
                     actionableMembers++;
                     actionableCallSites += callSites;
                     continue;
                 }
 
-                match.MatchCount++;
                 suppressedMembers++;
                 suppressedCallSites += callSites;
-                member["suppression"] = new JsonObject
-                {
-                    ["ruleId"] = match.Id,
-                    ["kind"] = match.Kind,
-                    ["reason"] = match.Reason,
-                    ["expires"] = match.Expires,
-                };
+                member["suppression"] = Suppression(matchedAcknowledgements[0]);
             }
 
             JsonArray stale = new(rules
-                .Where(rule => !rule.Expired && rule.MatchCount == 0)
+                .Where(rule => !rule.Expired && rule.ScopeMatchCount == 0)
                 .Select(rule => (JsonNode)new JsonObject
                 {
                     ["ruleId"] = rule.Id,
                     ["kind"] = rule.Kind,
                     ["reason"] = rule.Reason,
+                }).ToArray());
+            JsonArray digestMismatches = new(rules
+                .Where(rule => !rule.Expired && rule.Kind == "acknowledgement"
+                    && rule.ScopeMatchCount > 0 && rule.MatchCount == 0)
+                .Select(rule => (JsonNode)new JsonObject
+                {
+                    ["ruleId"] = rule.Id,
+                    ["kind"] = rule.Kind,
+                    ["reason"] = rule.Reason,
+                    ["baseDigest"] = rule.BaseDigest,
+                    ["prDigest"] = rule.PrDigest,
                 }).ToArray());
             JsonArray expired = new(rules
                 .Where(rule => rule.Expired)
@@ -168,6 +205,7 @@ namespace BehaviorDiff.Cli
                 ["actionableUnexpectedMembers"] = actionableMembers,
                 ["actionableUnexpectedCallSites"] = actionableCallSites,
                 ["staleEntries"] = stale,
+                ["digestMismatchEntries"] = digestMismatches,
                 ["expiredEntries"] = expired,
             };
             root["policyVerdict"] = actionableMembers == 0 ? "clean" : "findings";
@@ -180,6 +218,7 @@ namespace BehaviorDiff.Cli
                 suppressedMembers,
                 suppressedCallSites,
                 stale.Count,
+                digestMismatches.Count,
                 expired.Count);
         }
 
@@ -230,7 +269,7 @@ namespace BehaviorDiff.Cli
 
         private static void Validate(BaselineDocument baseline)
         {
-            if (!string.Equals(baseline.Schema, "behaviordiff.baseline/1", StringComparison.Ordinal))
+            if (!string.Equals(baseline.Schema, "behaviordiff.baseline/2", StringComparison.Ordinal))
             {
                 throw new CliException("Unsupported baseline schema '" + baseline.Schema + "'.");
             }
@@ -240,6 +279,9 @@ namespace BehaviorDiff.Cli
             {
                 Required(rule.Id, "acknowledgement id");
                 Required(rule.Member, "acknowledgement member");
+                Required(rule.Path ?? string.Empty, "acknowledgement path");
+                Required(rule.BaseDigest, "acknowledgement baseDigest");
+                Required(rule.PrDigest, "acknowledgement prDigest");
                 Required(rule.Reason, "acknowledgement reason");
                 Unique(ids, rule.Id);
                 ParseExpiry(rule.Expires, rule.Id);
@@ -293,6 +335,23 @@ namespace BehaviorDiff.Cli
         private static int Number(JsonObject value, string property) =>
             value[property]?.GetValue<int>() ?? 0;
 
+        private static JsonObject Suppression(RuleState match) => new()
+        {
+            ["ruleId"] = match.Id,
+            ["kind"] = match.Kind,
+            ["reason"] = match.Reason,
+            ["expires"] = match.Expires,
+        };
+
+        private static BehaviorPair[] BehaviorPairs(JsonObject member) =>
+            (member["evidence"] as JsonArray)?.OfType<JsonObject>()
+                .Select(item => new BehaviorPair(Text(item, "baseDigest"), Text(item, "prDigest")))
+                .Where(pair => pair.BaseDigest.Length > 0 && pair.PrDigest.Length > 0)
+                .Distinct()
+                .ToArray() ?? Array.Empty<BehaviorPair>();
+
+        private sealed record BehaviorPair(string BaseDigest, string PrDigest);
+
         private static string DisplayPath(string path)
         {
             string normalized = Path.GetFullPath(path).Replace('\\', '/');
@@ -303,6 +362,7 @@ namespace BehaviorDiff.Cli
         private sealed class RuleState
         {
             private readonly Func<JsonObject, bool> _matches;
+            private readonly Func<JsonObject, bool> _matchesScope;
 
             private RuleState(
                 string id,
@@ -310,7 +370,10 @@ namespace BehaviorDiff.Cli
                 string reason,
                 string? expires,
                 bool expired,
-                Func<JsonObject, bool> matches)
+                Func<JsonObject, bool> matches,
+                Func<JsonObject, bool>? matchesScope = null,
+                string? baseDigest = null,
+                string? prDigest = null)
             {
                 Id = id;
                 Kind = kind;
@@ -318,6 +381,9 @@ namespace BehaviorDiff.Cli
                 Expires = expires;
                 Expired = expired;
                 _matches = matches;
+                _matchesScope = matchesScope ?? matches;
+                BaseDigest = baseDigest;
+                PrDigest = prDigest;
             }
 
             internal string Id { get; }
@@ -330,22 +396,38 @@ namespace BehaviorDiff.Cli
 
             internal bool Expired { get; }
 
+            internal string? BaseDigest { get; }
+
+            internal string? PrDigest { get; }
+
             internal int MatchCount { get; set; }
+
+            internal int ScopeMatchCount { get; set; }
 
             internal bool Matches(JsonObject member) => _matches(member);
 
+            internal bool MatchesScope(JsonObject member) => _matchesScope(member);
+
+            internal bool MatchesPair(BehaviorPair pair) =>
+                string.Equals(BaseDigest, pair.BaseDigest, StringComparison.Ordinal)
+                && string.Equals(PrDigest, pair.PrDigest, StringComparison.Ordinal);
+
             internal static RuleState Acknowledgement(BaselineAcknowledgement rule, DateOnly today)
             {
-                string? expectedPath = rule.Path?.Replace('\\', '/');
+                string expectedPath = rule.Path!.Replace('\\', '/');
+                bool Scope(JsonObject member) =>
+                    string.Equals(Text(member, "memberName"), rule.Member, StringComparison.Ordinal)
+                    && string.Equals(Text(member, "filePath").Replace('\\', '/'), expectedPath, StringComparison.Ordinal);
                 return new RuleState(
                     rule.Id,
                     "acknowledgement",
                     rule.Reason,
                     rule.Expires,
                     IsExpired(rule.Expires, rule.Id, today),
-                    member => string.Equals(Text(member, "memberName"), rule.Member, StringComparison.Ordinal)
-                        && (expectedPath is null
-                            || string.Equals(Text(member, "filePath").Replace('\\', '/'), expectedPath, StringComparison.Ordinal)));
+                    Scope,
+                    Scope,
+                    rule.BaseDigest,
+                    rule.PrDigest);
             }
 
             internal static RuleState Ignore(BaselineIgnore rule, string kind, DateOnly today)

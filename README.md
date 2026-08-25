@@ -244,11 +244,13 @@ behaviordiff baseline write --findings .behaviordiff/artifacts/findings.json
 Use `--expires 90d` to choose another window or `--no-expiry` for permanent policy. Re-running the command is idempotent and adds only actionable members not already acknowledged.
 
 ```yaml
-schema: behaviordiff.baseline/1
+schema: behaviordiff.baseline/2
 acknowledgements:
   - id: accepted-pricing-change
     member: Commerce.Pricing.DiscountEngine.SelectDiscount(System.Decimal)
     path: src/Commerce.Pricing/DiscountEngine.cs
+    baseDigest: 'sha256:4ce90f...'
+    prDigest: 'sha256:809af1...'
     reason: Approved pricing migration
     expires: 2026-09-30
 ignorePaths:
@@ -261,7 +263,7 @@ ignoreMembers:
     reason: Known nondeterministic legacy cache
 ```
 
-Rule IDs must be unique. Acknowledgements match an exact member and optional path; path and member ignores use case-sensitive `*`, `**`, and `?` globs. An expiry before the current UTC date disables the rule. Active rules matching no current finding are reported as stale in console output, `findings.json.baseline.staleEntries`, and PR summaries. Provider comments show suppressed member/call-site counts and link to the committed baseline.
+Rule IDs must be unique. Acknowledgements match an exact member, path, and base/PR behavior-digest pair; changing either observed behavior resurfaces the finding. Deliberately broad path and member ignores are syntactically separate and use case-sensitive `*`, `**`, and `?` globs. An expiry before the current UTC date disables the rule. Active rules matching no current member/path are stale; acknowledgements whose member/path still exists but whose digest pair no longer matches are reported separately as changed behavior in `findings.json.baseline.digestMismatchEntries` and PR summaries. Provider comments show suppressed member/call-site counts and link to the committed baseline.
 
 ## Trace security and threat model
 

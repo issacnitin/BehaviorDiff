@@ -308,15 +308,23 @@ namespace BehaviorDiff.Cli
             }
 
             builder.AppendLine();
+            int changed = baseline.GetProperty("digestMismatchEntries").GetArrayLength();
             builder.AppendLine("Baseline policy " + reference + ": **" + Int(baseline, "suppressedMembers")
                 + " member(s), " + Int(baseline, "suppressedCallSites") + " call site(s) suppressed**; **"
                 + baseline.GetProperty("staleEntries").GetArrayLength() + " stale, "
+                + changed + " changed, "
                 + baseline.GetProperty("expiredEntries").GetArrayLength() + " expired entry/entries**.");
             JsonElement[] stale = baseline.GetProperty("staleEntries").EnumerateArray().Take(10).ToArray();
             if (stale.Length > 0)
             {
                 builder.AppendLine("Stale baseline rules: "
                     + string.Join(", ", stale.Select(entry => "`" + String(entry, "ruleId") + "`")) + ".");
+            }
+            JsonElement[] mismatches = baseline.GetProperty("digestMismatchEntries").EnumerateArray().Take(10).ToArray();
+            if (mismatches.Length > 0)
+            {
+                builder.AppendLine("Changed behavior since acknowledgement: "
+                    + string.Join(", ", mismatches.Select(entry => "`" + String(entry, "ruleId") + "`")) + ".");
             }
         }
 

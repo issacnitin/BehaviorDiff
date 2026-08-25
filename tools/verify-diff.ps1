@@ -12,7 +12,7 @@
 [CmdletBinding()]
 param(
     [switch]$Mutate,
-    [ValidateSet('discount', 'sort', 'retry', 'config', 'downgrade')]
+    [ValidateSet('discount', 'sort', 'retry', 'config', 'config-high', 'downgrade')]
     [string]$Change = 'discount',
     [switch]$SkipPrRebuild,
     [string]$WorkDirectory,
@@ -42,7 +42,11 @@ function Invoke-Suite([string]$stagedBin, [string]$outputDir) {
     $env:BEHAVIORDIFF_BACKEND = 'cecil'
     $env:BEHAVIORDIFF_TRACE = Join-Path $outputDir 'run.ndjson'
 
-    dotnet test (Join-Path $stagedBin 'SampleApp.Tests.dll') --nologo | Out-Null
+    $testArguments = @('test', (Join-Path $stagedBin 'SampleApp.Tests.dll'), '--nologo')
+    if ($Change -in @('config', 'config-high')) {
+        $testArguments += @('--filter', 'FullyQualifiedName!~SampleApp.Tests.DiscountOrderingTests')
+    }
+    & dotnet @testArguments | Out-Null
     return $LASTEXITCODE
 }
 
@@ -102,6 +106,12 @@ RetrySettings.MaxAttempts = raw.TryGetValue("max_attempts", out string? value)
             $mutated = $text -replace 'DefaultFreeShippingThreshold = 50m', 'DefaultFreeShippingThreshold = 30m'
             $label = 'SettingsParser default free-shipping threshold 50 -> 30'
         }
+        elseif ($Change -eq 'config-high') {
+            $target = Join-Path $prTree 'samples/SampleApp/SettingsParser.cs'
+            $text = Get-Content $target -Raw
+            $mutated = $text -replace 'DefaultFreeShippingThreshold = 50m', 'DefaultFreeShippingThreshold = 130m'
+            $label = 'SettingsParser default free-shipping threshold 50 -> 130'
+        }
         else {
             # Drives the frontier downgrade reasons. The edited file declares no methods.
             $target = Join-Path $prTree 'samples/SampleApp/DowngradeConfig.cs'
@@ -141,7 +151,7 @@ $base2Exit = Invoke-Suite $baseBin (Join-Path $work 'base_run2')
 if ($base2Exit -ne 0) { throw "base_run2 tests failed: $base2Exit" }
 Write-Host '  base_run2 done'
 $prExit = Invoke-Suite $prBin (Join-Path $work 'pr_run')
-$expectedPrExit = if ($Mutate -and $Change -in @('sort', 'retry', 'config', 'downgrade')) { 1 } else { 0 }
+$expectedPrExit = if ($Mutate -and $Change -in @('sort', 'retry', 'config', 'config-high', 'downgrade')) { 1 } else { 0 }
 if ($prExit -ne $expectedPrExit) {
     throw "pr_run test exit was $prExit, expected $expectedPrExit for change '$Change'"
 }

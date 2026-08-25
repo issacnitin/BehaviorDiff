@@ -886,15 +886,23 @@ namespace BehaviorDiff.Cli
             int suppressed = Int(baseline, "suppressedMembers");
             int suppressedCallSites = Int(baseline, "suppressedCallSites");
             int stale = baseline.GetProperty("staleEntries").GetArrayLength();
+            int changed = baseline.GetProperty("digestMismatchEntries").GetArrayLength();
             int expired = baseline.GetProperty("expiredEntries").GetArrayLength();
             builder.AppendLine();
             builder.AppendLine("Baseline policy " + reference + ": **" + suppressed + " member(s), "
                 + suppressedCallSites + " call site(s) suppressed**; **" + stale + " stale, "
+                + changed + " changed, "
                 + expired + " expired entry/entries**.");
             if (stale > 0)
             {
                 builder.AppendLine("Stale baseline rules: " + string.Join(", ", baseline.GetProperty("staleEntries")
                     .EnumerateArray().Take(10).Select(entry => Code(String(entry, "ruleId")))) + ".");
+            }
+            if (changed > 0)
+            {
+                builder.AppendLine("Changed behavior since acknowledgement: " + string.Join(", ",
+                    baseline.GetProperty("digestMismatchEntries").EnumerateArray().Take(10)
+                        .Select(entry => Code(String(entry, "ruleId")))) + ".");
             }
         }
 

@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -492,6 +494,8 @@ namespace BehaviorDiff.Engine
                 Kind = String(divergence, "kind"),
                 Detail = String(divergence, "detail"),
                 DigestConfidence = String(divergence, "digestConfidence"),
+                BaseDigest = BehaviorDigest(divergence, "base"),
+                PrDigest = BehaviorDigest(divergence, "pr"),
                 BaseArgs = exactOccurrence ? NullableString(divergence, "baseArgsRendered") : null,
                 PrArgs = exactOccurrence ? NullableString(divergence, "prArgsRendered") : null,
                 BaseReturn = exactOccurrence ? NullableString(divergence, "baseReturnRendered") : null,
@@ -512,6 +516,18 @@ namespace BehaviorDiff.Engine
                     .OrderBy(path => path, StringComparer.Ordinal)
                     .ToArray(),
             };
+        }
+
+        private static string BehaviorDigest(JsonElement divergence, string side)
+        {
+            string canonical = JsonSerializer.Serialize(new string?[]
+            {
+                NullableString(divergence, side + "ArgsDigest"),
+                NullableString(divergence, side + "ReturnDigest"),
+                NullableString(divergence, side + "ExceptionType"),
+            });
+            byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+            return "sha256:" + Convert.ToHexString(digest).ToLowerInvariant();
         }
 
         private static FindingPathNode[] FindCallPath(
@@ -693,6 +709,8 @@ namespace BehaviorDiff.Engine
             public string Kind { get; init; } = string.Empty;
             public string Detail { get; init; } = string.Empty;
             public string DigestConfidence { get; init; } = string.Empty;
+            public string BaseDigest { get; init; } = string.Empty;
+            public string PrDigest { get; init; } = string.Empty;
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? BaseArgs { get; init; }
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? PrArgs { get; init; }
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? BaseReturn { get; init; }
