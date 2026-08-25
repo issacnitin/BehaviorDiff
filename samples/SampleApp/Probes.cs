@@ -193,7 +193,7 @@ namespace SampleApp
             var builder = new StringBuilder(length);
             for (int i = 0; i < length; i++)
             {
-                builder.Append((char)('a' + (i % 26)));
+                builder.Append(i % 32 == 31 ? ':' : (char)('a' + (i % 26)));
             }
 
             return builder.ToString();

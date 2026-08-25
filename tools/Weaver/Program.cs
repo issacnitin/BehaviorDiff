@@ -481,6 +481,7 @@ module.Write(outputPath + ".woven", new WriterParameters { WriteSymbols = File.E
 
             Emit(Instruction.Create(OpCodes.Ldstr, assemblyName));
             Emit(Instruction.Create(isTestAssembly ? OpCodes.Ldc_I4_1 : OpCodes.Ldc_I4_0));
+            Emit(Instruction.Create(OpCodes.Ldc_I4, plans.Count));
             Emit(Instruction.Create(OpCodes.Call, refs.RegisterAssembly));
             Emit(Instruction.Create(OpCodes.Stsfld, baseField));
 

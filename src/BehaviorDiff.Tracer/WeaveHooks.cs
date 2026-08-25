@@ -41,11 +41,16 @@ namespace BehaviorDiff.Tracer
         /// Declares a woven assembly and reserves its descriptor range. The returned base is added to each
         /// call site's local index, so indices stay unique when several assemblies are woven into one process.
         /// </summary>
-        public static int RegisterAssembly(string assemblyName, bool isTestAssembly)
+        public static int RegisterAssembly(string assemblyName, bool isTestAssembly, int memberCount)
         {
             if (assemblyName == null)
             {
                 throw new ArgumentNullException(nameof(assemblyName));
+            }
+
+            if (memberCount < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(memberCount));
             }
 
             lock (s_gate)
@@ -56,6 +61,7 @@ namespace BehaviorDiff.Tracer
                 };
 
                 int baseOffset = s_descriptors.Length;
+                Array.Resize(ref s_descriptors, baseOffset + memberCount);
                 s_coverageByBase[baseOffset] = coverage;
 
                 int index = s_assemblies.Length;
