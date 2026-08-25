@@ -9,7 +9,6 @@ fi
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image="$1"
 state="$(mktemp -d)"
-trap 'rm -rf "$state"' EXIT
 mkdir -p "$state/workspace" "$state/cache" "$state/baseline" "$state/metrics"
 
 docker_path() {
@@ -19,6 +18,18 @@ docker_path() {
         printf '%s\n' "$1"
     fi
 }
+
+cleanup() {
+    MSYS_NO_PATHCONV=1 docker run --rm \
+        --entrypoint /bin/bash \
+        --volume "$(docker_path "$state"):/proof" \
+        "$image" -c 'rm -rf /proof/workspace /proof/cache /proof/baseline /proof/metrics' \
+        >/dev/null 2>&1 || true
+    rm -rf "$state" 2>/dev/null || true
+}
+
+trap 'status=$?; trap - EXIT; cleanup; exit "$status"' EXIT
+trap 'status=$?; echo "::error file=tools/verify-container.sh,line=$LINENO::Container proof failed: $BASH_COMMAND (exit $status)"; exit "$status"' ERR
 
 read_metric() {
     local file="$1"
