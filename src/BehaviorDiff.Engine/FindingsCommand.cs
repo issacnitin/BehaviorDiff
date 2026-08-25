@@ -16,6 +16,8 @@ namespace BehaviorDiff.Engine
     /// </summary>
     internal static class FindingsCommand
     {
+        private const int MaximumEvidencePerMember = 20;
+
         private static readonly JsonSerializerOptions Json = new JsonSerializerOptions
         {
             WriteIndented = true,
@@ -202,7 +204,8 @@ namespace BehaviorDiff.Engine
             var memberDivergences = divergences
                 .Where(divergence => string.Equals(String(divergence, "methodFullName"), group.Key, StringComparison.Ordinal))
                 .ToArray();
-            var evidence = memberDivergences
+            var renderedEvidence = memberDivergences
+                .Take(MaximumEvidencePerMember)
                 .Select(divergence => DescribeEvidence(
                     divergence,
                     frontierByTest,
@@ -210,7 +213,7 @@ namespace BehaviorDiff.Engine
                     prCallTree,
                     changedFiles))
                 .ToArray();
-            string[] observingTests = evidence.Select(item => item.TestId)
+            string[] observingTests = memberDivergences.Select(item => String(item, "testId"))
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(test => test, StringComparer.Ordinal)
                 .ToArray();
@@ -223,19 +226,20 @@ namespace BehaviorDiff.Engine
                 frontierByTest.TryGetValue(test, out JsonElement node) && !Bool(node, "untested"));
             FindingConsequence[] consequences = DescribeConsequences(
                 group.Key,
-                evidence,
+                renderedEvidence,
                 divergences,
                 frontierByTest,
                 baseCallTree,
                 prCallTree,
                 changedFiles);
-            string[] changedFilesReachingMember = evidence.SelectMany(item => item.ChangedFilesOnPath)
+            string[] changedFilesReachingMember = renderedEvidence.SelectMany(item => item.ChangedFilesOnPath)
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(path => path, StringComparer.Ordinal)
                 .ToArray();
             bool verified = String(first, "classification") == "frontier";
-            bool exact = evidence.Length > 0
-                && evidence.All(item => string.Equals(item.DigestConfidence, "Exact", StringComparison.Ordinal));
+            bool exact = memberDivergences.Length > 0
+                && memberDivergences.All(item =>
+                    string.Equals(String(item, "digestConfidence"), "Exact", StringComparison.Ordinal));
             bool causallyConnected = HasCausalConnectivity(
                 group.Key,
                 memberDivergences,
@@ -300,7 +304,9 @@ namespace BehaviorDiff.Engine
                 DowngradeReasons = group.SelectMany(node => Strings(node, "downgradeReasons")).Distinct(StringComparer.Ordinal).ToArray(),
                 DescendantsCompared = group.Sum(node => Int(node, "descendantKeysCompared")),
                 UntestedCallSiteCount = group.Count(node => Bool(node, "untested")),
-                Evidence = evidence,
+                EvidenceTotalCount = memberDivergences.Length,
+                EvidenceTruncated = memberDivergences.Length > renderedEvidence.Length,
+                Evidence = renderedEvidence,
                 Consequences = consequences,
             };
         }
@@ -611,7 +617,8 @@ namespace BehaviorDiff.Engine
                 Directory.CreateDirectory(directory);
             }
 
-            File.WriteAllText(fullPath, JsonSerializer.Serialize(artifact, Json));
+            using FileStream stream = File.Create(fullPath);
+            JsonSerializer.Serialize(stream, artifact, Json);
             Console.WriteLine("Findings written: " + fullPath);
         }
 
@@ -681,6 +688,8 @@ namespace BehaviorDiff.Engine
             public string[] DowngradeReasons { get; init; } = Array.Empty<string>();
             public int DescendantsCompared { get; init; }
             public int UntestedCallSiteCount { get; init; }
+            public int EvidenceTotalCount { get; init; }
+            public bool EvidenceTruncated { get; init; }
             public FindingEvidence[] Evidence { get; init; } = Array.Empty<FindingEvidence>();
             public FindingConsequence[] Consequences { get; init; } = Array.Empty<FindingConsequence>();
         }
