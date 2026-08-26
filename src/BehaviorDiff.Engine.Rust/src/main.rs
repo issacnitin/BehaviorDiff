@@ -10,6 +10,7 @@ mod matcher;
 mod model;
 mod stream_diff;
 mod stream_probe;
+mod trace_io;
 
 const EXIT_OK: i32 = 0;
 const EXIT_USAGE: i32 = 2;
@@ -149,12 +150,67 @@ fn run(args: Vec<String>) -> i32 {
                 EXIT_USAGE
             }
         },
+        "read" => match args.as_slice() {
+            [_, path] => match trace_io::read(path) {
+                Ok(exit_code) => exit_code,
+                Err(message) => {
+                    eprintln!("Input error: {message}");
+                    EXIT_USAGE
+                }
+            },
+            _ => {
+                eprintln!("usage: read <trace.ndjson>");
+                EXIT_USAGE
+            }
+        },
+        "normalize" => match parse_normalize_options(&args[1..]) {
+            Ok((input, output, force)) => match trace_io::normalize(&input, &output, force) {
+                Ok(exit_code) => exit_code,
+                Err(message) => {
+                    eprintln!("Input error: {message}");
+                    EXIT_USAGE
+                }
+            },
+            Err(message) => {
+                eprintln!("{message}");
+                EXIT_USAGE
+            }
+        },
         _ => {
             eprintln!("Unknown command '{command}'.");
             print_usage();
             EXIT_USAGE
         }
     }
+}
+
+fn parse_normalize_options(args: &[String]) -> Result<(String, String, bool), String> {
+    let Some(input) = args.first() else {
+        return Err("usage: normalize <trace.ndjson> -o <output.ndjson> [--force]".to_owned());
+    };
+    let mut output = String::new();
+    let mut force = false;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--force" => {
+                force = true;
+                index += 1;
+            }
+            "-o" | "--out" => {
+                output = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("Missing value for {}", args[index]))?
+                    .clone();
+                index += 2;
+            }
+            option => return Err(format!("Unknown option {option}")),
+        }
+    }
+    if output.is_empty() {
+        return Err("usage: normalize <trace.ndjson> -o <output.ndjson> [--force]".to_owned());
+    }
+    Ok((input.clone(), output, force))
 }
 
 fn parse_baseline_validate_options(args: &[String]) -> Result<String, String> {
@@ -346,6 +402,8 @@ fn print_usage() {
         "       behaviordiff-engine baseline --findings <findings.json> --baseline <baseline.yml>"
     );
     println!("       behaviordiff-engine baseline-validate --baseline <baseline.yml>");
+    println!("       behaviordiff-engine read <trace.ndjson>");
+    println!("       behaviordiff-engine normalize <trace.ndjson> -o <output.ndjson> [--force]");
 }
 
 fn findings_usage() -> &'static str {

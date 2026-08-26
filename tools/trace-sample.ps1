@@ -383,4 +383,9 @@ $interleaved = $events | Group-Object testId | Where-Object { ($_.Group.threadId
 
 Write-Host ''
 Write-Host '=== engine read ===' -ForegroundColor Cyan
-dotnet run --project src/BehaviorDiff.Engine -c Release --no-build -- read $traceFile.FullName
+$engineManifest = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml'
+& cargo build --release --locked --manifest-path $engineManifest
+if ($LASTEXITCODE -ne 0) { throw 'Rust engine build failed' }
+$engine = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/target/release/behaviordiff-engine.exe'
+if (-not $IsWindows) { $engine = $engine.Substring(0, $engine.Length - 4) }
+& $engine read $traceFile.FullName

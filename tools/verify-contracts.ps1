@@ -13,7 +13,9 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
-$engine = Join-Path $repo 'src\BehaviorDiff.Engine'
+$engineManifest = Join-Path $repo 'src\BehaviorDiff.Engine.Rust\Cargo.toml'
+$engine = Join-Path $repo 'src\BehaviorDiff.Engine.Rust\target\release\behaviordiff-engine.exe'
+if (-not $IsWindows) { $engine = $engine.Substring(0, $engine.Length - 4) }
 $work = Join-Path ([System.IO.Path]::GetTempPath()) 'behaviordiff-verify'
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $work | Out-Null
@@ -43,15 +45,17 @@ Write-Host ''
 Write-Host '=== build ===' -ForegroundColor Cyan
 dotnet build BehaviorDiff.sln -c Release --nologo -v quiet
 if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+& cargo build --release --locked --manifest-path $engineManifest
+if ($LASTEXITCODE -ne 0) { throw 'Rust engine build failed' }
 
 Write-Host ''
 Write-Host '=== 1. read: 5 events + 1 torn line, expect exit 1 ===' -ForegroundColor Cyan
-dotnet run --project $engine -c Release --no-build -- read $in
+& $engine read $in
 Write-Host "exit code: $LASTEXITCODE"
 
 Write-Host ''
 Write-Host '=== 2. normalize: reader -> writer through the real types ===' -ForegroundColor Cyan
-dotnet run --project $engine -c Release --no-build -- normalize $in -o $out1 --force
+& $engine normalize $in -o $out1 --force
 Write-Host "exit code: $LASTEXITCODE"
 
 Write-Host ''
@@ -62,7 +66,7 @@ Write-Host "$count line(s) accepted by ConvertFrom-Json, 0 failures"
 
 Write-Host ''
 Write-Host '=== 4. round-trip is byte-identical ===' -ForegroundColor Cyan
-dotnet run --project $engine -c Release --no-build -- normalize $out1 -o $out2 --force | Out-Null
+& $engine normalize $out1 -o $out2 --force | Out-Null
 $h1 = (Get-FileHash $out1 -Algorithm SHA256).Hash
 $h2 = (Get-FileHash $out2 -Algorithm SHA256).Hash
 Write-Host "out1 = $h1"

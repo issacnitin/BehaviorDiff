@@ -14,8 +14,10 @@ $traceManifest = Join-Path $run 'run.rust.manifest.ndjson'
 $output = Join-Path $work 'divergence-set.json'
 $tracerManifest = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml'
 $binary = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/target/release/behaviordiff-rust-rewrite.exe'
-$engine = Join-Path $repo 'src/BehaviorDiff.Engine'
+$engineManifest = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml'
+$engine = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/target/release/behaviordiff-engine.exe'
 if (-not $IsWindows) { $binary = $binary.Substring(0, $binary.Length - 4) }
+if (-not $IsWindows) { $engine = $engine.Substring(0, $engine.Length - 4) }
 
 if (Test-Path $work) { Remove-Item $work -Recurse -Force }
 New-Item $run -ItemType Directory -Force | Out-Null
@@ -67,9 +69,9 @@ if ([long]$digest.valuesDigested -le 0) {
     throw "Rust digest accounting is empty for $($events.Count) events"
 }
 
-& dotnet build $engine -c Release --nologo -v quiet
+& cargo build --release --locked --manifest-path $engineManifest
 if ($LASTEXITCODE -ne 0) { throw "BehaviorDiff engine build failed: $LASTEXITCODE" }
-& dotnet run --project $engine -c Release --no-build -- diff --base1 $run --base2 $run --pr $run --base-root $source --pr-root $source --out $output
+& $engine stream-diff --base1 $run --base2 $run --base3 $run --pr $run --base-root $source --pr-root $source --out $output
 if ($LASTEXITCODE -ne 0) { throw "BehaviorDiff engine rejected Rust trace/manifest: $LASTEXITCODE" }
 $document = Get-Content $output -Raw | ConvertFrom-Json
 if ([int]$document.counts.matchedKeys -lt 300) {

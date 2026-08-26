@@ -73,8 +73,12 @@ if (@($events | Where-Object { $_.filePathResolution -ne 'debugInfo' -or $_.line
     throw 'Java source resolution tripwire failed'
 }
 
-$engine = Join-Path $repo 'src/BehaviorDiff.Engine/BehaviorDiff.Engine.csproj'
-& dotnet run --project $engine -c Release --no-build -- read $traceFile.FullName | Out-Null
+$engineManifest = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml'
+& cargo build --release --locked --manifest-path $engineManifest
+if ($LASTEXITCODE -ne 0) { throw 'Rust engine build failed' }
+$engine = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/target/release/behaviordiff-engine.exe'
+if (-not $IsWindows) { $engine = $engine.Substring(0, $engine.Length - 4) }
+& $engine read $traceFile.FullName | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Shared engine could not read Java trace events' }
 
 Write-Host 'Java emitter proof: PASS' -ForegroundColor Green
