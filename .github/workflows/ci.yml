@@ -8,54 +8,195 @@ on:
 permissions:
   contents: read
 
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
 jobs:
-  build-and-prove:
+  rust-engine:
+    name: Rust engine
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-
-      - name: Use .NET 8 SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.x
-
-      - name: Use stable Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Use Rust 1.98
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt, clippy
-
-      - name: Build and test Rust engine
+      - name: Build, lint, and test
         shell: pwsh
         run: |
           cargo fmt --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml -- --check
           cargo clippy --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml
 
-      - name: Build and test Rust tracer
+  tracer-builds:
+    name: ${{ matrix.tracer }} tracer
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        tracer: [dotnet, java, node, go, rust]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use .NET 8
+        if: matrix.tracer == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+      - name: Use Java 17
+        if: matrix.tracer == 'java'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Use Node 24
+        if: matrix.tracer == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: src/BehaviorDiff.Node/package-lock.json
+      - name: Use Go 1.27
+        if: matrix.tracer == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: src/BehaviorDiff.Go/go.mod
+      - name: Use Rust 1.98
+        if: matrix.tracer == 'rust'
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - name: Build .NET tracer
+        if: matrix.tracer == 'dotnet'
+        shell: pwsh
+        run: |
+          dotnet build src/BehaviorDiff.Tracer/BehaviorDiff.Tracer.csproj -c Release --nologo
+          dotnet build src/BehaviorDiff.Tracer.Xunit/BehaviorDiff.Tracer.Xunit.csproj -c Release --nologo
+          dotnet build tools/Weaver/Weaver.csproj -c Release --nologo
+      - name: Build and test Java tracer
+        if: matrix.tracer == 'java'
+        shell: pwsh
+        run: mvn --batch-mode --no-transfer-progress -f src/BehaviorDiff.Java.Agent/pom.xml test
+      - name: Build and test Node tracer
+        if: matrix.tracer == 'node'
+        shell: pwsh
+        working-directory: src/BehaviorDiff.Node
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+      - name: Build and test Go tracer
+        if: matrix.tracer == 'go'
+        shell: pwsh
+        working-directory: src/BehaviorDiff.Go
+        run: |
+          go test ./...
+          go build ./cmd/behaviordiff-go-rewrite
+      - name: Build, lint, and test Rust tracer
+        if: matrix.tracer == 'rust'
         shell: pwsh
         run: |
           cargo fmt --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml -- --check
           cargo clippy --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml
 
-      - name: Build .NET solution
+  conformance:
+    name: ${{ matrix.suite }} conformance
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [dotnet, java, node-js, node-ts, go, rust]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Rust 1.98
+        uses: dtolnay/rust-toolchain@1.98.0
+      - name: Use .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+      - name: Use Java 17
+        if: matrix.suite == 'java'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Use Node 24
+        if: startsWith(matrix.suite, 'node-')
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            src/BehaviorDiff.Node/package-lock.json
+            samples/NodeReference.TypeScript/package-lock.json
+      - name: Use Go 1.27
+        if: matrix.suite == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: |
+            src/BehaviorDiff.Go/go.mod
+            samples/GoReference/go.mod
+      - name: Run conformance suite
+        shell: pwsh
+        run: pwsh -NoProfile -File tools/conformance-${{ matrix.suite }}.ps1
+
+  demos:
+    name: Three demo fixtures
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Build solution
         shell: pwsh
         run: dotnet build BehaviorDiff.sln -c Release --nologo
-
-      - name: Verify contracts
-        shell: pwsh
-        run: pwsh -NoProfile -File tools/verify-contracts.ps1
-
-      - name: Verify demo fixtures
+      - name: Verify sort, retry, and config fixtures
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-demo-fixtures.ps1
 
-      - name: Pack CLI tool with native binaries
+  package-proof:
+    name: Installed binary package proof
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+      - name: Use Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Use Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: src/BehaviorDiff.Node/package-lock.json
+      - name: Use Rust 1.98
+        uses: dtolnay/rust-toolchain@1.98.0
+      - name: Assert removed engine surfaces stay absent
         shell: pwsh
-        run: pwsh -NoProfile -File tools/package-cli.ps1 -OutputDirectory artifacts/packages
-
+        run: |
+          $matches = @(git grep -n -E 'BehaviorDiff\.Engine\.csproj|--engine(=| )' -- .github action.yml docker tools)
+          if ($matches.Count -ne 0) {
+            $matches | ForEach-Object { Write-Error $_ }
+            throw 'CI or packaging still references a removed C# engine surface.'
+          }
+      - name: Build, install, and execute packaged binaries
+        shell: pwsh
+        run: pwsh -NoProfile -File tools/verify-cli-package.ps1 -WorkDirectory artifacts/package-proof -KeepWork
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: behaviordiff-tool
-          path: artifacts/packages/*.nupkg
+          path: artifacts/package-proof/packages/*.nupkg
