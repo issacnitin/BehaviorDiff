@@ -27,7 +27,7 @@ Every process manifest begins with exactly one run record:
 | --- | --- | --- | --- |
 | `kind` | string | yes | Always `run`. |
 | `schema` | string | yes | Exactly `behaviordiff.trace/1`. An unsupported value is refused. |
-| `language` | string | yes | Digest/canonicalizer domain. Version 1 reserves `dotnet`, `java`, `node`, and `go`. |
+| `language` | string | yes | Digest/canonicalizer domain. Version 1 reserves `dotnet`, `java`, `node`, `go`, and `rust`. |
 
 All process manifests merged into one run MUST agree on `schema` and `language`. Base samples and the proposed run MUST have the same language. The engine refuses a cross-language comparison because digest equality is defined only within one language.
 
@@ -105,6 +105,8 @@ For JavaScript loaded directly from its repository source, the parser's original
 
 Node worker threads are separate JavaScript isolates with separate globals and asynchronous context. Version 1 does not propagate tracing into `worker_threads`. A transformed module that imports `node:worker_threads`/`worker_threads` or constructs `Worker` MUST add a skipped boundary member with `skipReason:"UnsupportedShape"` and language detail such as `Node: WorkerThreadsOutOfScope`. This makes potentially unobserved descendants degrade confidence instead of disappearing silently. A future implementation may bootstrap each worker as an independent trace/manifest producer, but it must not merge worker call stacks into the main isolate by assumption.
 
+For Rust rewritten into a content-addressed build cache, the stable parser position in the original ungenerated `.rs` file is `debugInfo`. Events and members MUST use the original repository-relative path and line, never the cache or staging path. A callable generated only by a macro expansion unavailable to stable source parsing is outside the transformer's callable inventory. The transformer MUST add a stable skipped boundary member for the original macro invocation with `skipReason:"UnsupportedShape"` and detail `Rust: MacroExpansionUnavailable`; it MUST NOT report unknown generated callables as patched or fabricate generated source positions.
+
 Usable attribution requires `debugInfo`, `generatedState`, or `declaringType`. Exact source statistics count only `debugInfo` and `generatedState`. An unresolved state is evidence, not permission to infer a path. Guessing makes every changed path miss and can invert an unexpected change into a clean result.
 
 The conformance source tripwire requires all exercised subject events in the reference project to have a usable state and requires zero subject roots. Harness events may be unresolved because they are not attributed.
@@ -115,13 +117,13 @@ The manifest is a snapshot written after registration and completed after the ev
 
 ### Module record
 
-The historical wire discriminator and identifier are `kind:"assembly"` and `assembly`; in version 1 their normative meaning is language module. Java uses a class-loader/module unit, Node uses an instrumented source module or package unit, and Go uses an import package.
+The historical wire discriminator and identifier are `kind:"assembly"` and `assembly`; in version 1 their normative meaning is language module. Java uses a class-loader/module unit, Node uses an instrumented source module or package unit, Go uses an import package, and Rust uses a Cargo package target.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `kind` | string | yes | `assembly`. |
 | `assembly` | non-empty string | yes | Stable module identity within the run. |
-| `discovery` | string | yes | Instrumentation mechanism: `BuildTimeWeave`, `JavaAgentTransform`, `NodeAstTransform`, or `GoAstRewrite`. |
+| `discovery` | string | yes | Instrumentation mechanism: `BuildTimeWeave`, `JavaAgentTransform`, `NodeAstTransform`, `GoAstRewrite`, or `RustAstRewrite`. |
 | `scanned` | boolean | yes | Member discovery completed for this module. |
 | `instrumented` | boolean | yes | At least one member was instrumented. |
 | `patchedMembers` | non-negative integer | yes | Number of instrumented members. The historical name means `instrumentedMembers`. |

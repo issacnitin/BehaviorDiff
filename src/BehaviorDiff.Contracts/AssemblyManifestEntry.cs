@@ -20,6 +20,9 @@ namespace BehaviorDiff.Contracts
 
         /// <summary>Go source transformed through the module-aware AST rewriter.</summary>
         GoAstRewrite,
+
+        /// <summary>Rust source transformed into a content-addressed Cargo build cache.</summary>
+        RustAstRewrite,
     }
 
     /// <summary>

@@ -502,6 +502,9 @@ namespace BehaviorDiff.Contracts
                 case nameof(AssemblyDiscovery.GoAstRewrite):
                     discovery = AssemblyDiscovery.GoAstRewrite;
                     break;
+                case nameof(AssemblyDiscovery.RustAstRewrite):
+                    discovery = AssemblyDiscovery.RustAstRewrite;
+                    break;
                 default:
                     // StartupEnumeration and AssemblyLoadEvent were the runtime patcher's; a manifest still
                     // carrying them predates build-time weaving and its coverage claims do not transfer.
