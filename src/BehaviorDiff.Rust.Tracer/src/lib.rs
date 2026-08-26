@@ -567,7 +567,11 @@ impl ExitHookInstrumenter {
             parse_quote!({
                 let __behaviordiff_args = ::behaviordiff_rust_runtime::capture_arguments(vec![#(#args),*]);
                 let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line, __behaviordiff_args, #is_test_root);
-                let __behaviordiff_result = (async move #original).await;
+                let (__behaviordiff_guard, __behaviordiff_result) =
+                    ::behaviordiff_rust_runtime::trace_future(
+                        __behaviordiff_guard,
+                        async move #original,
+                    ).await;
                 let __behaviordiff_return = #result;
                 __behaviordiff_guard.complete(__behaviordiff_return);
                 __behaviordiff_result

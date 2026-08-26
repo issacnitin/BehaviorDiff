@@ -78,6 +78,10 @@ if ($question.Count -ne 2 -or @($question | Where-Object outcome -cne 'normal').
 if ($asyncCompletion.Count -ne 1 -or $asyncCompletion[0].outcome -cne 'normal' -or $asyncCancellation.Count -ne 1 -or $asyncCancellation[0].outcome -cne 'cancelled') {
     throw 'Rust async completion/cancellation outcomes differ'
 }
+$asyncSynchronousReturns = @($asyncCancellation | Where-Object outcome -ceq 'normal').Count
+if ($asyncSynchronousReturns -ne 0) {
+    throw "Rust async cancellation emitted $asyncSynchronousReturns synchronous return event(s) from $($asyncCancellation.Count) cancellation event(s)"
+}
 $panicReturnFields = @($panic | Where-Object { $null -ne $_.PSObject.Properties['returnDigest'] }).Count
 if ($panicReturnFields -ne 0) { throw "Rust panic records carried $panicReturnFields return digest field(s)" }
 
@@ -91,6 +95,7 @@ if ($panicReturnFields -ne 0) { throw "Rust panic records carried $panicReturnFi
     QuestionMarkNormal = $question.Count
     AsyncCompleted = $asyncCompletion.Count
     AsyncCancelled = $asyncCancellation.Count
+    AsyncSynchronousReturns = $asyncSynchronousReturns
     PanicReturnFields = $panicReturnFields
     SourceHashChanges = 0
 } | Format-List

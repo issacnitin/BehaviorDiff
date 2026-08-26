@@ -8,9 +8,12 @@ pub use canonical::{
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
+use std::future::Future;
 use std::io::Write;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::task::{Context, Poll};
 
 static NEXT_CALL_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
@@ -49,6 +52,7 @@ pub struct Guard {
     ordinal: i32,
     thread_id: u64,
     is_test_root: bool,
+    active: bool,
     completed: bool,
 }
 
@@ -93,6 +97,7 @@ pub fn enter(
         ordinal,
         thread_id,
         is_test_root,
+        active: true,
         completed: false,
     }
 }
@@ -101,10 +106,27 @@ impl Guard {
     pub fn complete(mut self, result: Option<CapturedValue>) {
         self.completed = true;
         emit(&self, "normal", result.as_ref());
-        self.leave();
+        self.suspend();
     }
 
-    fn leave(&self) {
+    fn activate(&mut self) {
+        if self.active {
+            return;
+        }
+        CONTEXT.with(|context| {
+            let mut context = context.borrow_mut();
+            if self.is_test_root {
+                context.test_id = Some(self.test_id.clone());
+            }
+            context.stack.push(self.call_id);
+        });
+        self.active = true;
+    }
+
+    fn suspend(&mut self) {
+        if !self.active {
+            return;
+        }
         CONTEXT.with(|context| {
             let mut context = context.borrow_mut();
             if context.stack.last() == Some(&self.call_id) {
@@ -120,6 +142,7 @@ impl Guard {
                 context.test_id = None;
             }
         });
+        self.active = false;
     }
 }
 
@@ -134,7 +157,47 @@ impl Drop for Guard {
             "cancelled"
         };
         emit(self, outcome, None);
-        self.leave();
+        self.suspend();
+    }
+}
+
+pub struct TraceFuture<F: Future> {
+    guard: Option<Guard>,
+    future: Pin<Box<F>>,
+}
+
+pub fn trace_future<F: Future>(guard: Guard, future: F) -> TraceFuture<F> {
+    TraceFuture {
+        guard: Some(guard),
+        future: Box::pin(future),
+    }
+}
+
+impl<F: Future> Future for TraceFuture<F> {
+    type Output = (Guard, F::Output);
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.as_mut().get_mut();
+        let guard = this
+            .guard
+            .as_mut()
+            .expect("trace future polled after completion");
+        guard.activate();
+        match this.future.as_mut().poll(context) {
+            Poll::Ready(value) => Poll::Ready((this.guard.take().unwrap(), value)),
+            Poll::Pending => {
+                guard.suspend();
+                Poll::Pending
+            }
+        }
+    }
+}
+
+impl<F: Future> Drop for TraceFuture<F> {
+    fn drop(&mut self) {
+        if let Some(guard) = &mut self.guard {
+            guard.activate();
+        }
     }
 }
 
@@ -200,4 +263,32 @@ fn escape(value: &str) -> String {
         .replace('"', "\\\"")
         .replace('\n', "\\n")
         .replace('\r', "\\r")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::task::Waker;
+
+    struct AlwaysPending;
+
+    impl Future for AlwaysPending {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    #[test]
+    fn pending_future_suspends_logical_context_before_drop() {
+        let guard = enter("async_test", "src/lib.rs", 1, None, false);
+        let mut future = Box::pin(trace_future(guard, AlwaysPending));
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        assert!(future.as_mut().poll(&mut context).is_pending());
+        CONTEXT.with(|trace| assert!(trace.borrow().stack.is_empty()));
+        drop(future);
+        CONTEXT.with(|trace| assert!(trace.borrow().stack.is_empty()));
+    }
 }
