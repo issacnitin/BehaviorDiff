@@ -33,15 +33,15 @@ pwsh -File tools/verify-demo-fixtures.ps1
 pwsh -File tools/verify-pipeline.ps1
 ```
 
-For changes to the Rust diff engine, run its compiler checks and the cross-engine equivalence gate. The verifier generates fixed success, noise, tooling-gap, partial-digest, and divergence inputs by default.
+For changes to the Rust diff engine, run its compiler checks and regression proofs:
 
 ```powershell
 cargo fmt --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml -- --check
 cargo clippy --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml
-pwsh -File tools/verify-rust-engine.ps1
-pwsh -File tools/verify-rust-engine.ps1 -FixtureFault writer
-pwsh -File tools/verify-rust-engine.ps1 -FixtureFault ordinal
+pwsh -File tools/verify-contracts.ps1
+pwsh -File tools/verify-diff.ps1
+pwsh -File tools/verify-cli-package.ps1
 ```
 
 Keep pull requests focused. Include a regression proof for behavioral changes and explain any new refusal condition or observability limitation.

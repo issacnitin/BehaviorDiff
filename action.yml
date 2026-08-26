@@ -37,10 +37,6 @@ inputs:
     description: Include lower-confidence and nondeterministic findings in comments.
     required: false
     default: 'false'
-  engine:
-    description: Diff engine implementation, either csharp or rust.
-    required: false
-    default: rust
 outputs:
   analysis-exit:
     description: BehaviorDiff analysis exit code before posting policy.
@@ -63,4 +59,3 @@ runs:
     - ${{ inputs.gate }}
     - ${{ inputs.post }}
     - ${{ inputs.strict }}
-    - ${{ inputs.engine }}
