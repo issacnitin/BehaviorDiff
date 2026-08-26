@@ -104,7 +104,7 @@ fn emit(
     let result = capture_fields("return", result);
     let _ = writeln!(
         stream,
-        "{{\"schema\":\"behaviordiff.rust-exit-hook/2\",\"callId\":{call_id},\"method\":\"{method}\",\"file\":\"{file}\",\"line\":{line},\"outcome\":\"{outcome}\"{args}{result}{exception}}}"
+        "{{\"schema\":\"behaviordiff.rust-exit-hook/2\",\"callId\":{call_id},\"method\":\"{method}\",\"filePath\":\"{file}\",\"filePathResolution\":\"debugInfo\",\"line\":{line},\"outcome\":\"{outcome}\"{args}{result}{exception}}}"
     );
 }
 
