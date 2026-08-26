@@ -72,6 +72,19 @@ Findings now retain complete member-level counts, observing tests, confidence, e
 
 The final #1068 findings run produced an `812,206`-byte artifact in `14.551` seconds with a sampled peak working set of `341,770,240` bytes (325.938 MiB), down `656,789,504` bytes (626.363 MiB) from the original peak. The artifact is 99.637% smaller. A fresh `stream-diff` gate then passed all ten analyzed retained inputs byte-for-byte through frontier and findings modulo only `generatedUtc`: SampleApp sort/retry/config, all four language conformance corpora, and JSON-java #1061/#1062/#1065. FluentValidation #2136 and JSON-java #1068 passed the same fresh analyzed gate separately; Commons Text #764 again produced identical direct exit 2, CLI exit 3 mapping, and refused findings.
 
+## Full-pipeline engine comparison
+
+FluentValidation #2136 was then measured through the complete CLI with independent empty caches for the cold runs and each engine's own populated cache for the warm runs. Peak RSS is the maximum summed working set of the CLI and its direct engine child from `engine part 1` through frontier completion. Independently rerun PR traces retain small baseline-observed call-site variation, so correctness qualification remains the byte-equivalent retained-trace corpus gate above rather than this timing run.
+
+| Engine | Cache | End-to-end wall | Diff + frontier | Peak engine-interval RSS |
+| --- | --- | ---: | ---: | ---: |
+| C# | cold miss | 112.611 s | 19.173 s | 2,135.594 MiB |
+| C# | warm hit | 64.831 s | 17.879 s | 2,178.270 MiB |
+| Rust `stream-diff` | cold miss | 174.319 s | 85.995 s | 311.602 MiB |
+| Rust `stream-diff` | warm hit | 127.986 s | 84.391 s | 308.719 MiB |
+
+Rust reduces peak engine-interval RSS by 85.41% cold and 85.83% warm, but is 1.548x slower end-to-end cold, 1.974x slower end-to-end warm, and 4.485x to 4.720x slower across diff plus frontier. The requested default-switch condition therefore does not hold. C# remains the default; Rust remains explicit through `--engine=rust`.
+
 After this qualification, explicit `--engine=rust` dispatch moved from `diff` to `stream-diff`. C# remains the default engine, and the old Rust `diff` command remains available as a qualified fallback.
 
 Run the hard gate with:
