@@ -15,6 +15,7 @@ namespace RealDiff.Cli
         Node,
         Go,
         Rust,
+        Python,
     }
 
     internal sealed class LanguageDetection
@@ -74,7 +75,7 @@ namespace RealDiff.Cli
             if (candidates.Count == 0 && configuredLanguage is null)
             {
                 throw DetectionFailure(
-                    "Could not detect a supported repository language. Expected a solution/project, pom.xml, package.json, go.mod, or Cargo.toml.");
+                    "Could not detect a supported repository language. Expected a solution/project, pom.xml, package.json, go.mod, Cargo.toml, pyproject.toml, setup.py, or requirements.txt.");
             }
 
             RepositoryLanguage language;
@@ -153,6 +154,7 @@ namespace RealDiff.Cli
                 case "node": language = RepositoryLanguage.Node; return true;
                 case "go": language = RepositoryLanguage.Go; return true;
                 case "rust": language = RepositoryLanguage.Rust; return true;
+                case "python": language = RepositoryLanguage.Python; return true;
                 default: language = default; return false;
             }
         }
@@ -188,6 +190,7 @@ namespace RealDiff.Cli
             Add(candidates, root, RepositoryLanguage.Node, Existing(root, "package.json"));
             Add(candidates, root, RepositoryLanguage.Go, Existing(root, "go.mod"));
             Add(candidates, root, RepositoryLanguage.Rust, Existing(root, "Cargo.toml"));
+            Add(candidates, root, RepositoryLanguage.Python, PythonMarkers(root, SearchOption.TopDirectoryOnly));
             return candidates;
         }
 
@@ -200,6 +203,7 @@ namespace RealDiff.Cli
             Add(candidates, root, RepositoryLanguage.Node, Find(root, "package.json"));
             Add(candidates, root, RepositoryLanguage.Go, Find(root, "go.mod"));
             Add(candidates, root, RepositoryLanguage.Rust, Find(root, "Cargo.toml"));
+            Add(candidates, root, RepositoryLanguage.Python, PythonMarkers(root, SearchOption.AllDirectories));
             return candidates;
         }
 
@@ -253,6 +257,13 @@ namespace RealDiff.Cli
                 }
                 return packages.ToArray();
             }
+            if (language == RepositoryLanguage.Python)
+            {
+                string[] scopes = new[] { "src", "lib", "app", "tests" }
+                    .Where(candidate => Directory.Exists(Path.Combine(workDirectory, candidate)))
+                    .ToArray();
+                return scopes.Length > 0 ? scopes : new[] { Relative(repositoryRoot, workDirectory) };
+            }
             return new[] { Relative(repositoryRoot, workDirectory) };
         }
 
@@ -263,6 +274,7 @@ namespace RealDiff.Cli
             RepositoryLanguage.Node => "npm ci && npm run build --if-present",
             RepositoryLanguage.Go => "go build ./...",
             RepositoryLanguage.Rust => "cargo build",
+            RepositoryLanguage.Python => string.Empty,
             _ => string.Empty,
         };
 
@@ -274,6 +286,7 @@ namespace RealDiff.Cli
             RepositoryLanguage.Node => "npm test",
             RepositoryLanguage.Go => "go test ./...",
             RepositoryLanguage.Rust => "cargo test -- --test-threads=1",
+            RepositoryLanguage.Python => "python -m pytest",
             _ => string.Empty,
         };
 
@@ -290,6 +303,20 @@ namespace RealDiff.Cli
         private static IEnumerable<string> Find(string root, string pattern) =>
             Directory.EnumerateFiles(root, pattern, SearchOption.AllDirectories).Where(path => !IsBuildOutput(path));
 
+        private static IEnumerable<string> PythonMarkers(string root, SearchOption option) =>
+            new[] { "pyproject.toml", "setup.py", "requirements.txt" }
+                .SelectMany(name => Directory.EnumerateFiles(root, name, option))
+                .Where(path => !IsBuildOutput(path))
+                .GroupBy(Path.GetDirectoryName, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderBy(PythonMarkerRank).First());
+
+        private static int PythonMarkerRank(string path) => Path.GetFileName(path) switch
+        {
+            "pyproject.toml" => 0,
+            "setup.py" => 1,
+            _ => 2,
+        };
+
         private static bool IsBuildOutput(string path)
         {
             string normalized = path.Replace('\\', '/');
@@ -297,6 +324,8 @@ namespace RealDiff.Cli
                 || normalized.Contains("/obj/", StringComparison.Ordinal)
                 || normalized.Contains("/target/", StringComparison.Ordinal)
                 || normalized.Contains("/node_modules/", StringComparison.Ordinal)
+                || normalized.Contains("/__pycache__/", StringComparison.Ordinal)
+                || normalized.Contains("/.pytest_cache/", StringComparison.Ordinal)
                 || normalized.Contains("/dist/", StringComparison.Ordinal);
         }
 
