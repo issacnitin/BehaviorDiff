@@ -38,29 +38,44 @@ The FluentValidation timing image was `behaviordiff:rust-tracer-proof`, image ID
 
 Large traces and the persistent trace cache lived on a Docker-managed Linux volume. Docker Desktop bind-mounted NTFS traces repeatedly tore their final event and manifest records at about 142 MB; those refused runs were discarded. Dependencies used the host's non-empty `C:\Nuget` global package cache read-only plus a local feed for FluentValidation's floating `Microsoft.SourceLink.GitHub` `1.*` reference.
 
-The benchmark refuses an empty findings artifact, non-positive diff/frontier timings, cold non-miss, warm non-hit, or zero RSS samples. Both completed runs had 4 engine-interval RSS samples and analyzed findings.
+The benchmark refuses an empty findings artifact, non-positive diff/frontier timings, cold non-miss, warm non-hit, or an engine interval without memory samples. The final sampler read summed descendant `VmRSS`, `memory.current`, and `memory.stat` directly inside the container about every 300 ms. Both completed runs retained 19 peak-interval samples and analyzed findings.
 
-| Environment | Cache | End-to-end wall | Diff + frontier | Peak memory | Cache saved |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Host Rust | cold miss | 94.419 s | 6.626 s | 321.410 MiB | 0 s |
-| Container Rust | cold miss | 186.170 s | 5.362 s | 1,967.104 MiB | 0 s |
-| Host Rust | warm hit | 55.430 s | 7.331 s | 314.102 MiB | host report did not retain this field |
-| Container Rust | warm hit | 117.078 s | 5.261 s | 1,956.864 MiB | 65.265 s |
+| Environment | Cache | End-to-end wall | Diff + frontier | Peak process-tree RSS | Peak cgroup current | Cache saved |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Host Rust | cold miss | 94.419 s | 6.626 s | 321.410 MiB | not measured | 0 s |
+| Container Rust | cold miss | 186.251 s | 5.441 s | 1,777.156 MiB | 2,661.461 MiB | 0 s |
+| Host Rust | warm hit | 55.430 s | 7.331 s | 314.102 MiB | not measured | host report did not retain this field |
+| Container Rust | warm hit | 149.090 s | 5.656 s | 2,064.219 MiB | 2,524.680 MiB | 65.246 s |
+
+At each temperature, maximum process-tree RSS and maximum `memory.current` occurred in the same retained sample:
+
+| Cgroup-v2 component at peak | Cold | Warm |
+| --- | ---: | ---: |
+| `memory.current` | 2,661.461 MiB | 2,524.680 MiB |
+| `anon` | 1,259.879 MiB | 1,555.715 MiB |
+| `file` | 1,345.234 MiB | 926.832 MiB |
+| `kernel` | 54.559 MiB | 41.363 MiB |
+| `shmem` (subset of `file`) | 195.313 MiB | 191.230 MiB |
+| `file_mapped` (subset of `file`) | 195.324 MiB | 191.277 MiB |
+
+`anon + file + kernel` accounts for 99.93% cold and 99.97% warm of `memory.current`; the small remainder is normal cgroup accounting outside those three reported fields.
 
 Container-to-host ratios:
 
 | Measurement | Cold | Warm |
 | --- | ---: | ---: |
-| End-to-end wall | 1.972x | 2.112x |
-| Diff + frontier | 0.809x | 0.718x |
-| Reported peak memory | 6.120x | 6.230x |
+| End-to-end wall | 1.973x | 2.690x |
+| Diff + frontier | 0.821x | 0.772x |
+| Process-tree RSS | 5.529x | 6.572x |
+| Container cgroup current / host process working set | 8.280x | 8.038x |
 
-The memory columns use different ownership domains. Host peak is the summed working set of the CLI and its direct engine child between engine-part-1 and frontier completion. Container peak is whole-container cgroup memory from `docker stats` over the same output-marker interval; it includes the .NET CLI, Rust child, and cgroup-accounted file/cache memory. The container's approximately 1.96 GiB is therefore the correct Docker Desktop cgroup ceiling observed by this proof, but it is not a process-RSS comparison to the host's approximately 314-321 MiB.
+The memory columns use different ownership domains. Host peak is the summed working set of the CLI and its direct engine child between engine-part-1 and frontier completion. Container process-tree RSS sums `VmRSS` for PID 1 and all descendants; shared and file-backed resident pages can appear in more than one process. Cgroup `memory.current` charges pages once to the container and includes anonymous memory, filesystem cache, shared memory, and kernel memory.
+
+The previously reported approximately 1.96 GiB `docker stats` peak was a sparse-sampling artifact, not the measured deployment ceiling and not a like-for-like process-RSS value. The direct samples put the workload's cgroup peak at 2.52-2.66 GiB. A container limit must therefore allow at least that observed peak plus operating margin. Conversely, describing the warm 2.02 GiB summed `VmRSS` as private application memory would also overstate ownership: cgroup anonymous memory was 1.56 GiB, while 0.93 GiB was cgroup file memory and summed process RSS can double-count shared mappings.
 
 Cold and warm findings were both non-empty and analyzed, but independent reruns retained known trace variation: cold had 11 unexpected members/161 call sites; warm had 8/144. Correctness qualification remains the retained-trace byte-equivalence gate, not equality between independently rerun benchmark findings.
 
 ## Not closed
 
 - Container FluentValidation end-to-end wall remains 91.751 s slower cold and 61.648 s slower warm than the host measurement.
-- Whole-cgroup peak remains approximately 1.96 GiB. The benchmark identifies the deployment ceiling but does not yet attribute cgroup memory among anonymous heap, mapped files, and page cache.
-- The image carries the Rust tracer, but the tracer's rendering-only sensitive-value redaction gap remains as documented in `RUST-TRACER-PRODUCTION.md`.
+- Whole-cgroup peak remains 2.52-2.66 GiB for this exact FluentValidation corpus and image. File/cache memory explains 0.93-1.35 GiB, but anonymous memory alone remains 1.26-1.56 GiB.
