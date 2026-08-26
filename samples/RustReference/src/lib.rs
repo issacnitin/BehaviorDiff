@@ -1,5 +1,12 @@
 #![cfg(test)]
 
+use std::collections::HashMap;
+use std::fmt;
+use std::rc::{Rc, Weak};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
+
 #[derive(Clone, Copy)]
 struct PrivatePoint {
     left: i32,
@@ -9,6 +16,83 @@ struct PrivatePoint {
 enum PrivateState {
     Ready(i32),
     Waiting { value: i32 },
+}
+
+static USER_CODE_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+struct NoUserCodeValue {
+    value: i32,
+}
+
+impl fmt::Display for NoUserCodeValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        USER_CODE_CALLS.fetch_add(1, Ordering::SeqCst);
+        write!(formatter, "{}", self.value)
+    }
+}
+
+struct CycleNode {
+    value: i32,
+    next: Weak<CycleNode>,
+}
+
+struct DeepNode {
+    value: i32,
+    next: Option<Box<DeepNode>>,
+}
+
+union UnreadableUnion {
+    integer: i32,
+    floating: f32,
+}
+
+fn proof_no_user_code(value: NoUserCodeValue) -> i32 { value.value }
+fn proof_cycle(value: Rc<CycleNode>) -> i32 { value.value }
+fn proof_topology(value: Vec<Rc<String>>) -> usize { value.len() }
+fn proof_unordered(value: HashMap<String, i32>) -> usize { value.len() }
+fn proof_time(value: SystemTime) -> bool { value > SystemTime::UNIX_EPOCH }
+fn proof_blocklist(_value: Mutex<i32>) -> bool { true }
+fn proof_depth(value: DeepNode) -> i32 { value.value }
+fn proof_truncation(value: String) -> usize { value.len() }
+fn proof_unreadable(_value: UnreadableUnion) -> bool { true }
+fn proof_beyond_cap(value: String) -> usize { value.len() }
+
+fn deep_node(depth: usize) -> DeepNode {
+    DeepNode {
+        value: depth as i32,
+        next: (depth > 0).then(|| Box::new(deep_node(depth - 1))),
+    }
+}
+
+fn run_digest_proofs() {
+    USER_CODE_CALLS.store(0, Ordering::SeqCst);
+    assert_eq!(proof_no_user_code(NoUserCodeValue { value: 7 }), 7);
+    assert_eq!(USER_CODE_CALLS.load(Ordering::SeqCst), 0);
+
+    let cycle = Rc::new_cyclic(|weak| CycleNode { value: 11, next: weak.clone() });
+    assert_eq!(proof_cycle(cycle), 11);
+
+    let shared = Rc::new(String::from("shared"));
+    assert_eq!(proof_topology(vec![shared.clone(), shared]), 2);
+    assert_eq!(proof_topology(vec![Rc::new(String::from("shared")), Rc::new(String::from("shared"))]), 2);
+
+    let mut first = HashMap::new();
+    first.insert(String::from("one"), 1);
+    first.insert(String::from("two"), 2);
+    let mut second = HashMap::new();
+    second.insert(String::from("two"), 2);
+    second.insert(String::from("one"), 1);
+    assert_eq!(proof_unordered(first), 2);
+    assert_eq!(proof_unordered(second), 2);
+
+    assert!(proof_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)));
+    assert!(proof_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)));
+    assert!(proof_blocklist(Mutex::new(3)));
+    assert_eq!(proof_depth(deep_node(12)), 12);
+    assert_eq!(proof_truncation("x".repeat(5000)), 5000);
+    assert!(proof_unreadable(UnreadableUnion { integer: 5 }));
+    assert_eq!(proof_beyond_cap(format!("{}A", "z".repeat(5000))), 5001);
+    assert_eq!(proof_beyond_cap(format!("{}B", "z".repeat(5000))), 5001);
 }
 
 fn operation_00(value: i32) -> i32 {
@@ -302,5 +386,10 @@ mod tests {
     #[test]
     fn reference_case_5() {
         assert_ne!(run_suite(5), i32::MIN);
+    }
+
+    #[test]
+    fn digest_proofs() {
+        run_digest_proofs();
     }
 }

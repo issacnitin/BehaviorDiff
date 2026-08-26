@@ -1,8 +1,9 @@
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasher, Hash};
-use std::rc::Rc;
-use std::sync::Arc;
+use std::rc::{Rc, Weak as RcWeak};
+use std::sync::{Arc, Weak as ArcWeak};
+use std::time::{Instant, SystemTime};
 
 const MAX_DEPTH: usize = 8;
 const RENDERED_CAP: usize = 4096;
@@ -285,6 +286,36 @@ impl<T: Canonicalize + ?Sized> Canonicalize for Arc<T> {
                 self.as_ref().write_canonical(context, output);
             },
         );
+    }
+}
+
+impl<T: Canonicalize + ?Sized> Canonicalize for RcWeak<T> {
+    fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
+        match self.upgrade() {
+            Some(value) => value.write_canonical(context, output),
+            None => context.write_value("Weak", output, |_, output| output.push_str("Weak:dropped")),
+        }
+    }
+}
+
+impl<T: Canonicalize + ?Sized> Canonicalize for ArcWeak<T> {
+    fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
+        match self.upgrade() {
+            Some(value) => value.write_canonical(context, output),
+            None => context.write_value("Weak", output, |_, output| output.push_str("Weak:dropped")),
+        }
+    }
+}
+
+impl Canonicalize for SystemTime {
+    fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
+        context.write_value("SystemTime", output, |_, output| output.push_str("SystemTime:normalized"));
+    }
+}
+
+impl Canonicalize for Instant {
+    fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
+        context.write_value("Instant", output, |_, output| output.push_str("Instant:normalized"));
     }
 }
 

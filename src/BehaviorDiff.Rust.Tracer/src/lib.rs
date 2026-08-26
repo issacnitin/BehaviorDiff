@@ -669,6 +669,9 @@ fn exact_type(ty: &Type, local_types: &HashSet<String>, generic_names: &HashSet<
                     | "Box"
                     | "Rc"
                     | "Arc"
+                    | "Weak"
+                    | "SystemTime"
+                    | "Instant"
             );
             if local_types.contains(&name) {
                 return !matches!(name.as_str(), "union");
@@ -684,7 +687,7 @@ fn exact_type(ty: &Type, local_types: &HashSet<String>, generic_names: &HashSet<
                         _ => false,
                     })
                 }
-                PathArguments::None => true,
+                PathArguments::None => false,
                 PathArguments::Parenthesized(_) => false,
             }
         }
