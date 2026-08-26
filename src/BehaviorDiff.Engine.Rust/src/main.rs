@@ -1,6 +1,7 @@
 use std::env;
 
 mod engine;
+mod frontier;
 mod loader;
 mod matcher;
 mod model;
@@ -80,12 +81,50 @@ fn run(args: Vec<String>) -> i32 {
                 EXIT_USAGE
             }
         },
+        "frontier" => match parse_frontier_options(&args[1..]) {
+            Ok(options) => match frontier::run(&options) {
+                Ok(exit_code) => exit_code,
+                Err(message) => {
+                    eprintln!("Input error: {message}");
+                    EXIT_USAGE
+                }
+            },
+            Err(message) => {
+                eprintln!("{message}");
+                EXIT_USAGE
+            }
+        },
         _ => {
             eprintln!("Unknown command '{command}'.");
             print_usage();
             EXIT_USAGE
         }
     }
+}
+
+fn parse_frontier_options(args: &[String]) -> Result<frontier::FrontierOptions, String> {
+    let mut options = frontier::FrontierOptions::default();
+    let mut index = 0;
+    while index < args.len() {
+        let option = &args[index];
+        let Some(value) = args.get(index + 1) else {
+            return Err(format!("Missing value for {option}"));
+        };
+        match option.as_str() {
+            "--in" => options.input = value.clone(),
+            "--changed-files" => options.changed_files = value.clone(),
+            "--out" => options.output = value.clone(),
+            _ => return Err(format!("Unknown option {option}")),
+        }
+        index += 2;
+    }
+    if options.input.is_empty() || options.output.is_empty() {
+        return Err(
+            "usage: frontier --in <set.json> --changed-files <paths.txt> --out <report.json>"
+                .to_owned(),
+        );
+    }
+    Ok(options)
 }
 
 fn parse_diff_options(args: &[String]) -> Result<DiffOptions, String> {
@@ -135,6 +174,7 @@ fn print_usage() {
     println!(
         "       behaviordiff-engine stream-diff --base1 <dir> --base2 <dir> --base3 <dir> --pr <dir> --out <set.json>"
     );
+    println!("       behaviordiff-engine frontier --in <set.json> --changed-files <paths.txt> --out <report.json>");
 }
 
 fn diff_usage() -> &'static str {
