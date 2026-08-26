@@ -74,13 +74,13 @@ RUN dotnet publish tools/Weaver/Weaver.csproj \
 FROM ${DOTNET_IMAGE} AS runtime
 ARG BUILD_VERSION=dev
 LABEL org.opencontainers.image.title="BehaviorDiff" \
-      org.opencontainers.image.description="BehaviorDiff CLI, engine, and .NET, Java, Node, and Go tracing toolchains" \
+    org.opencontainers.image.description="BehaviorDiff CLI, engine, and .NET, Java, Node, Go, and Rust tracing toolchains" \
       org.opencontainers.image.source="https://github.com/issacnitin/BehaviorDiff" \
       org.opencontainers.image.version="${BUILD_VERSION}" \
       org.opencontainers.image.licenses="MIT"
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates git \
+    && apt-get install --yes --no-install-recommends build-essential ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=java-build /opt/java/openjdk /opt/java/openjdk
@@ -88,6 +88,8 @@ COPY --from=java-build /usr/share/maven /usr/share/maven
 COPY --from=node-build /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-build /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=go-build /usr/local/go /usr/local/go
+COPY --from=rust-tracer-build /usr/local/cargo /usr/local/cargo
+COPY --from=rust-tracer-build /usr/local/rustup /usr/local/rustup
 
 RUN ln -s /usr/share/maven/bin/mvn /usr/local/bin/mvn \
     && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
@@ -106,9 +108,11 @@ COPY docker/entrypoint.sh /usr/local/bin/behaviordiff-entrypoint
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=1 \
     JAVA_HOME=/opt/java/openjdk \
+    CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
     BEHAVIORDIFF_JAVA_AGENT=/opt/behaviordiff/tracers/java/behaviordiff-java-agent.jar \
     BEHAVIORDIFF_NODE_TRACER=/opt/behaviordiff/tracers/node \
-    PATH=/opt/java/openjdk/bin:/usr/local/go/bin:${PATH}
+    PATH=/opt/java/openjdk/bin:/usr/local/go/bin:/usr/local/cargo/bin:${PATH}
 
 RUN chmod +x /usr/local/bin/behaviordiff /usr/local/bin/behaviordiff-action \
     /usr/local/bin/behaviordiff-entrypoint /usr/local/bin/behaviordiff-go-rewrite \
@@ -119,7 +123,9 @@ RUN chmod +x /usr/local/bin/behaviordiff /usr/local/bin/behaviordiff-action \
     && mvn --version \
     && node --version \
     && npm --version \
-    && go version
+    && go version \
+    && cargo --version \
+    && rustc --version
 
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/behaviordiff-entrypoint"]

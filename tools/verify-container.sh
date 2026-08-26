@@ -107,6 +107,7 @@ run_phase warm
     exit 1
 }
 run_container java
+run_container rust
 
 echo "CONTAINER_PERSISTENT_MOUNTS cache_entries=$cache_entries baseline_schema=behaviordiff.baseline/2 suppressed_members=$warm_suppressed_members"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then

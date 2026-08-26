@@ -17,7 +17,7 @@ trap 'if [[ "$owns_root" == true ]]; then rm -rf "$root"; fi' EXIT
 
 git config --global --add safe.directory '*'
 
-for command in dotnet java mvn node npm go git behaviordiff behaviordiff-go-rewrite; do
+for command in dotnet java mvn node npm go cargo rustc git behaviordiff behaviordiff-go-rewrite; do
     command -v "$command" >/dev/null || { echo "missing image command: $command" >&2; exit 1; }
 done
 
@@ -238,6 +238,45 @@ run_java_proof() {
     echo 'CONTAINER_JAVA_ANALYSIS: PASS'
 }
 
+run_rust_proof() {
+    local repo="$root/rust-repo"
+    local work="$root/rust-work"
+    local findings="$work/findings.json"
+    local output="$root/rust-output.log"
+    initialize_fixture RustSortDemo "$repo"
+    local base
+    base="$(git -C "$repo" rev-parse HEAD)"
+    sed -i 's/PRIORITY_BIAS: i32 = 0/PRIORITY_BIAS: i32 = 5/' "$repo/src/config.rs"
+    git -C "$repo" add src/config.rs
+    git -C "$repo" commit --quiet -m 'pr: change priority bias'
+    local pr
+    pr="$(git -C "$repo" rev-parse HEAD)"
+
+    set +e
+    behaviordiff "$repo" --base "$base" --pr "$pr" --work "$work" \
+        --findings "$findings" --no-baseline --strict --keep-traces 1d 2>&1 | tee "$output"
+    local exit_code=${PIPESTATUS[0]}
+    set -e
+    [[ $exit_code -eq 1 ]] || { echo "Rust container analysis exited $exit_code, expected 1" >&2; exit 1; }
+    grep -Eq '^  engine: rust$' "$output"
+    grep -Eq '^  rust tracer: /opt/behaviordiff/tracers/rust/linux-(x64|arm64)/behaviordiff-rust-rewrite$' "$output"
+    assert_analyzed_findings "$findings"
+    local events
+    events="$(find "$work/base_run1" -name 'run.*.ndjson' ! -name '*.manifest.ndjson' -type f -exec cat {} + | grep -cve '^$')"
+    (( events > 0 )) || { echo 'Rust container trace input is empty' >&2; exit 1; }
+    node - "$findings" "$events" <<'NODE'
+const artifact = require(process.argv[2]);
+const events = Number(process.argv[3]);
+if (artifact.summary.unexpectedMembers !== 1
+    || artifact.summary.editedFiles !== 1
+    || artifact.summary.tracedMembers !== 0
+    || artifact.summary.untestedMembers !== 1) {
+  throw new Error(`Rust container findings shape differs for ${events} events: ${JSON.stringify(artifact.summary)}`);
+}
+NODE
+    echo "CONTAINER_RUST_DEFAULT_TRACER events=$events: PASS"
+}
+
 phase="${1:-all}"
 case "$phase" in
     cold)
@@ -249,13 +288,17 @@ case "$phase" in
     java)
         run_java_proof
         ;;
+    rust)
+        run_rust_proof
+        ;;
     all)
         run_node_proof
         run_java_proof
         run_node_warm_proof
+        run_rust_proof
         ;;
     *)
-        echo "usage: $0 [cold|warm|java|all]" >&2
+        echo "usage: $0 [cold|warm|java|rust|all]" >&2
         exit 2
         ;;
 esac
