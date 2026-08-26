@@ -110,6 +110,19 @@ fn run(args: Vec<String>) -> i32 {
                 EXIT_USAGE
             }
         },
+        "findings-invalid" => match parse_invalid_findings_options(&args[1..]) {
+            Ok(options) => match findings::write_invalid(&options) {
+                Ok(exit_code) => exit_code,
+                Err(message) => {
+                    eprintln!("Input error: {message}");
+                    EXIT_USAGE
+                }
+            },
+            Err(message) => {
+                eprintln!("{message}");
+                EXIT_USAGE
+            }
+        },
         "baseline" => match parse_baseline_options(&args[1..]) {
             Ok(options) => match baseline::run(&options) {
                 Ok(exit_code) => exit_code,
@@ -129,6 +142,34 @@ fn run(args: Vec<String>) -> i32 {
             EXIT_USAGE
         }
     }
+}
+
+fn parse_invalid_findings_options(
+    args: &[String],
+) -> Result<findings::InvalidFindingsOptions, String> {
+    let mut options = findings::InvalidFindingsOptions::default();
+    let mut index = 0;
+    while index < args.len() {
+        let option = &args[index];
+        let Some(value) = args.get(index + 1) else {
+            return Err(format!("Missing value for {option}"));
+        };
+        match option.as_str() {
+            "--out" => options.output = value.clone(),
+            "--status" => options.status = value.clone(),
+            "--reason" => options.reason = value.clone(),
+            "--exit-code" => options.exit_code = parse_number(option, value)?,
+            "--base-sha" => options.base_sha = value.clone(),
+            "--pr-sha" => options.pr_sha = value.clone(),
+            "--merge-base" => options.merge_base = value.clone(),
+            _ => return Err(format!("Unknown option {option}")),
+        }
+        index += 2;
+    }
+    if options.output.is_empty() || options.status.is_empty() || options.reason.is_empty() {
+        return Err("usage: findings-invalid --status <refused|failed> --exit-code <code> --reason <text> --out <findings.json>".to_owned());
+    }
+    Ok(options)
 }
 
 fn parse_baseline_options(args: &[String]) -> Result<baseline::BaselineOptions, String> {
@@ -280,6 +321,7 @@ fn print_usage() {
     );
     println!("       behaviordiff-engine frontier --in <set.json> --changed-files <paths.txt> --out <report.json>");
     println!("       behaviordiff-engine findings --divergences <set.json> --frontier <report.json> --out <findings.json> --exit-code <code> --base-sha <sha> --pr-sha <sha> --merge-base <sha>");
+    println!("       behaviordiff-engine findings-invalid --status <refused|failed> --exit-code <code> --reason <text> --out <findings.json>");
     println!(
         "       behaviordiff-engine baseline --findings <findings.json> --baseline <baseline.yml>"
     );

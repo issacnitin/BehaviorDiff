@@ -31,6 +31,17 @@ pub(crate) struct FindingsOptions {
     pub(crate) strict: bool,
 }
 
+#[derive(Default)]
+pub(crate) struct InvalidFindingsOptions {
+    pub(crate) output: String,
+    pub(crate) status: String,
+    pub(crate) reason: String,
+    pub(crate) exit_code: i32,
+    pub(crate) base_sha: String,
+    pub(crate) pr_sha: String,
+    pub(crate) merge_base: String,
+}
+
 struct TreeIndex<'a> {
     by_identity: HashMap<String, &'a Value>,
     by_occurrence: HashMap<(String, String, i32), Vec<&'a Value>>,
@@ -404,6 +415,51 @@ pub(crate) fn run(options: &FindingsOptions) -> Result<i32, String> {
         ),
         ("coverage", coverage),
         ("members", Value::Array(members)),
+    ]);
+    write(&options.output, &artifact)?;
+    Ok(0)
+}
+
+pub(crate) fn write_invalid(options: &InvalidFindingsOptions) -> Result<i32, String> {
+    if options.status != "refused" && options.status != "failed" {
+        return Err(format!("Invalid findings status '{}'.", options.status));
+    }
+    let artifact = object([
+        (
+            "schema",
+            Value::String("behaviordiff.findings/1".to_owned()),
+        ),
+        (
+            "generatedUtc",
+            Value::String(OffsetDateTime::now_utc().format(&Rfc3339).unwrap()),
+        ),
+        ("status", Value::String(options.status.clone())),
+        ("verdict", Value::String("could_not_analyze".to_owned())),
+        ("isCleanResult", Value::Bool(false)),
+        ("exitCode", Value::from(options.exit_code)),
+        (
+            "exitReason",
+            Value::String(
+                if options.status == "refused" {
+                    "analysis_refused"
+                } else {
+                    "analysis_failed"
+                }
+                .to_owned(),
+            ),
+        ),
+        (
+            "refs",
+            object([
+                ("baseSha", Value::String(options.base_sha.clone())),
+                ("prSha", Value::String(options.pr_sha.clone())),
+                ("mergeBaseSha", Value::String(options.merge_base.clone())),
+            ]),
+        ),
+        (
+            "refusal",
+            object([("reason", Value::String(options.reason.clone()))]),
+        ),
     ]);
     write(&options.output, &artifact)?;
     Ok(0)
