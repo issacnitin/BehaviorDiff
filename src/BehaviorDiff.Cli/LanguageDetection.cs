@@ -10,6 +10,7 @@ namespace BehaviorDiff.Cli
         DotNet,
         Java,
         Node,
+        Rust,
     }
 
     internal sealed class LanguageDetection
@@ -35,7 +36,7 @@ namespace BehaviorDiff.Cli
             if (candidates.Count == 0)
             {
                 throw new CliException(
-                    "Could not detect a supported repository language. Expected a solution/project, pom.xml, or package.json.",
+                    "Could not detect a supported repository language. Expected a solution/project, pom.xml, package.json, or Cargo.toml.",
                     ExitCodes.RunInvalid);
             }
 
@@ -67,6 +68,7 @@ namespace BehaviorDiff.Cli
                 .Concat(Directory.EnumerateFiles(root, "*.csproj", SearchOption.TopDirectoryOnly)));
             Add(candidates, root, RepositoryLanguage.Java, Existing(root, "pom.xml"));
             Add(candidates, root, RepositoryLanguage.Node, Existing(root, "package.json"));
+            Add(candidates, root, RepositoryLanguage.Rust, Existing(root, "Cargo.toml"));
             return candidates;
         }
 
@@ -76,6 +78,8 @@ namespace BehaviorDiff.Cli
             AddDotNet(candidates, root, Find(root, "*.sln").Concat(Find(root, "*.csproj")));
             Add(candidates, root, RepositoryLanguage.Java, Find(root, "pom.xml"));
             Add(candidates, root, RepositoryLanguage.Node, Find(root, "package.json")
+                .Where(path => !IsBuildOutput(path)));
+            Add(candidates, root, RepositoryLanguage.Rust, Find(root, "Cargo.toml")
                 .Where(path => !IsBuildOutput(path)));
             return candidates;
         }

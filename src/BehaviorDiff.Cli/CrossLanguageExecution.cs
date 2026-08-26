@@ -70,6 +70,7 @@ namespace BehaviorDiff.Cli
             {
                 RepositoryLanguage.Java => RunJava(baseDetection, prDetection, baseTree, prTree, targetSha),
                 RepositoryLanguage.Node => RunNode(baseDetection, prDetection, baseTree, prTree, targetSha),
+                RepositoryLanguage.Rust => RunRust(baseDetection, prDetection, baseTree, prTree, targetSha),
                 _ => throw new CliException("Cross-language execution was requested for " + baseDetection.Language + "."),
             };
         }
@@ -83,6 +84,9 @@ namespace BehaviorDiff.Cli
                     break;
                 case RepositoryLanguage.Node:
                     WarmNode(detection, baseTree, targetSha);
+                    break;
+                case RepositoryLanguage.Rust:
+                    WarmRust(detection, baseTree, targetSha);
                     break;
                 default:
                     throw new CliException("Cache warming was requested for " + detection.Language + ".");
@@ -294,6 +298,106 @@ namespace BehaviorDiff.Cli
             prStopwatch.Stop();
             _timings.InstrumentedRunMilliseconds += prStopwatch.ElapsedMilliseconds;
             return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
+        }
+
+        private void WarmRust(LanguageDetection detection, string baseTree, string targetSha)
+        {
+            string source = Path.GetDirectoryName(detection.EntryPoint)!;
+            string tracer = ResolveRustTracer();
+            var key = new TraceCacheKey(targetSha, "rust", TracerFingerprint.ForFile(tracer), Pipeline.ScopeConfig(string.Empty));
+            if (_cache.TryRestore(key, out _))
+            {
+                return;
+            }
+            var stopwatch = Stopwatch.StartNew();
+            RunRustTests("base_run1", source, Path.Combine(_work, "rust-base-cache"), tracer);
+            RunRustTests("base_run2", source, Path.Combine(_work, "rust-base-cache"), tracer);
+            RunRustTests("base_run3", source, Path.Combine(_work, "rust-base-cache"), tracer);
+            stopwatch.Stop();
+            _cache.Store(key, baseTree, stopwatch.ElapsedMilliseconds);
+        }
+
+        private CrossLanguageRunSet RunRust(
+            LanguageDetection baseDetection,
+            LanguageDetection prDetection,
+            string baseTree,
+            string prTree,
+            string targetSha)
+        {
+            Console.WriteLine();
+            Console.WriteLine("=== 2. Rust stable cached source rewriting ===");
+            string baseSource = Path.GetDirectoryName(baseDetection.EntryPoint)!;
+            string prSource = Path.GetDirectoryName(prDetection.EntryPoint)!;
+            string tracer = ResolveRustTracer();
+            Console.WriteLine("  rust tracer: " + tracer);
+            var key = new TraceCacheKey(targetSha, "rust", TracerFingerprint.ForFile(tracer), Pipeline.ScopeConfig(string.Empty));
+            bool cacheHit = _cache.TryRestore(key, out TraceCacheEntry? cacheEntry);
+            string base1;
+            string base2;
+            string base3;
+            string baseRoot;
+            if (cacheHit)
+            {
+                base1 = TraceCacheSession.RunPath(_work, 1);
+                base2 = TraceCacheSession.RunPath(_work, 2);
+                base3 = TraceCacheSession.RunPath(_work, 3);
+                baseRoot = cacheEntry!.BaseRoot;
+            }
+            else
+            {
+                var stopwatch = Stopwatch.StartNew();
+                string cache = Path.Combine(_work, "rust-base-cache");
+                base1 = RunRustTests("base_run1", baseSource, cache, tracer);
+                base2 = RunRustTests("base_run2", baseSource, cache, tracer);
+                base3 = RunRustTests("base_run3", baseSource, cache, tracer);
+                stopwatch.Stop();
+                _timings.InstrumentedRunMilliseconds += stopwatch.ElapsedMilliseconds;
+                baseRoot = baseTree;
+                _cache.Store(key, baseRoot, stopwatch.ElapsedMilliseconds);
+            }
+            Pipeline.AssertTestIdsPresent(base1);
+            string pr = RunRustTests("pr_run", prSource, Path.Combine(_work, "rust-pr-cache"), tracer);
+            return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
+        }
+
+        private string RunRustTests(string label, string source, string cache, string tracer)
+        {
+            string directory = PrepareRunDirectory(label);
+            ProcessResult rewrite = Shell.Run(
+                tracer,
+                new[] { "--source", source, "--cache-root", cache },
+                source);
+            if (!rewrite.Ok)
+            {
+                throw new CliException("Rust source rewriting failed." + Environment.NewLine + Shell.Tail(rewrite.Output, 25), ExitCodes.RepoDoesNotBuild);
+            }
+            using JsonDocument report = JsonDocument.Parse(rewrite.Output.Trim());
+            string rewritten = report.RootElement.GetProperty("output").GetString()!;
+            string trace = Path.Combine(directory, "run.rust.ndjson");
+            var environment = new Dictionary<string, string> { ["BEHAVIORDIFF_RUST_EXIT_TRACE"] = trace };
+            Console.WriteLine("  " + label.PadRight(10) + " command: cargo test -- --test-threads=1");
+            ProcessResult test = RunScriptCommand(
+                "cargo",
+                new[] { "test", "--quiet", "--manifest-path", Path.Combine(rewritten, "Cargo.toml"), "--", "--test-threads=1" },
+                rewritten,
+                environment);
+            if (!test.Ok)
+            {
+                throw new CliException("Rewritten Rust tests failed." + Environment.NewLine + Shell.Tail(test.Output, 25), ExitCodes.BuildOrTestFailure);
+            }
+            string origin = Path.Combine(rewritten, ".behaviordiff-rust-origin.json");
+            string manifest = Path.Combine(directory, "run.rust.manifest.ndjson");
+            ProcessResult finalize = Shell.Run(
+                tracer,
+                new[] { "finalize", "--origin", origin, "--trace", trace, "--out", manifest },
+                rewritten);
+            if (!finalize.Ok)
+            {
+                throw new CliException("Rust trace manifest finalization failed." + Environment.NewLine + Shell.Tail(finalize.Output, 25), ExitCodes.RunInvalid);
+            }
+            TraceSummary summary = ValidateTrace(directory, label, test.Output);
+            ReportTrace(label, summary, test.ExitCode);
+            return directory;
         }
 
         private static void BuildJava(string label, string entryPoint, MavenCommand maven)
@@ -590,6 +694,30 @@ namespace BehaviorDiff.Cli
 
             throw new CliException(
                 "BehaviorDiff Node tracer was not found. Set BEHAVIORDIFF_NODE_TRACER or install it at " + packaged + ".");
+        }
+
+        private static string ResolveRustTracer()
+        {
+            string? configured = Environment.GetEnvironmentVariable("BEHAVIORDIFF_RUST_TRACER");
+            if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+            {
+                return Path.GetFullPath(configured);
+            }
+            string fileName = OperatingSystem.IsWindows() ? "behaviordiff-rust-rewrite.exe" : "behaviordiff-rust-rewrite";
+            string packaged = Path.Combine(AppContext.BaseDirectory, "tracers", "rust", fileName);
+            if (File.Exists(packaged))
+            {
+                return packaged;
+            }
+            foreach (string root in CandidateSourceRoots())
+            {
+                string candidate = Path.Combine(root, "src", "BehaviorDiff.Rust.Tracer", "target", "release", fileName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+            throw new CliException("BehaviorDiff Rust tracer was not found. Set BEHAVIORDIFF_RUST_TRACER or build src/BehaviorDiff.Rust.Tracer.");
         }
 
         private static string ValidateNodeTracer(string directory)
