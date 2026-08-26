@@ -188,7 +188,8 @@ namespace BehaviorDiff.Cli
                 Console.Error.WriteLine();
                 Console.Error.WriteLine("FAILED: " + ex.Message);
                 ResolvedRefs? refs = pipeline?.ResolvedRefs;
-                FindingsCommand.WriteInvalid(
+                EngineDispatch.WriteInvalidFindings(
+                    engine,
                     findingsPath,
                     ex.ExitCode == ExitCodes.RunInvalid ? "refused" : "failed",
                     ex.ExitCode,
@@ -204,7 +205,8 @@ namespace BehaviorDiff.Cli
                 Console.Error.WriteLine();
                 Console.Error.WriteLine("REFUSED: " + reason);
                 ResolvedRefs? refs = pipeline?.ResolvedRefs;
-                FindingsCommand.WriteInvalid(
+                EngineDispatch.WriteInvalidFindings(
+                    engine,
                     findingsPath,
                     "refused",
                     ExitCodes.RunInvalid,
@@ -220,7 +222,8 @@ namespace BehaviorDiff.Cli
                 Console.Error.WriteLine();
                 Console.Error.WriteLine("FAILED: " + reason);
                 ResolvedRefs? refs = pipeline?.ResolvedRefs;
-                FindingsCommand.WriteInvalid(
+                EngineDispatch.WriteInvalidFindings(
+                    engine,
                     findingsPath,
                     "failed",
                     ExitCodes.BuildOrTestFailure,
@@ -736,7 +739,8 @@ namespace BehaviorDiff.Cli
             if (diffExit != 0)
             {
                 string reason = diffOptions.RefusalReason ?? "The comparison was refused before a DivergenceSet was produced.";
-                FindingsCommand.WriteInvalid(
+                EngineDispatch.WriteInvalidFindings(
+                    _engine,
                     _findings,
                     "refused",
                     ExitCodes.RunInvalid,
@@ -766,7 +770,8 @@ namespace BehaviorDiff.Cli
             if (frontierExit != 0)
             {
                 string reason = frontierOptions.RefusalReason ?? "Frontier detection was refused before a report was produced.";
-                FindingsCommand.WriteInvalid(
+                EngineDispatch.WriteInvalidFindings(
+                    _engine,
                     _findings,
                     "refused",
                     ExitCodes.RunInvalid,
@@ -780,7 +785,8 @@ namespace BehaviorDiff.Cli
             }
 
             int exitCode = Summarize(report);
-            FindingsCommand.WriteAnalyzed(
+            EngineDispatch.WriteFindings(
+                _engine,
                 divergenceSet,
                 report,
                 _findings,

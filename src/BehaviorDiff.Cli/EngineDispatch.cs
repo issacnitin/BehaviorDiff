@@ -103,6 +103,110 @@ namespace BehaviorDiff.Cli
                 + Shell.Tail(result.Output, 20));
         }
 
+        internal static void WriteFindings(
+            AnalysisEngine engine,
+            string divergenceSet,
+            string frontierReport,
+            string output,
+            int exitCode,
+            string baseSha,
+            string prSha,
+            string mergeBaseSha,
+            string cacheStatus,
+            string cacheKey,
+            string cacheBackend,
+            long cacheSavedWallClockMilliseconds,
+            long buildMilliseconds,
+            long weaveMilliseconds,
+            long instrumentedRunMilliseconds,
+            long cacheRestoreMilliseconds,
+            long cacheStoreMilliseconds,
+            long diffMilliseconds,
+            long frontierMilliseconds,
+            bool strict)
+        {
+            if (engine == AnalysisEngine.CSharp)
+            {
+                FindingsCommand.WriteAnalyzed(
+                    divergenceSet,
+                    frontierReport,
+                    output,
+                    exitCode,
+                    baseSha,
+                    prSha,
+                    mergeBaseSha,
+                    cacheStatus,
+                    cacheKey,
+                    cacheBackend,
+                    cacheSavedWallClockMilliseconds,
+                    buildMilliseconds,
+                    weaveMilliseconds,
+                    instrumentedRunMilliseconds,
+                    cacheRestoreMilliseconds,
+                    cacheStoreMilliseconds,
+                    diffMilliseconds,
+                    frontierMilliseconds,
+                    strict);
+                return;
+            }
+
+            RunRustArtifact(FindingsArguments(
+                divergenceSet,
+                frontierReport,
+                output,
+                exitCode,
+                baseSha,
+                prSha,
+                mergeBaseSha,
+                cacheStatus,
+                cacheKey,
+                cacheBackend,
+                cacheSavedWallClockMilliseconds,
+                buildMilliseconds,
+                weaveMilliseconds,
+                instrumentedRunMilliseconds,
+                cacheRestoreMilliseconds,
+                cacheStoreMilliseconds,
+                diffMilliseconds,
+                frontierMilliseconds,
+                strict), "findings");
+        }
+
+        internal static void WriteInvalidFindings(
+            AnalysisEngine engine,
+            string output,
+            string status,
+            int exitCode,
+            string reason,
+            string? baseSha = null,
+            string? prSha = null,
+            string? mergeBaseSha = null)
+        {
+            if (engine == AnalysisEngine.CSharp)
+            {
+                FindingsCommand.WriteInvalid(
+                    output,
+                    status,
+                    exitCode,
+                    reason,
+                    baseSha,
+                    prSha,
+                    mergeBaseSha);
+                return;
+            }
+
+            RunRustArtifact(
+                InvalidFindingsArguments(
+                    output,
+                    status,
+                    exitCode,
+                    reason,
+                    baseSha,
+                    prSha,
+                    mergeBaseSha),
+                "invalid findings");
+        }
+
         private static IEnumerable<string> Arguments(DiffOptions options)
         {
             yield return "stream-diff";
@@ -149,6 +253,117 @@ namespace BehaviorDiff.Cli
             yield return options.ChangedFiles;
             yield return "--out";
             yield return options.Output;
+        }
+
+        private static IEnumerable<string> FindingsArguments(
+            string divergenceSet,
+            string frontierReport,
+            string output,
+            int exitCode,
+            string baseSha,
+            string prSha,
+            string mergeBaseSha,
+            string cacheStatus,
+            string cacheKey,
+            string cacheBackend,
+            long cacheSavedWallClockMilliseconds,
+            long buildMilliseconds,
+            long weaveMilliseconds,
+            long instrumentedRunMilliseconds,
+            long cacheRestoreMilliseconds,
+            long cacheStoreMilliseconds,
+            long diffMilliseconds,
+            long frontierMilliseconds,
+            bool strict)
+        {
+            yield return "findings";
+            yield return "--divergences";
+            yield return divergenceSet;
+            yield return "--frontier";
+            yield return frontierReport;
+            yield return "--out";
+            yield return output;
+            yield return "--exit-code";
+            yield return exitCode.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            yield return "--base-sha";
+            yield return baseSha;
+            yield return "--pr-sha";
+            yield return prSha;
+            yield return "--merge-base";
+            yield return mergeBaseSha;
+            yield return "--cache-status";
+            yield return cacheStatus;
+            yield return "--cache-key";
+            yield return cacheKey;
+            yield return "--cache-backend";
+            yield return cacheBackend;
+            yield return "--cache-saved-ms";
+            yield return cacheSavedWallClockMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            yield return "--build-ms";
+            yield return buildMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            yield return "--weave-ms";
+            yield return weaveMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            yield return "--run-ms";
+            yield return instrumentedRunMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            yield return "--cache-restore-ms";
+            yield return cacheRestoreMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            yield return "--cache-store-ms";
+            yield return cacheStoreMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            yield return "--diff-ms";
+            yield return diffMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            yield return "--frontier-ms";
+            yield return frontierMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (strict)
+            {
+                yield return "--strict";
+            }
+        }
+
+        private static IEnumerable<string> InvalidFindingsArguments(
+            string output,
+            string status,
+            int exitCode,
+            string reason,
+            string? baseSha,
+            string? prSha,
+            string? mergeBaseSha)
+        {
+            yield return "findings-invalid";
+            yield return "--out";
+            yield return output;
+            yield return "--status";
+            yield return status;
+            yield return "--exit-code";
+            yield return exitCode.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            yield return "--reason";
+            yield return reason;
+            foreach (string argument in Optional("--base-sha", baseSha)) yield return argument;
+            foreach (string argument in Optional("--pr-sha", prSha)) yield return argument;
+            foreach (string argument in Optional("--merge-base", mergeBaseSha)) yield return argument;
+        }
+
+        private static IEnumerable<string> Optional(string name, string? value)
+        {
+            if (value is not null)
+            {
+                yield return name;
+                yield return value;
+            }
+        }
+
+        private static void RunRustArtifact(IEnumerable<string> arguments, string artifact)
+        {
+            ProcessResult result = Shell.Run(
+                ResolveRustEngine(),
+                arguments,
+                Environment.CurrentDirectory);
+            Console.Write(result.Output);
+            if (result.ExitCode != 0)
+            {
+                throw new CliException(
+                    "The Rust engine could not write " + artifact + "; exit " + result.ExitCode + "."
+                    + Environment.NewLine + Shell.Tail(result.Output, 20));
+            }
         }
 
         private static string? InputError(string output)
