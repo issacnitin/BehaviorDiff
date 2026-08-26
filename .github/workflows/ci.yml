@@ -19,7 +19,26 @@ jobs:
         with:
           dotnet-version: 8.x
 
-      - name: Build
+      - name: Use stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Build and test Rust engine
+        shell: pwsh
+        run: |
+          cargo fmt --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml -- --check
+          cargo clippy --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml
+
+      - name: Build and test Rust tracer
+        shell: pwsh
+        run: |
+          cargo fmt --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml -- --check
+          cargo clippy --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml
+
+      - name: Build .NET solution
         shell: pwsh
         run: dotnet build BehaviorDiff.sln -c Release --nologo
 
@@ -31,9 +50,9 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-demo-fixtures.ps1
 
-      - name: Pack CLI tool
+      - name: Pack CLI tool with native binaries
         shell: pwsh
-        run: dotnet pack src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj -c Release -o artifacts/packages
+        run: pwsh -NoProfile -File tools/package-cli.ps1 -OutputDirectory artifacts/packages
 
       - name: Upload package
         uses: actions/upload-artifact@v4

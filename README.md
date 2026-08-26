@@ -8,7 +8,7 @@ BehaviorDiff finds **runtime behavior changes that ordinary source review misses
 
 It builds two Git revisions, observes their tests, learns a noise baseline from three base runs, and reports the first changed behavior in each call tree. A source diff tells you what was edited. BehaviorDiff tells you what the edit did, including effects in files the pull request never touched.
 
-The architecture has one language-neutral trace contract, one tracer per runtime, and selectable C# or Rust diff implementations:
+The architecture has one language-neutral trace contract, one tracer per runtime, and a single-pass streaming Rust diff, frontier, and findings engine:
 
 ```mermaid
 flowchart LR
@@ -17,9 +17,8 @@ flowchart LR
   N[Node / CJS + ESM + Babel] --> T
   G[Go / stable AST rewrite] --> T
   R[Rust / stable syn rewrite cache] --> T
-  T --> E[C# or Rust matching and noise]
-  E --> A[Shared C# frontier and attribution]
-  A --> F[findings.json]
+  T --> E[Rust matching, noise, frontier, and findings]
+  E --> F[findings.json]
   F --> P[GitHub, Azure DevOps, MCP]
 ```
 
@@ -164,7 +163,6 @@ BehaviorDiff needs a repository path and two Git refs. The target repository mus
 behaviordiff C:\src\my-service `
   --base origin/main `
   --pr HEAD `
-  --engine rust `
   --findings C:\temp\behaviordiff\findings.json
 ```
 
@@ -173,7 +171,6 @@ Useful options:
 ```text
 --work <directory>      Override the temporary work directory
 --findings <file>       Write canonical machine-readable findings
---engine <name>         Select rust or csharp for matching/noise diff; defaults to rust
 --cache-dir <directory> Override the local base-trace cache directory
 --cache-retention <n>    Expire cached traces after a stated window, for example 12h or 7d
 --keep-traces <n>        Opt in to retaining working traces for a stated window
@@ -182,9 +179,9 @@ Useful options:
 --ci=azuredevops        Resolve refs from Azure Pipelines variables
 ```
 
-The Rust engine implements engine part 1: trace loading, matching, noise filtering, and divergence construction. Frontier detection, attribution, findings generation, and comment rendering remain the shared C# implementation. Rust is the default; pass `--engine=csharp` to use the managed fallback. `BEHAVIORDIFF_RUST_ENGINE` can override the packaged native executable for development diagnostics.
+The streaming Rust engine implements trace loading, matching, noise filtering, divergence construction, frontier detection, attribution, baseline suppression, and findings generation. `BEHAVIORDIFF_RUST_ENGINE` can override the packaged native executable for development diagnostics.
 
-PR comments use a high-confidence policy by default. A finding is high-confidence only when its frontier is verified, every compared digest is exact, an ancestor or descendant divergence connects it to the change through the call tree, and the same member showed no baseline-run or manifest nondeterminism. An edited file contributing zero traced members does not by itself disqualify the finding. Every finding remains in `findings.json` with `confidence`, `confidenceFactors`, `nondeterminism`, and `commentSuppressionReasons`; comments show how many lower-confidence findings were retained only in the artifact. Pass `--strict` to include all unsuppressed findings in comments. The GitHub Action exposes the same behavior through `strict: 'true'`, and Azure Pipelines through `behaviorDiffStrict: 'true'`. The Action's `engine` input accepts `rust` or `csharp` and defaults to `rust`.
+PR comments use a high-confidence policy by default. A finding is high-confidence only when its frontier is verified, every compared digest is exact, an ancestor or descendant divergence connects it to the change through the call tree, and the same member showed no baseline-run or manifest nondeterminism. An edited file contributing zero traced members does not by itself disqualify the finding. Every finding remains in `findings.json` with `confidence`, `confidenceFactors`, `nondeterminism`, and `commentSuppressionReasons`; comments show how many lower-confidence findings were retained only in the artifact. Pass `--strict` to include all unsuppressed findings in comments. The GitHub Action exposes the same behavior through `strict: 'true'`, and Azure Pipelines through `behaviorDiffStrict: 'true'`.
 
 Exit codes:
 
@@ -425,10 +422,9 @@ See [evidence/FINDINGS.md](evidence/FINDINGS.md) for measured instrumentation an
 
 | Path | Purpose |
 | --- | --- |
+| `src/BehaviorDiff.Engine.Rust` | Single-pass streaming Rust diff, frontier, baseline policy, and findings engine |
 | `src/BehaviorDiff.Cli` | Repository orchestration and PR providers |
-| `src/BehaviorDiff.Engine` | Matching, noise filtering, frontier analysis, findings |
-| `src/BehaviorDiff.Engine.Rust` | Optional Rust implementation of matching and noise-filtered divergence construction |
-| `src/BehaviorDiff.Tracer` | Runtime hooks, value rendering, coverage manifests |
+| `src/BehaviorDiff.Tracer` | .NET runtime hooks, value rendering, coverage manifests |
 | `src/BehaviorDiff.Java.Agent` | Java agent, ASM rewriting, JVM canonicalizer |
 | `src/BehaviorDiff.Node` | CommonJS/ESM hooks, Babel rewriting, Node canonicalizer and test adapters |
 | `src/BehaviorDiff.Go` | Stable Go source rewriter and runtime |
