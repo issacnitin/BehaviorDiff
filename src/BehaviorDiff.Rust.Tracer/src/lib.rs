@@ -1,13 +1,14 @@
 use quote::ToTokens;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use syn::visit_mut::{self, VisitMut};
 use syn::{
-    parse_quote, Block, Fields, GenericParam, ImplItemFn, Item, ItemEnum, ItemFn, ItemImpl,
-    ItemStruct, ItemTrait, TraitItemFn,
+    parse_quote, Block, Fields, FnArg, GenericArgument, ImplItemFn, Item, ItemEnum, ItemFn,
+    ItemImpl, ItemStruct, ItemTrait, ItemUnion, Pat, PathArguments, ReturnType, TraitItemFn, Type,
 };
 use toml_edit::{DocumentMut, InlineTable, Item as TomlItem, Value};
 use walkdir::{DirEntry, WalkDir};
@@ -151,11 +152,13 @@ fn build_cache_entry(
             let mut syntax =
                 syn::parse_file(&text).map_err(|error| format!("{}: {error}", input.display()))?;
             if should_instrument(relative) {
-                let mut instrumenter = ExitHookInstrumenter::new(slash(relative));
+                let local_types = local_type_names(&syntax.items);
+                let mut instrumenter =
+                    ExitHookInstrumenter::new(slash(relative), local_types.clone());
                 instrumenter.visit_file_mut(&mut syntax);
                 instrumented_functions += instrumenter.instrumented;
                 skipped_functions += instrumenter.skipped;
-                generated_readers += generate_readers(&mut syntax.items)?;
+                generated_readers += generate_readers(&mut syntax.items, &local_types)?;
             }
             let tokens = syntax.to_token_stream();
             let reparsed =
@@ -188,12 +191,12 @@ fn build_cache_entry(
     Ok(())
 }
 
-fn generate_readers(items: &mut Vec<Item>) -> Result<usize, String> {
+fn generate_readers(items: &mut Vec<Item>, local_types: &HashSet<String>) -> Result<usize, String> {
     let mut generated = 0;
     for item in items.iter_mut() {
         if let Item::Mod(module) = item {
             if let Some((_, nested)) = &mut module.content {
-                generated += generate_readers(nested)?;
+                generated += generate_readers(nested, local_types)?;
             }
         }
     }
@@ -201,8 +204,9 @@ fn generate_readers(items: &mut Vec<Item>) -> Result<usize, String> {
     let mut output = Vec::with_capacity(items.len() * 2);
     for item in std::mem::take(items) {
         let reader = match &item {
-            Item::Struct(structure) => Some(struct_reader(structure)?),
-            Item::Enum(enumeration) => Some(enum_reader(enumeration)?),
+            Item::Struct(structure) => Some(struct_reader(structure, local_types)?),
+            Item::Enum(enumeration) => Some(enum_reader(enumeration, local_types)?),
+            Item::Union(union) => Some(union_reader(union)?),
             _ => None,
         };
         output.push(item);
@@ -215,10 +219,10 @@ fn generate_readers(items: &mut Vec<Item>) -> Result<usize, String> {
     Ok(generated)
 }
 
-fn struct_reader(item: &ItemStruct) -> Result<ItemImpl, String> {
+fn struct_reader(item: &ItemStruct, local_types: &HashSet<String>) -> Result<ItemImpl, String> {
     let ident = &item.ident;
-    let mut generics = item.generics.clone();
-    add_canonical_bounds(&mut generics);
+    let generics = item.generics.clone();
+    let generic_names = generic_type_names(&generics);
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let fields = match &item.fields {
         Fields::Named(fields) => fields
@@ -227,21 +231,29 @@ fn struct_reader(item: &ItemStruct) -> Result<ItemImpl, String> {
             .map(|field| {
                 let name = field.ident.as_ref().unwrap();
                 let label = name.to_string();
-                quote::quote! {
-                    ::behaviordiff_rust_runtime::write_field(context, output, #label, &self.#name);
-                }
+                field_write(
+                    &label,
+                    quote::quote!(&self.#name),
+                    &field.ty,
+                    local_types,
+                    &generic_names,
+                )
             })
             .collect::<Vec<_>>(),
         Fields::Unnamed(fields) => fields
             .unnamed
             .iter()
             .enumerate()
-            .map(|(index, _)| {
+            .map(|(index, field)| {
                 let member = syn::Index::from(index);
                 let label = index.to_string();
-                quote::quote! {
-                    ::behaviordiff_rust_runtime::write_field(context, output, #label, &self.#member);
-                }
+                field_write(
+                    &label,
+                    quote::quote!(&self.#member),
+                    &field.ty,
+                    local_types,
+                    &generic_names,
+                )
             })
             .collect::<Vec<_>>(),
         Fields::Unit => Vec::new(),
@@ -265,10 +277,10 @@ fn struct_reader(item: &ItemStruct) -> Result<ItemImpl, String> {
     .map_err(|error| error.to_string())
 }
 
-fn enum_reader(item: &ItemEnum) -> Result<ItemImpl, String> {
+fn enum_reader(item: &ItemEnum, local_types: &HashSet<String>) -> Result<ItemImpl, String> {
     let ident = &item.ident;
-    let mut generics = item.generics.clone();
-    add_canonical_bounds(&mut generics);
+    let generics = item.generics.clone();
+    let generic_names = generic_type_names(&generics);
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let arms = item
         .variants
@@ -283,11 +295,15 @@ fn enum_reader(item: &ItemEnum) -> Result<ItemImpl, String> {
                         .iter()
                         .map(|field| field.ident.as_ref().unwrap())
                         .collect::<Vec<_>>();
-                    let writes = names.iter().map(|name| {
+                    let writes = names.iter().zip(fields.named.iter()).map(|(name, field)| {
                         let label = name.to_string();
-                        quote::quote! {
-                            ::behaviordiff_rust_runtime::write_field(context, output, #label, #name);
-                        }
+                        field_write(
+                            &label,
+                            quote::quote!(#name),
+                            &field.ty,
+                            local_types,
+                            &generic_names,
+                        )
                     });
                     quote::quote! {
                         Self::#variant_ident { #(#names),* } => {
@@ -302,12 +318,18 @@ fn enum_reader(item: &ItemEnum) -> Result<ItemImpl, String> {
                     let names = (0..fields.unnamed.len())
                         .map(|index| quote::format_ident!("field_{index}"))
                         .collect::<Vec<_>>();
-                    let writes = names.iter().enumerate().map(|(index, name)| {
-                        let label = index.to_string();
-                        quote::quote! {
-                            ::behaviordiff_rust_runtime::write_field(context, output, #label, #name);
-                        }
-                    });
+                    let writes = names.iter().zip(fields.unnamed.iter()).enumerate().map(
+                        |(index, (name, field))| {
+                            let label = index.to_string();
+                            field_write(
+                                &label,
+                                quote::quote!(#name),
+                                &field.ty,
+                                local_types,
+                                &generic_names,
+                            )
+                        },
+                    );
                     quote::quote! {
                         Self::#variant_ident(#(#names),*) => {
                             output.push_str(#variant_name);
@@ -341,28 +363,185 @@ fn enum_reader(item: &ItemEnum) -> Result<ItemImpl, String> {
     .map_err(|error| error.to_string())
 }
 
-fn add_canonical_bounds(generics: &mut syn::Generics) {
-    for parameter in &mut generics.params {
-        if let GenericParam::Type(parameter) = parameter {
-            parameter
-                .bounds
-                .push(parse_quote!(::behaviordiff_rust_runtime::Canonicalize));
+fn union_reader(item: &ItemUnion) -> Result<ItemImpl, String> {
+    let ident = &item.ident;
+    let generics = item.generics.clone();
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    syn::parse2(quote::quote! {
+        impl #impl_generics ::behaviordiff_rust_runtime::Canonicalize for #ident #type_generics #where_clause {
+            fn write_canonical(
+                &self,
+                context: &mut ::behaviordiff_rust_runtime::CanonicalContext,
+                output: &mut String,
+            ) {
+                context.write_skipped(output, concat!("union:", stringify!(#ident)));
+            }
         }
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn field_write(
+    label: &str,
+    value: proc_macro2::TokenStream,
+    ty: &Type,
+    local_types: &HashSet<String>,
+    generic_names: &HashSet<String>,
+) -> proc_macro2::TokenStream {
+    if exact_type(ty, local_types, generic_names) {
+        quote::quote! {
+            ::behaviordiff_rust_runtime::write_field(context, output, #label, #value);
+        }
+    } else {
+        let detail = skipped_type_detail(ty, generic_names);
+        quote::quote! {
+            output.push_str(#label);
+            output.push('=');
+            context.write_skipped(output, #detail);
+            output.push(';');
+        }
+    }
+}
+
+fn local_type_names(items: &[Item]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for item in items {
+        match item {
+            Item::Struct(item) => {
+                names.insert(item.ident.to_string());
+            }
+            Item::Enum(item) => {
+                names.insert(item.ident.to_string());
+            }
+            Item::Union(item) => {
+                names.insert(item.ident.to_string());
+            }
+            Item::Mod(module) => {
+                if let Some((_, nested)) = &module.content {
+                    names.extend(local_type_names(nested));
+                }
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
+fn generic_type_names(generics: &syn::Generics) -> HashSet<String> {
+    generics
+        .type_params()
+        .map(|item| item.ident.to_string())
+        .collect()
+}
+
+fn exact_type(ty: &Type, local_types: &HashSet<String>, generic_names: &HashSet<String>) -> bool {
+    match ty {
+        Type::Reference(reference) => exact_type(&reference.elem, local_types, generic_names),
+        Type::Slice(slice) => exact_type(&slice.elem, local_types, generic_names),
+        Type::Array(array) => exact_type(&array.elem, local_types, generic_names),
+        Type::Tuple(tuple) => tuple
+            .elems
+            .iter()
+            .all(|item| exact_type(item, local_types, generic_names)),
+        Type::Never(_) => false,
+        Type::Path(path) if path.qself.is_none() => {
+            let Some(segment) = path.path.segments.last() else {
+                return false;
+            };
+            let name = segment.ident.to_string();
+            if generic_names.contains(&name) {
+                return false;
+            }
+            let scalar = matches!(
+                name.as_str(),
+                "bool"
+                    | "char"
+                    | "str"
+                    | "String"
+                    | "i8"
+                    | "i16"
+                    | "i32"
+                    | "i64"
+                    | "i128"
+                    | "isize"
+                    | "u8"
+                    | "u16"
+                    | "u32"
+                    | "u64"
+                    | "u128"
+                    | "usize"
+                    | "f32"
+                    | "f64"
+            );
+            if scalar {
+                return true;
+            }
+            let supported = matches!(
+                name.as_str(),
+                "Option"
+                    | "Result"
+                    | "Vec"
+                    | "VecDeque"
+                    | "HashMap"
+                    | "HashSet"
+                    | "BTreeMap"
+                    | "BTreeSet"
+                    | "Box"
+                    | "Rc"
+                    | "Arc"
+            );
+            if local_types.contains(&name) {
+                return !matches!(name.as_str(), "union");
+            }
+            if !supported {
+                return false;
+            }
+            match &segment.arguments {
+                PathArguments::AngleBracketed(arguments) => {
+                    arguments.args.iter().all(|argument| match argument {
+                        GenericArgument::Type(ty) => exact_type(ty, local_types, generic_names),
+                        GenericArgument::Lifetime(_) | GenericArgument::Const(_) => true,
+                        _ => false,
+                    })
+                }
+                PathArguments::None => true,
+                PathArguments::Parenthesized(_) => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+fn skipped_type_detail(ty: &Type, generic_names: &HashSet<String>) -> String {
+    let text = ty.to_token_stream().to_string();
+    if matches!(ty, Type::TraitObject(_)) {
+        format!("trait-object:{text}")
+    } else if generic_names.iter().any(|name| {
+        text.split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|part| part == name)
+    }) {
+        format!("generic:{text}")
+    } else {
+        format!("external:{text}")
     }
 }
 
 struct ExitHookInstrumenter {
     relative_path: String,
     context: Option<String>,
+    context_generics: HashSet<String>,
+    local_types: HashSet<String>,
     instrumented: usize,
     skipped: usize,
 }
 
 impl ExitHookInstrumenter {
-    fn new(relative_path: String) -> Self {
+    fn new(relative_path: String, local_types: HashSet<String>) -> Self {
         Self {
             relative_path,
             context: None,
+            context_generics: HashSet::new(),
+            local_types,
             instrumented: 0,
             skipped: 0,
         }
@@ -379,19 +558,27 @@ impl ExitHookInstrumenter {
         };
         let file = self.relative_path.clone();
         let line = signature.ident.span().start().line as u32;
+        let mut generic_names = self.context_generics.clone();
+        generic_names.extend(generic_type_names(&signature.generics));
+        let args = argument_capture(signature, &self.local_types, &generic_names);
+        let result = return_capture(&signature.output, &self.local_types, &generic_names);
         let original = block.clone();
         *block = if signature.asyncness.is_some() {
             parse_quote!({
-                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line);
+                let __behaviordiff_args = ::behaviordiff_rust_runtime::capture_arguments(vec![#(#args),*]);
+                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line, __behaviordiff_args);
                 let __behaviordiff_result = (async move #original).await;
-                __behaviordiff_guard.complete();
+                let __behaviordiff_return = #result;
+                __behaviordiff_guard.complete(__behaviordiff_return);
                 __behaviordiff_result
             })
         } else {
             parse_quote!({
-                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line);
+                let __behaviordiff_args = ::behaviordiff_rust_runtime::capture_arguments(vec![#(#args),*]);
+                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line, __behaviordiff_args);
                 let __behaviordiff_result = (|| #original)();
-                __behaviordiff_guard.complete();
+                let __behaviordiff_return = #result;
+                __behaviordiff_guard.complete(__behaviordiff_return);
                 __behaviordiff_result
             })
         };
@@ -419,13 +606,16 @@ impl VisitMut for ExitHookInstrumenter {
 
     fn visit_item_impl_mut(&mut self, item: &mut ItemImpl) {
         let previous = self.context.take();
+        let previous_generics = std::mem::take(&mut self.context_generics);
         let self_type = item.self_ty.to_token_stream().to_string();
         self.context = Some(match &item.trait_ {
             Some((_, path, _)) => format!("{} for {self_type}", path.to_token_stream()),
             None => self_type,
         });
+        self.context_generics = generic_type_names(&item.generics);
         visit_mut::visit_item_impl_mut(self, item);
         self.context = previous;
+        self.context_generics = previous_generics;
     }
 
     fn visit_item_trait_mut(&mut self, item: &mut ItemTrait) {
@@ -433,6 +623,58 @@ impl VisitMut for ExitHookInstrumenter {
         self.context = Some(format!("trait {}", item.ident));
         visit_mut::visit_item_trait_mut(self, item);
         self.context = previous;
+    }
+}
+
+fn argument_capture(
+    signature: &syn::Signature,
+    local_types: &HashSet<String>,
+    generic_names: &HashSet<String>,
+) -> Vec<proc_macro2::TokenStream> {
+    signature
+        .inputs
+        .iter()
+        .map(|argument| match argument {
+            FnArg::Receiver(_) => {
+                let detail = "receiver";
+                quote::quote!(("self", ::behaviordiff_rust_runtime::capture_skipped(#detail)))
+            }
+            FnArg::Typed(argument) => {
+                let Pat::Ident(pattern) = argument.pat.as_ref() else {
+                    return quote::quote!((
+                        "pattern",
+                        ::behaviordiff_rust_runtime::capture_skipped("pattern")
+                    ));
+                };
+                let ident = &pattern.ident;
+                let name = ident.to_string();
+                if exact_type(&argument.ty, local_types, generic_names) {
+                    quote::quote!((#name, ::behaviordiff_rust_runtime::capture(&#ident)))
+                } else {
+                    let detail = skipped_type_detail(&argument.ty, generic_names);
+                    quote::quote!((#name, ::behaviordiff_rust_runtime::capture_skipped(#detail)))
+                }
+            }
+        })
+        .collect()
+}
+
+fn return_capture(
+    output: &ReturnType,
+    local_types: &HashSet<String>,
+    generic_names: &HashSet<String>,
+) -> proc_macro2::TokenStream {
+    match output {
+        ReturnType::Default => quote::quote!(None),
+        ReturnType::Type(_, ty) if exact_type(ty, local_types, generic_names) => {
+            quote::quote!(Some(::behaviordiff_rust_runtime::capture(
+                &__behaviordiff_result
+            )))
+        }
+        ReturnType::Type(_, ty) => {
+            let detail = skipped_type_detail(ty, generic_names);
+            quote::quote!(Some(::behaviordiff_rust_runtime::capture_skipped(#detail)))
+        }
     }
 }
 

@@ -18,6 +18,7 @@ pub struct CapturedValue {
     pub depth_limited: u64,
     pub blocklisted: u64,
     pub rendered_truncated: u64,
+    canonical: String,
 }
 
 #[derive(Default)]
@@ -39,6 +40,37 @@ pub fn capture<T: Canonicalize + ?Sized>(value: &T) -> CapturedValue {
     let mut context = CanonicalContext::default();
     let mut canonical = String::new();
     value.write_canonical(&mut context, &mut canonical);
+    finish_capture(canonical, context)
+}
+
+pub fn capture_skipped(detail: &str) -> CapturedValue {
+    let mut context = CanonicalContext::default();
+    let mut canonical = String::new();
+    context.write_skipped(&mut canonical, detail);
+    finish_capture(canonical, context)
+}
+
+pub fn capture_arguments(values: Vec<(&'static str, CapturedValue)>) -> Option<CapturedValue> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut context = CanonicalContext::default();
+    let mut canonical = String::from("args{");
+    for (name, value) in values {
+        write_text(&mut canonical, name);
+        canonical.push('=');
+        canonical.push_str(&value.canonical);
+        canonical.push(';');
+        context.values_digested += value.values_digested;
+        context.depth_limited += value.depth_limited;
+        context.blocklisted += value.blocklisted;
+        context.partial |= value.partial;
+    }
+    canonical.push('}');
+    finish_capture(canonical, context).into()
+}
+
+fn finish_capture(canonical: String, context: CanonicalContext) -> CapturedValue {
     let digest = format!("sha256:{}", hex::encode(Sha256::digest(canonical.as_bytes())));
     let (rendered, rendered_truncated) = if canonical.len() > RENDERED_CAP {
         let mut end = RENDERED_CAP;
@@ -47,7 +79,7 @@ pub fn capture<T: Canonicalize + ?Sized>(value: &T) -> CapturedValue {
         }
         (format!("{}<truncated>", &canonical[..end]), 1)
     } else {
-        (canonical, 0)
+        (canonical.clone(), 0)
     };
     CapturedValue {
         digest,
@@ -57,6 +89,7 @@ pub fn capture<T: Canonicalize + ?Sized>(value: &T) -> CapturedValue {
         depth_limited: context.depth_limited,
         blocklisted: context.blocklisted,
         rendered_truncated,
+        canonical,
     }
 }
 

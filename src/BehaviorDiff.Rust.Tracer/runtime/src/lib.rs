@@ -1,6 +1,9 @@
 mod canonical;
 
-pub use canonical::{capture, write_field, CanonicalContext, Canonicalize, CapturedValue};
+pub use canonical::{
+    capture, capture_arguments, capture_skipped, write_field, CanonicalContext, Canonicalize,
+    CapturedValue,
+};
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -15,23 +18,38 @@ pub struct Guard {
     method: &'static str,
     file: &'static str,
     line: u32,
+    args: Option<CapturedValue>,
     completed: bool,
 }
 
-pub fn enter(method: &'static str, file: &'static str, line: u32) -> Guard {
+pub fn enter(
+    method: &'static str,
+    file: &'static str,
+    line: u32,
+    args: Option<CapturedValue>,
+) -> Guard {
     Guard {
         call_id: NEXT_CALL_ID.fetch_add(1, Ordering::Relaxed),
         method,
         file,
         line,
+        args,
         completed: false,
     }
 }
 
 impl Guard {
-    pub fn complete(mut self) {
+    pub fn complete(mut self, result: Option<CapturedValue>) {
         self.completed = true;
-        emit(self.call_id, self.method, self.file, self.line, "normal");
+        emit(
+            self.call_id,
+            self.method,
+            self.file,
+            self.line,
+            "normal",
+            self.args.as_ref(),
+            result.as_ref(),
+        );
     }
 }
 
@@ -45,11 +63,27 @@ impl Drop for Guard {
         } else {
             "cancelled"
         };
-        emit(self.call_id, self.method, self.file, self.line, outcome);
+        emit(
+            self.call_id,
+            self.method,
+            self.file,
+            self.line,
+            outcome,
+            self.args.as_ref(),
+            None,
+        );
     }
 }
 
-fn emit(call_id: u64, method: &str, file: &str, line: u32, outcome: &str) {
+fn emit(
+    call_id: u64,
+    method: &str,
+    file: &str,
+    line: u32,
+    outcome: &str,
+    args: Option<&CapturedValue>,
+    result: Option<&CapturedValue>,
+) {
     let writer = WRITER.get_or_init(|| Mutex::new(open_trace()));
     let Ok(mut writer) = writer.lock() else {
         return;
@@ -66,10 +100,28 @@ fn emit(call_id: u64, method: &str, file: &str, line: u32, outcome: &str) {
     } else {
         ""
     };
+    let args = capture_fields("args", args);
+    let result = capture_fields("return", result);
     let _ = writeln!(
         stream,
-        "{{\"schema\":\"behaviordiff.rust-exit-hook/1\",\"callId\":{call_id},\"method\":\"{method}\",\"file\":\"{file}\",\"line\":{line},\"outcome\":\"{outcome}\"{exception}}}"
+        "{{\"schema\":\"behaviordiff.rust-exit-hook/2\",\"callId\":{call_id},\"method\":\"{method}\",\"file\":\"{file}\",\"line\":{line},\"outcome\":\"{outcome}\"{args}{result}{exception}}}"
     );
+}
+
+fn capture_fields(prefix: &str, value: Option<&CapturedValue>) -> String {
+    let Some(value) = value else {
+        return String::new();
+    };
+    format!(
+        ",\"{prefix}Digest\":\"{}\",\"{prefix}Rendered\":\"{}\",\"{prefix}Partial\":{},\"{prefix}ValuesDigested\":{},\"{prefix}DepthLimited\":{},\"{prefix}Blocklisted\":{},\"{prefix}RenderedTruncated\":{}",
+        escape(&value.digest),
+        escape(&value.rendered),
+        value.partial,
+        value.values_digested,
+        value.depth_limited,
+        value.blocklisted,
+        value.rendered_truncated,
+    )
 }
 
 fn open_trace() -> Option<File> {
