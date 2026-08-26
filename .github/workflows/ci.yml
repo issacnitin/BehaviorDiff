@@ -187,12 +187,11 @@ jobs:
       - name: Assert removed engine surfaces stay absent
         shell: pwsh
         run: |
-          $output = & git grep -n -E 'BehaviorDiff\.Engine\.csproj|--engine(=| )' -- .github action.yml docker tools
-          $grepExit = $LASTEXITCODE
-          if ($grepExit -notin @(0, 1)) {
-            throw "git grep failed with exit code $grepExit"
+          $tracked = @(& git ls-files -- .github action.yml docker tools)
+          if ($LASTEXITCODE -ne 0 -or $tracked.Count -eq 0) {
+            throw 'Could not enumerate tracked CI and packaging files.'
           }
-          $matches = @($output)
+          $matches = @(Select-String -Path $tracked -Pattern 'BehaviorDiff\.Engine\.csproj', '--engine(?:=|\s)')
           if ($matches.Count -ne 0) {
             $matches | ForEach-Object { Write-Error $_ }
             throw 'CI or packaging still references a removed C# engine surface.'
