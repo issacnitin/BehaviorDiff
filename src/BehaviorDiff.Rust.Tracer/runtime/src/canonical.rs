@@ -1,7 +1,5 @@
 use sha2::{Digest, Sha256};
-use std::collections::{
-    BTreeMap, BTreeSet, HashMap, HashSet, VecDeque,
-};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasher, Hash};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -71,7 +69,10 @@ pub fn capture_arguments(values: Vec<(&'static str, CapturedValue)>) -> Option<C
 }
 
 fn finish_capture(canonical: String, context: CanonicalContext) -> CapturedValue {
-    let digest = format!("sha256:{}", hex::encode(Sha256::digest(canonical.as_bytes())));
+    let digest = format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(canonical.as_bytes()))
+    );
     let (rendered, rendered_truncated) = if canonical.len() > RENDERED_CAP {
         let mut end = RENDERED_CAP;
         while !canonical.is_char_boundary(end) {
@@ -198,7 +199,9 @@ impl Canonicalize for char {
 
 impl Canonicalize for f32 {
     fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
-        context.write_value("f32", output, |_, output| write_float(*self as f64, "f32", output));
+        context.write_value("f32", output, |_, output| {
+            write_float(*self as f64, "f32", output)
+        });
     }
 }
 
@@ -232,36 +235,56 @@ impl Canonicalize for () {
 impl<T: Canonicalize + ?Sized> Canonicalize for &T {
     fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
         let address = std::ptr::from_ref(*self).cast::<()>() as usize;
-        context.write_reference(address, std::any::type_name::<T>(), output, |context, output| {
-            (*self).write_canonical(context, output);
-        });
+        context.write_reference(
+            address,
+            std::any::type_name::<T>(),
+            output,
+            |context, output| {
+                (*self).write_canonical(context, output);
+            },
+        );
     }
 }
 
 impl<T: Canonicalize + ?Sized> Canonicalize for Box<T> {
     fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
         let address = std::ptr::from_ref(self.as_ref()).cast::<()>() as usize;
-        context.write_reference(address, std::any::type_name::<T>(), output, |context, output| {
-            self.as_ref().write_canonical(context, output);
-        });
+        context.write_reference(
+            address,
+            std::any::type_name::<T>(),
+            output,
+            |context, output| {
+                self.as_ref().write_canonical(context, output);
+            },
+        );
     }
 }
 
 impl<T: Canonicalize + ?Sized> Canonicalize for Rc<T> {
     fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
         let address = Rc::as_ptr(self).cast::<()>() as usize;
-        context.write_reference(address, std::any::type_name::<T>(), output, |context, output| {
-            self.as_ref().write_canonical(context, output);
-        });
+        context.write_reference(
+            address,
+            std::any::type_name::<T>(),
+            output,
+            |context, output| {
+                self.as_ref().write_canonical(context, output);
+            },
+        );
     }
 }
 
 impl<T: Canonicalize + ?Sized> Canonicalize for Arc<T> {
     fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
         let address = Arc::as_ptr(self).cast::<()>() as usize;
-        context.write_reference(address, std::any::type_name::<T>(), output, |context, output| {
-            self.as_ref().write_canonical(context, output);
-        });
+        context.write_reference(
+            address,
+            std::any::type_name::<T>(),
+            output,
+            |context, output| {
+                self.as_ref().write_canonical(context, output);
+            },
+        );
     }
 }
 
@@ -492,7 +515,10 @@ mod tests {
         let right = HashMap::from([("one", 1_i32), ("two", 2_i32)]);
         let map = capture(&left);
         assert_eq!(map.digest, capture(&right).digest);
-        assert_ne!(map.digest, capture(&vec![("one", 1_i32), ("two", 2_i32)]).digest);
+        assert_ne!(
+            map.digest,
+            capture(&vec![("one", 1_i32), ("two", 2_i32)]).digest
+        );
         assert!(!map.partial);
         assert!(map.values_digested > 0);
     }
@@ -501,7 +527,10 @@ mod tests {
     fn references_preserve_topology_without_runtime_addresses() {
         let shared = Rc::new(String::from("value"));
         let shared_graph = vec![shared.clone(), shared];
-        let copied_graph = vec![Rc::new(String::from("value")), Rc::new(String::from("value"))];
+        let copied_graph = vec![
+            Rc::new(String::from("value")),
+            Rc::new(String::from("value")),
+        ];
         let first = capture(&shared_graph);
         assert_ne!(first.digest, capture(&copied_graph).digest);
         assert!(!first.rendered.contains("0x"));
