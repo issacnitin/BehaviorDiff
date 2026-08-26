@@ -104,10 +104,38 @@ jobs:
             -t behaviordiff:self-contained-linux-proof .
           docker run --rm behaviordiff:self-contained-linux-proof
 
+  rust-redaction-proof:
+    name: Released Rust redaction proof
+    needs: publish
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: behaviordiff-win-x64
+          path: artifacts/released-rust-redaction/download
+      - name: Extract downloaded release archive
+        shell: pwsh
+        run: |
+          $destination = 'artifacts/released-rust-redaction/behaviordiff'
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          Expand-Archive artifacts/released-rust-redaction/download/behaviordiff-*-win-x64.zip $destination
+      - name: Prove packaged Rust redaction
+        shell: pwsh
+        run: |
+          $command = (Resolve-Path 'artifacts/released-rust-redaction/behaviordiff/behaviordiff.exe').Path
+          pwsh -NoProfile -File tools/verify-rust-redaction.ps1 `
+            -BehaviorDiffCommand $command `
+            -WorkDirectory "$env:RUNNER_TEMP\rust-redaction"
+
   release:
     name: Publish GitHub Release
     if: github.ref_type == 'tag'
-    needs: [publish, clean-linux-proof]
+    needs: [publish, clean-linux-proof, rust-redaction-proof]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

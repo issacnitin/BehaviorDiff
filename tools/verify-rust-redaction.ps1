@@ -1,6 +1,10 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([string]$WorkDirectory, [switch]$KeepWork)
+param(
+    [string]$WorkDirectory,
+    [string]$BehaviorDiffCommand,
+    [switch]$KeepWork
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -104,25 +108,30 @@ $testCases
     Invoke-Checked 'PR commit' { & git -C $fixture commit --quiet -m 'rotate token' }
     $pr = (& git -C $fixture rev-parse HEAD).Trim()
 
-    Invoke-Checked 'Rust tracer build' {
-        & cargo build --release --locked --manifest-path (Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml')
-    }
-    Invoke-Checked 'Rust engine build' {
-        & cargo build --release --locked --manifest-path (Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml')
-    }
-    Invoke-Checked 'CLI build' {
-        & dotnet build (Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj') -c Release --nologo -v quiet
-    }
-
-    $previousTracer = $env:BEHAVIORDIFF_RUST_TRACER
-    $env:BEHAVIORDIFF_RUST_TRACER = $tracer
-    try {
-        $output = @(& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Cli') -c Release --no-build -- `
-            $fixture --base $base --pr $pr --work $analysis --findings $findingsPath `
-            --no-baseline --strict --keep --keep-traces 1d 2>&1)
+    if ([string]::IsNullOrWhiteSpace($BehaviorDiffCommand)) {
+        Invoke-Checked 'Rust tracer build' {
+            & cargo build --release --locked --manifest-path (Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml')
+        }
+        Invoke-Checked 'Rust engine build' {
+            & cargo build --release --locked --manifest-path (Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml')
+        }
+        Invoke-Checked 'CLI build' {
+            & dotnet build (Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj') -c Release --nologo -v quiet
+        }
+        $previousTracer = $env:BEHAVIORDIFF_RUST_TRACER
+        $env:BEHAVIORDIFF_RUST_TRACER = $tracer
+        try {
+            $output = @(& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Cli') -c Release --no-build -- `
+                $fixture --base $base --pr $pr --work $analysis --findings $findingsPath `
+                --no-baseline --strict --keep --keep-traces 1d 2>&1)
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $env:BEHAVIORDIFF_RUST_TRACER = $previousTracer
+        }
+    } else {
+        $output = @(& $BehaviorDiffCommand $fixture --base $base --pr $pr --work $analysis `
+            --findings $findingsPath --no-baseline --strict --keep --keep-traces 1d 2>&1)
         $exitCode = $LASTEXITCODE
-    } finally {
-        $env:BEHAVIORDIFF_RUST_TRACER = $previousTracer
     }
     $output | ForEach-Object { Write-Host $_ }
     if ($exitCode -ne 1) { throw "Rust redaction analysis exited $exitCode instead of findings exit 1" }
