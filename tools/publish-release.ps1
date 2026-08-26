@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)]
     [ValidateSet('linux-x64', 'linux-arm64', 'osx-x64', 'osx-arm64', 'win-x64')]
     [string]$RuntimeIdentifier,
-    [string]$Version = '0.1.0',
+    [string]$Version = '0.2.0',
     [string]$OutputDirectory = 'artifacts/release',
     [switch]$Trimmed
 )

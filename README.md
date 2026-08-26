@@ -120,21 +120,21 @@ Download the archive for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64
 
 ```bash
 sha256sum --check SHA256SUMS --ignore-missing
-tar -xzf behaviordiff-v0.1.0-linux-x64.tar.gz -C "$HOME/.local/lib/behaviordiff"
+tar -xzf behaviordiff-v0.2.0-linux-x64.tar.gz -C "$HOME/.local/lib/behaviordiff"
 ln -s "$HOME/.local/lib/behaviordiff/behaviordiff" "$HOME/.local/bin/behaviordiff"
 behaviordiff --help
 ```
 
 ```powershell
-Get-FileHash .\behaviordiff-v0.1.0-win-x64.zip -Algorithm SHA256
-Expand-Archive .\behaviordiff-v0.1.0-win-x64.zip "$env:LOCALAPPDATA\BehaviorDiff"
+Get-FileHash .\behaviordiff-v0.2.0-win-x64.zip -Algorithm SHA256
+Expand-Archive .\behaviordiff-v0.2.0-win-x64.zip "$env:LOCALAPPDATA\BehaviorDiff"
 & "$env:LOCALAPPDATA\BehaviorDiff\behaviordiff.exe" --help
 ```
 
 The complete extracted directory must remain together because it also contains the native engine, language tracers, and the separately launched .NET Weaver. The NuGet tool package remains available as a framework-dependent compatibility distribution:
 
 ```powershell
-dotnet tool install --global BehaviorDiff.Tool --version 0.1.0 --add-source .
+dotnet tool install --global BehaviorDiff.Tool --version 0.2.0 --add-source .
 behaviordiff --help
 ```
 
