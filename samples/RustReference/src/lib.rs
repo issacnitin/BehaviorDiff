@@ -2,9 +2,12 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::task::{Context, Poll, Waker};
 use std::time::{Duration, SystemTime};
 
 #[derive(Clone, Copy)]
@@ -16,6 +19,49 @@ struct PrivatePoint {
 enum PrivateState {
     Ready(i32),
     Waiting { value: i32 },
+}
+
+trait Score {
+    fn score(&self) -> i32;
+}
+
+impl Score for PrivatePoint {
+    fn score(&self) -> i32 { self.left + self.right }
+}
+
+macro_rules! define_macro_shape {
+    () => { fn macro_generated_shape() -> i32 { 17 } };
+}
+define_macro_shape!();
+
+fn private_shape(point: PrivatePoint, state: PrivateState) -> i32 {
+    point.left + match state { PrivateState::Ready(value) => value, PrivateState::Waiting { value } => value }
+}
+fn generic_shape<T: Clone>(value: T) -> T { value.clone() }
+fn trait_object_shape(value: &dyn Score) -> i32 { value.score() }
+async fn async_shape() -> i32 { std::future::ready(19).await }
+async fn pending_shape() { std::future::pending::<()>().await }
+fn maybe_shape(present: bool) -> Result<i32, &'static str> { if present { Ok(23) } else { Err("missing") } }
+fn question_shape(present: bool) -> Result<i32, &'static str> { Ok(maybe_shape(present)? + 1) }
+fn panic_shape() { panic!("conformance panic") }
+
+fn block_on<F: Future>(future: F) -> F::Output {
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
+    let mut future = Box::pin(future);
+    loop {
+        match Pin::as_mut(&mut future).poll(&mut context) {
+            Poll::Ready(value) => return value,
+            Poll::Pending => std::thread::yield_now(),
+        }
+    }
+}
+
+fn cancel_after_first_poll<F: Future>(future: F) {
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
+    let mut future = Box::pin(future);
+    assert!(Pin::as_mut(&mut future).poll(&mut context).is_pending());
 }
 
 static USER_CODE_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -41,20 +87,24 @@ struct DeepNode {
     next: Option<Box<DeepNode>>,
 }
 
+#[allow(dead_code)]
 union UnreadableUnion {
     integer: i32,
     floating: f32,
 }
 
 fn proof_no_user_code(value: NoUserCodeValue) -> i32 { value.value }
-fn proof_cycle(value: Rc<CycleNode>) -> i32 { value.value }
+fn proof_cycle(value: Rc<CycleNode>) -> i32 { let _ = value.next.strong_count(); value.value }
 fn proof_topology(value: Vec<Rc<String>>) -> usize { value.len() }
 fn proof_unordered(value: HashMap<String, i32>) -> usize { value.len() }
 fn proof_time(value: SystemTime) -> bool { value > SystemTime::UNIX_EPOCH }
 fn proof_blocklist(_value: Mutex<i32>) -> bool { true }
-fn proof_depth(value: DeepNode) -> i32 { value.value }
+fn proof_depth(value: DeepNode) -> i32 { let _ = value.next.is_none(); value.value }
 fn proof_truncation(value: String) -> usize { value.len() }
-fn proof_unreadable(_value: UnreadableUnion) -> bool { true }
+fn proof_unreadable(value: UnreadableUnion) -> bool {
+    let _ = std::mem::ManuallyDrop::new(value);
+    std::mem::size_of::<UnreadableUnion>() == std::mem::size_of::<i32>()
+}
 fn proof_beyond_cap(value: String) -> usize { value.len() }
 
 fn deep_node(depth: usize) -> DeepNode {
@@ -391,5 +441,20 @@ mod tests {
     #[test]
     fn digest_proofs() {
         run_digest_proofs();
+    }
+
+    #[test]
+    fn completion_shapes() {
+        let point = PrivatePoint { left: 2, right: 3 };
+        assert_eq!(private_shape(point, PrivateState::Ready(5)), 7);
+        assert_eq!(generic_shape(String::from("generic")), "generic");
+        assert_eq!(generic_shape(29_i32), 29);
+        assert_eq!(trait_object_shape(&point), 5);
+        assert_eq!(block_on(async_shape()), 19);
+        cancel_after_first_poll(pending_shape());
+        assert_eq!(question_shape(true), Ok(24));
+        assert_eq!(question_shape(false), Err("missing"));
+        assert!(std::panic::catch_unwind(panic_shape).is_err());
+        assert_eq!(macro_generated_shape(), 17);
     }
 }

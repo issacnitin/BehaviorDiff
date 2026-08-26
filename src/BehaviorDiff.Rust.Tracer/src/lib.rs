@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use syn::spanned::Spanned;
 use syn::visit_mut::{self, VisitMut};
 use syn::{
     parse_quote, Block, Fields, FnArg, GenericArgument, ImplItemFn, Item, ItemEnum, ItemFn,
@@ -13,7 +14,7 @@ use syn::{
 use toml_edit::{DocumentMut, InlineTable, Item as TomlItem, Value};
 use walkdir::{DirEntry, WalkDir};
 
-const CACHE_VERSION: &str = "behaviordiff.rust-rewrite-cache/5";
+const CACHE_VERSION: &str = "behaviordiff.rust-rewrite-cache/6";
 const ORIGIN_MANIFEST: &str = ".behaviordiff-rust-origin.json";
 const RUNTIME_CARGO: &str = include_str!("../runtime/Cargo.toml");
 const RUNTIME_SOURCE: &str = include_str!("../runtime/src/lib.rs");
@@ -187,6 +188,7 @@ fn build_cache_entry(
                 let mut instrumenter =
                     ExitHookInstrumenter::new(slash(relative), local_types.clone());
                 instrumenter.visit_file_mut(&mut syntax);
+                inventory_macro_boundaries(&syntax.items, &slash(relative), &mut instrumenter);
                 if instrumenter.members.is_empty() {
                     let stem = relative
                         .file_stem()
@@ -241,6 +243,42 @@ fn build_cache_entry(
     let manifest_text = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
     fs::write(staging.join(ORIGIN_MANIFEST), manifest_text).map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn inventory_macro_boundaries(
+    items: &[Item],
+    relative_path: &str,
+    instrumenter: &mut ExitHookInstrumenter,
+) {
+    for item in items {
+        match item {
+            Item::Macro(item) if !item.mac.path.is_ident("macro_rules") => {
+                let name = item
+                    .ident
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| item.mac.path.to_token_stream().to_string());
+                instrumenter.members.push(OriginMember {
+                    method: format!("{relative_path}::macro::{name}"),
+                    file_path: relative_path.to_owned(),
+                    line: item.mac.path.span().start().line as u32,
+                    status: "Skipped".to_owned(),
+                    skip_reason: Some("UnsupportedShape".to_owned()),
+                    detail: Some("Rust: MacroExpansionUnavailable".to_owned()),
+                    return_kind: "macro".to_owned(),
+                    is_test_root: false,
+                    generic_template: false,
+                });
+                instrumenter.skipped += 1;
+            }
+            Item::Mod(module) => {
+                if let Some((_, nested)) = &module.content {
+                    inventory_macro_boundaries(nested, relative_path, instrumenter);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 pub fn finalize(origin: &Path, trace: &Path, output: &Path) -> Result<FinalizeReport, String> {

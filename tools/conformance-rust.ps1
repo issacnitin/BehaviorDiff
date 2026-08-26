@@ -134,6 +134,19 @@ try {
     if ($firstRoots.Count -ne $runnerCounts[0] -or $secondRoots.Count -ne $runnerCounts[1]) {
         throw "Rust runner/derived counts differ: runner=$($runnerCounts -join '/') derived=$($firstRoots.Count)/$($secondRoots.Count)"
     }
+    $shapeEvents = @($firstRun.Events | Where-Object {
+        $_.methodFullName -match 'private_shape|generic_shape|trait_object_shape|Score for PrivatePoint::score|async_shape|pending_shape|question_shape|panic_shape'
+    })
+    $shapeMethods = @($shapeEvents | ForEach-Object methodFullName | Sort-Object -Unique)
+    $genericShapes = @($shapeEvents | Where-Object methodFullName -like '*generic_shape<*' | ForEach-Object methodFullName | Sort-Object -Unique)
+    $panicShapes = @($shapeEvents | Where-Object { $_.methodFullName -like '*panic_shape' -and $_.outcome -ceq 'panic' })
+    $cancelShapes = @($shapeEvents | Where-Object { $_.methodFullName -like '*pending_shape' -and $_.outcome -ceq 'cancelled' })
+    $manifestObjects = @(Get-Content (Join-Path $work 'run-1/run.rust.manifest.ndjson') | Where-Object { $_.Trim().Length -gt 0 } | ForEach-Object { $_ | ConvertFrom-Json })
+    $macroBoundaries = @($manifestObjects | Where-Object { $_.kind -ceq 'member' -and $_.detail -ceq 'Rust: MacroExpansionUnavailable' })
+    if ($shapeEvents.Count -le 0 -or $shapeMethods.Count -lt 8 -or $genericShapes.Count -ne 2 -or
+        $panicShapes.Count -ne 1 -or $cancelShapes.Count -ne 1 -or $macroBoundaries.Count -le 0) {
+        throw "Rust completion shape coverage differs: events=$($shapeEvents.Count) methods=$($shapeMethods.Count) generics=$($genericShapes.Count) panic=$($panicShapes.Count) cancel=$($cancelShapes.Count) macros=$($macroBoundaries.Count)"
+    }
 
     & dotnet build $engine -c Release --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "BehaviorDiff engine build failed: $LASTEXITCODE" }
@@ -169,6 +182,12 @@ try {
         SourceHashChanges = 0
         ValuesDigested = "$($finalizeReports[0].valuesDigested)/$($finalizeReports[1].valuesDigested)"
         Blocklisted = "$($finalizeReports[0].blocklisted)/$($finalizeReports[1].blocklisted)"
+        CompletionShapeEvents = $shapeEvents.Count
+        CompletionShapeMethods = $shapeMethods.Count
+        GenericShapeIdentities = $genericShapes.Count
+        PanicShapeEvents = $panicShapes.Count
+        CancellationShapeEvents = $cancelShapes.Count
+        MacroUnsupportedBoundaries = $macroBoundaries.Count
     } | Format-List
     Write-Host 'RUST_CONFORMANCE: PASS'
 } finally {
