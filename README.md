@@ -160,7 +160,7 @@ BehaviorDiff needs a repository path and two Git refs. The target repository mus
 behaviordiff C:\src\my-service `
   --base origin/main `
   --pr HEAD `
-  --engine csharp `
+  --engine rust `
   --findings C:\temp\behaviordiff\findings.json
 ```
 
@@ -169,7 +169,7 @@ Useful options:
 ```text
 --work <directory>      Override the temporary work directory
 --findings <file>       Write canonical machine-readable findings
---engine <name>         Select csharp or rust for matching/noise diff; defaults to csharp
+--engine <name>         Select rust or csharp for matching/noise diff; defaults to rust
 --cache-dir <directory> Override the local base-trace cache directory
 --cache-retention <n>    Expire cached traces after a stated window, for example 12h or 7d
 --keep-traces <n>        Opt in to retaining working traces for a stated window
@@ -178,9 +178,9 @@ Useful options:
 --ci=azuredevops        Resolve refs from Azure Pipelines variables
 ```
 
-The Rust option replaces engine part 1: trace loading, matching, noise filtering, and divergence construction. Frontier detection, attribution, findings generation, and comment rendering remain the shared C# implementation. The default remains `csharp`. `BEHAVIORDIFF_RUST_ENGINE` can override the packaged native executable for development diagnostics.
+The Rust engine implements engine part 1: trace loading, matching, noise filtering, and divergence construction. Frontier detection, attribution, findings generation, and comment rendering remain the shared C# implementation. Rust is the default; pass `--engine=csharp` to use the managed fallback. `BEHAVIORDIFF_RUST_ENGINE` can override the packaged native executable for development diagnostics.
 
-PR comments use a high-confidence policy by default. A finding is high-confidence only when its frontier is verified, every compared digest is exact, an ancestor or descendant divergence connects it to the change through the call tree, and the same member showed no baseline-run or manifest nondeterminism. An edited file contributing zero traced members does not by itself disqualify the finding. Every finding remains in `findings.json` with `confidence`, `confidenceFactors`, `nondeterminism`, and `commentSuppressionReasons`; comments show how many lower-confidence findings were retained only in the artifact. Pass `--strict` to include all unsuppressed findings in comments. The GitHub Action exposes the same behavior through `strict: 'true'`, and Azure Pipelines through `behaviorDiffStrict: 'true'`. The Action's `engine` input accepts `csharp` or `rust` and defaults to `csharp`.
+PR comments use a high-confidence policy by default. A finding is high-confidence only when its frontier is verified, every compared digest is exact, an ancestor or descendant divergence connects it to the change through the call tree, and the same member showed no baseline-run or manifest nondeterminism. An edited file contributing zero traced members does not by itself disqualify the finding. Every finding remains in `findings.json` with `confidence`, `confidenceFactors`, `nondeterminism`, and `commentSuppressionReasons`; comments show how many lower-confidence findings were retained only in the artifact. Pass `--strict` to include all unsuppressed findings in comments. The GitHub Action exposes the same behavior through `strict: 'true'`, and Azure Pipelines through `behaviorDiffStrict: 'true'`. The Action's `engine` input accepts `rust` or `csharp` and defaults to `rust`.
 
 Exit codes:
 

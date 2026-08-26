@@ -9,7 +9,7 @@ cache_retention="${5:-1d}"
 gate="${6:-warn-only}"
 post="${7:-true}"
 strict="${8:-false}"
-engine="${9:-csharp}"
+engine="${9:-rust}"
 
 mkdir -p "$(dirname "$findings")" "$cache_dir"
 

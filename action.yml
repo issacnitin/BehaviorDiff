@@ -40,7 +40,7 @@ inputs:
   engine:
     description: Diff engine implementation, either csharp or rust.
     required: false
-    default: csharp
+    default: rust
 outputs:
   analysis-exit:
     description: BehaviorDiff analysis exit code before posting policy.

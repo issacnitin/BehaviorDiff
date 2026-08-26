@@ -122,7 +122,7 @@ try {
         $prSha = (& git -C $repository rev-parse HEAD).Trim()
 
         $findingsPath = Join-Path $analysis 'findings.json'
-        $output = @(& $cli $repository --base $baseSha --pr $prSha --engine=rust `
+        $output = @(& $cli $repository --base $baseSha --pr $prSha `
             --work $analysis --findings $findingsPath --no-baseline --keep --keep-traces 1d 2>&1)
         $exitCode = $LASTEXITCODE
         $output | ForEach-Object { Write-Host $_ }

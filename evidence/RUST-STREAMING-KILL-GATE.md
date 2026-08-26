@@ -12,7 +12,7 @@ Before frontier implementation, one direct `stream-probe` process must satisfy e
 
 The RSS condition is a hard stop. A result equal to or above 300 MiB ends streaming-engine work regardless of proximity. The threshold will not be raised and frontier work will not begin. Rust then remains frozen as the qualified alternative implementation and work moves to the Rust tracer prototypes.
 
-If the pre-frontier gate passes, the completed streaming diff/frontier path must remain below 500 MiB and preserve byte-identical final `findings.json` modulo only `generatedUtc` before it can replace the existing Rust implementation behind `--engine=rust`. C# remains the default throughout. The old Rust implementation remains selected until the new implementation passes the full existing corpus gate.
+If the pre-frontier gate passes, the completed streaming diff/frontier path must remain below 500 MiB and preserve byte-identical final `findings.json` modulo only `generatedUtc` before it can replace the existing Rust implementation behind `--engine=rust`. C# remains the default throughout this initial qualification. The old Rust implementation remains selected until the new implementation passes the full existing corpus gate.
 
 ## Prototype result
 
@@ -83,7 +83,7 @@ FluentValidation #2136 was then measured through the complete CLI with independe
 | Rust `stream-diff` | cold miss | 174.319 s | 85.995 s | 311.602 MiB |
 | Rust `stream-diff` | warm hit | 127.986 s | 84.391 s | 308.719 MiB |
 
-Rust reduces peak engine-interval RSS by 85.41% cold and 85.83% warm, but is 1.548x slower end-to-end cold, 1.974x slower end-to-end warm, and 4.485x to 4.720x slower across diff plus frontier. The requested default-switch condition therefore does not hold. C# remains the default; Rust remains explicit through `--engine=rust`.
+In this pre-optimization benchmark, Rust reduces peak engine-interval RSS by 85.41% cold and 85.83% warm, but is 1.548x slower end-to-end cold, 1.974x slower end-to-end warm, and 4.485x to 4.720x slower across diff plus frontier. The requested default-switch condition therefore did not hold at that point, so C# remained the default and Rust remained explicit through `--engine=rust`.
 
 ### Streaming profile before optimization
 
@@ -127,7 +127,26 @@ The frontier graph traversal itself is not the slowdown. For every diverged key,
 
 The profile identifies two concrete optimization candidates, neither applied in this measurement commit: serialize compact records directly without per-record `json!` value trees, ideally avoiding the expanded call-tree/matched-key interchange entirely; and index source lines by `(testId, methodFullName)` once before frontier iteration. Default selection remains unchanged until an optimized implementation is rerun through the byte-equivalence corpus gate and the same cold/warm pipeline benchmark. The proposed reconsideration threshold is Rust within approximately 1.5x of C# while retaining the approximately 311 MiB peak.
 
-After this qualification, explicit `--engine=rust` dispatch moved from `diff` to `stream-diff`. C# remains the default engine, and the old Rust `diff` command remains available as a qualified fallback.
+### Optimized write path qualification
+
+The interchange writer now emits compact JSON through a buffered `serde_json::Serializer`, and every production artifact section serializes borrowed projections directly from compact records without per-record `json!` or `Value` construction. The shared frontier builds its first-seen `(testId, methodFullName)` source-line index during the existing call-tree indexing pass.
+
+On the same retained FluentValidation traces, direct profiled `stream-diff` wall time fell from 80.125 seconds to 4.390 seconds. Artifact serialization fell from 75.144 seconds to 0.236 seconds; base and PR call-tree emission took 0.089 seconds each, and matched-key emission took 0.042 seconds. Compact output reduced the DivergenceSet from 129,720,903 bytes to 107,343,031 bytes. The indexed frontier's internal time fell from 6.238 seconds to 2.045 seconds, with source-line lookup falling from 4.445 seconds to 0.004 seconds.
+
+The post-change gate passed all ten retained analyzed inputs through semantic DivergenceSet comparison and byte-identical frontier and final findings comparison modulo only `generatedUtc`: SampleApp sort/retry/config, .NET/Java/Node/Go conformance, and JSON-java #1061/#1062/#1065. FluentValidation #2136 separately produced the same DivergenceSet semantic hash and a byte-identical 1,054,165-byte findings artifact modulo only `generatedUtc`.
+
+The complete CLI was then remeasured with independent cold caches and per-engine warm caches:
+
+| Engine | Cache | End-to-end wall | Diff + frontier | Peak engine-interval RSS |
+| --- | --- | ---: | ---: | ---: |
+| C# | cold miss | 114.469 s | 13.685 s | 2,130.137 MiB |
+| C# | warm hit | 62.383 s | 14.037 s | 2,155.504 MiB |
+| Rust `stream-diff` | cold miss | 94.419 s | 6.626 s | 321.410 MiB |
+| Rust `stream-diff` | warm hit | 55.430 s | 7.331 s | 314.102 MiB |
+
+Rust is 0.484x the C# diff/frontier interval cold and 0.522x warm while reducing peak engine-interval RSS by 84.91% cold and 85.43% warm. It also completes the full pipeline 17.52% faster cold and 11.15% faster warm. This clears the approximately 1.5x reconsideration threshold while retaining the bounded-memory design, so Rust is now the default engine. C# remains available explicitly through `--engine=csharp`.
+
+The default `--engine=rust` dispatch uses `stream-diff`. C# remains available as an explicit managed fallback, and the old Rust `diff` command remains available as a qualified implementation fallback.
 
 Run the hard gate with:
 

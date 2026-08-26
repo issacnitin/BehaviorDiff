@@ -85,9 +85,11 @@ namespace BehaviorDiff.Engine
             Console.WriteLine("=== call tree ===");
             started = profile.Start();
             var byCallId = new Dictionary<long, CallNodeDto>();
+            var lineByKey = new Dictionary<(string TestId, string MethodFullName), int?>();
             foreach (CallNodeDto node in set.CallTree)
             {
                 byCallId[node.CallId] = node;
+                lineByKey.TryAdd((node.TestId, node.MethodFullName), node.Line);
             }
 
             var children = new Dictionary<long, List<CallNodeDto>>();
@@ -217,9 +219,7 @@ namespace BehaviorDiff.Engine
                 List<DivergenceDto> entries = divergedKeys[key];
                 DivergenceDto first = entries[0];
                 long lineLookupStarted = profile.Start();
-                int? line = set.CallTree.FirstOrDefault(call =>
-                    string.Equals(call.TestId, first.TestId, StringComparison.Ordinal)
-                    && string.Equals(call.MethodFullName, first.MethodFullName, StringComparison.Ordinal))?.Line;
+                lineByKey.TryGetValue((first.TestId, first.MethodFullName), out int? line);
                 profile.LineLookupMilliseconds += profile.Stop(lineLookupStarted);
 
                 var node = new FrontierNode

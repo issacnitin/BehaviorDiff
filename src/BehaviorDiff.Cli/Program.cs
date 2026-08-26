@@ -75,7 +75,7 @@ namespace BehaviorDiff.Cli
             bool keep = false;
             bool noBaseline = false;
             bool strict = false;
-            AnalysisEngine engine = AnalysisEngine.CSharp;
+            AnalysisEngine engine = AnalysisEngine.Rust;
             var positional = new List<string>();
 
             for (int i = firstOption; i < args.Length; i++)

@@ -2,13 +2,13 @@ use crate::model::{AssemblyEntry, MemberEntry};
 use crate::DiffOptions;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Serialize, Serializer};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -526,6 +526,7 @@ pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let output = File::create(&options.output).map_err(|error| error.to_string())?;
+    let mut output = BufWriter::new(output);
     let base_readers = open_files(&base1.files)?;
     let pr_readers = open_files(&pr.files)?;
     let profile = RefCell::new(profile);
@@ -546,10 +547,11 @@ pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
         profile: &profile,
     };
     let artifact_started = profile.borrow().start();
-    let mut serializer = serde_json::Serializer::pretty(output);
+    let mut serializer = serde_json::Serializer::new(&mut output);
     artifact
         .serialize(&mut serializer)
         .map_err(|error| error.to_string())?;
+    output.flush().map_err(|error| error.to_string())?;
     if let Some(started) = artifact_started {
         profile.borrow_mut().artifact_total += started.elapsed();
     }
@@ -1085,18 +1087,34 @@ impl Serialize for Artifact<'_> {
             "generatedUtc",
             &OffsetDateTime::now_utc().format(&Rfc3339).unwrap(),
         )?;
-        state.serialize_field("runs", &json!({
-            "base1": describe_run(self.base1), "base2": describe_run(self.base2), "pr": describe_run(self.pr)
-        }))?;
-        state.serialize_field("counts", &json!({
-            "matchedKeys": self.matched.len(),
-            "rawDifferences": self.raw.len(),
-            "noiseExcludedKeys": self.noise_keys.len(),
-            "noiseExcludedDifferences": self.raw.iter().filter(|item| self.noise_keys.contains(&item.key)).count(),
-            "toolingGaps": self.gaps.len(),
-            "remainingDivergences": self.remaining.len(),
-            "matchedKeysPartial": self.matched.iter().filter(|item| item.confidence == Confidence::Partial).count(),
-        }))?;
+        state.serialize_field(
+            "runs",
+            &RunsView {
+                base1: describe_run(self.base1),
+                base2: describe_run(self.base2),
+                pr: describe_run(self.pr),
+            },
+        )?;
+        state.serialize_field(
+            "counts",
+            &CountsView {
+                matched_keys: self.matched.len(),
+                raw_differences: self.raw.len(),
+                noise_excluded_keys: self.noise_keys.len(),
+                noise_excluded_differences: self
+                    .raw
+                    .iter()
+                    .filter(|item| self.noise_keys.contains(&item.key))
+                    .count(),
+                tooling_gaps: self.gaps.len(),
+                remaining_divergences: self.remaining.len(),
+                matched_keys_partial: self
+                    .matched
+                    .iter()
+                    .filter(|item| item.confidence == Confidence::Partial)
+                    .count(),
+            },
+        )?;
         if let Some(started) = runs_counts_started {
             self.profile.borrow_mut().artifact_runs_counts += started.elapsed();
         }
@@ -1135,28 +1153,32 @@ impl Serialize for Artifact<'_> {
                 strings: self.strings,
             },
         )?;
+        state.serialize_field("toolingGaps", &GapView { values: self.gaps })?;
         state.serialize_field(
-            "toolingGaps",
-            &self.gaps.iter().map(describe_gap).collect::<Vec<_>>(),
+            "manifestNoise",
+            &ManifestNoiseView {
+                values: self.manifest_noise,
+            },
         )?;
-        state.serialize_field("manifestNoise", &self.manifest_noise.iter().map(|gap| json!({
-            "scope": gap.scope, "assembly": gap.assembly, "methodFullName": gap.method,
-            "run1State": gap.base_state, "run2State": gap.pr_state,
-            "reason": "nondeterministic tracer coverage: differs between two runs of the same build"
-        })).collect::<Vec<_>>())?;
-        state.serialize_field("harnessDivergences", &self.harness_divergences.iter().map(|item| json!({
-            "testId": self.strings.resolve(item.key.test), "methodFullName": self.strings.resolve(item.key.method),
-            "kind": item.kind, "detail": item.detail,
-            "isTestRoot": member(self.base1, self.strings.resolve(item.key.method)).map(|entry| entry.is_test_root),
-        })).collect::<Vec<_>>())?;
+        state.serialize_field(
+            "harnessDivergences",
+            &HarnessDivergenceView {
+                values: self.harness_divergences,
+                strings: self.strings,
+                base: self.base1,
+            },
+        )?;
         if let Some(started) = noise_started {
             self.profile.borrow_mut().artifact_noise += started.elapsed();
         }
         let coverage_started = self.profile.borrow().start();
-        state.serialize_field("coverage", &json!({
-            "members": self.base1.members.iter().map(describe_member).collect::<Vec<_>>(),
-            "assemblies": self.base1.assemblies.iter().map(describe_assembly).collect::<Vec<_>>(),
-        }))?;
+        state.serialize_field(
+            "coverage",
+            &CoverageView {
+                members: &self.base1.members,
+                assemblies: &self.base1.assemblies,
+            },
+        )?;
         if let Some(started) = coverage_started {
             self.profile.borrow_mut().artifact_coverage += started.elapsed();
         }
@@ -1186,6 +1208,66 @@ impl Serialize for Artifact<'_> {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunView<'a> {
+    name: &'a str,
+    schema: &'a str,
+    language: &'a str,
+    root: &'a str,
+    trace_files: usize,
+    events: u64,
+    subject_events: u64,
+    harness_events: u64,
+}
+
+#[derive(Serialize)]
+struct RunsView<'a> {
+    base1: RunView<'a>,
+    base2: RunView<'a>,
+    pr: RunView<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CountsView {
+    matched_keys: usize,
+    raw_differences: usize,
+    noise_excluded_keys: usize,
+    noise_excluded_differences: usize,
+    tooling_gaps: usize,
+    remaining_divergences: usize,
+    matched_keys_partial: usize,
+}
+
+#[derive(Clone, Copy)]
+struct MarkerNames(u8);
+
+impl Serialize for MarkerNames {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let values = [(2, "depth"), (4, "error"), (1, "skipped"), (8, "truncated")];
+        let mut sequence = serializer.serialize_seq(Some(
+            values.iter().filter(|(bit, _)| self.0 & bit != 0).count(),
+        ))?;
+        for (_, name) in values.into_iter().filter(|(bit, _)| self.0 & bit != 0) {
+            sequence.serialize_element(name)?;
+        }
+        sequence.end()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatchedItem<'a> {
+    test_id: &'a str,
+    method_full_name: &'a str,
+    file_path: Option<&'a str>,
+    base_calls: usize,
+    pr_calls: usize,
+    digest_confidence: &'static str,
+    partial_markers: MarkerNames,
+}
+
 struct MatchedView<'a> {
     values: &'a [Matched],
     strings: &'a Interner,
@@ -1194,14 +1276,26 @@ impl Serialize for MatchedView<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut sequence = serializer.serialize_seq(Some(self.values.len()))?;
         for item in self.values {
-            sequence.serialize_element(&json!({
-                "testId": self.strings.resolve(item.key.test), "methodFullName": self.strings.resolve(item.key.method),
-                "filePath": self.strings.optional(item.path), "baseCalls": item.base_calls, "prCalls": item.pr_calls,
-                "digestConfidence": item.confidence.name(), "partialMarkers": marker_names(item.markers),
-            }))?;
+            sequence.serialize_element(&MatchedItem {
+                test_id: self.strings.resolve(item.key.test),
+                method_full_name: self.strings.resolve(item.key.method),
+                file_path: self.strings.optional(item.path),
+                base_calls: item.base_calls,
+                pr_calls: item.pr_calls,
+                digest_confidence: item.confidence.name(),
+                partial_markers: MarkerNames(item.markers),
+            })?;
         }
         sequence.end()
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NoiseItem<'a> {
+    test_id: &'a str,
+    method_full_name: &'a str,
+    differences: u8,
 }
 
 struct NoiseView<'a> {
@@ -1214,12 +1308,37 @@ impl Serialize for NoiseView<'_> {
         keys.sort_by(|a, b| compare_keys(*a, *b, self.strings));
         let mut sequence = serializer.serialize_seq(Some(keys.len()))?;
         for key in keys {
-            sequence.serialize_element(&json!({
-                "testId": self.strings.resolve(key.test), "methodFullName": self.strings.resolve(key.method), "differences": 1
-            }))?;
+            sequence.serialize_element(&NoiseItem {
+                test_id: self.strings.resolve(key.test),
+                method_full_name: self.strings.resolve(key.method),
+                differences: 1,
+            })?;
         }
         sequence.end()
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DivergenceItem<'a> {
+    test_id: &'a str,
+    method_full_name: &'a str,
+    file_path: Option<&'a str>,
+    ordinal: i32,
+    kind: &'static str,
+    detail: &'a str,
+    digest_confidence: &'static str,
+    partial_markers: MarkerNames,
+    base_args_digest: Option<&'a str>,
+    pr_args_digest: Option<&'a str>,
+    base_args_rendered: Option<&'a str>,
+    pr_args_rendered: Option<&'a str>,
+    base_return_digest: Option<&'a str>,
+    pr_return_digest: Option<&'a str>,
+    base_return_rendered: Option<&'a str>,
+    pr_return_rendered: Option<&'a str>,
+    base_exception_type: Option<&'a str>,
+    pr_exception_type: Option<&'a str>,
 }
 
 struct DivergenceView<'a> {
@@ -1245,24 +1364,55 @@ impl Serialize for DivergenceView<'_> {
                 .map(|locator| read_evidence(self.pr, self.pr_readers, locator, self.profile))
                 .transpose()
                 .map_err(serde::ser::Error::custom)?;
-            sequence.serialize_element(&json!({
-                "testId": self.strings.resolve(item.key.test), "methodFullName": self.strings.resolve(item.key.method),
-                "filePath": self.strings.optional(item.path), "ordinal": item.ordinal, "kind": item.kind, "detail": item.detail,
-                "digestConfidence": item.confidence.name(), "partialMarkers": marker_names(item.markers),
-                "baseArgsDigest": base.as_ref().and_then(|event| event.args_digest.as_ref()),
-                "prArgsDigest": pr.as_ref().and_then(|event| event.args_digest.as_ref()),
-                "baseArgsRendered": base.as_ref().and_then(|event| event.args_rendered.as_ref()),
-                "prArgsRendered": pr.as_ref().and_then(|event| event.args_rendered.as_ref()),
-                "baseReturnDigest": base.as_ref().and_then(|event| event.return_digest.as_ref()),
-                "prReturnDigest": pr.as_ref().and_then(|event| event.return_digest.as_ref()),
-                "baseReturnRendered": base.as_ref().and_then(|event| event.return_rendered.as_ref()),
-                "prReturnRendered": pr.as_ref().and_then(|event| event.return_rendered.as_ref()),
-                "baseExceptionType": base.as_ref().and_then(|event| event.exception_type.as_ref()),
-                "prExceptionType": pr.as_ref().and_then(|event| event.exception_type.as_ref()),
-            }))?;
+            sequence.serialize_element(&DivergenceItem {
+                test_id: self.strings.resolve(item.key.test),
+                method_full_name: self.strings.resolve(item.key.method),
+                file_path: self.strings.optional(item.path),
+                ordinal: item.ordinal,
+                kind: item.kind,
+                detail: &item.detail,
+                digest_confidence: item.confidence.name(),
+                partial_markers: MarkerNames(item.markers),
+                base_args_digest: base.as_ref().and_then(|event| event.args_digest.as_deref()),
+                pr_args_digest: pr.as_ref().and_then(|event| event.args_digest.as_deref()),
+                base_args_rendered: base
+                    .as_ref()
+                    .and_then(|event| event.args_rendered.as_deref()),
+                pr_args_rendered: pr.as_ref().and_then(|event| event.args_rendered.as_deref()),
+                base_return_digest: base
+                    .as_ref()
+                    .and_then(|event| event.return_digest.as_deref()),
+                pr_return_digest: pr.as_ref().and_then(|event| event.return_digest.as_deref()),
+                base_return_rendered: base
+                    .as_ref()
+                    .and_then(|event| event.return_rendered.as_deref()),
+                pr_return_rendered: pr
+                    .as_ref()
+                    .and_then(|event| event.return_rendered.as_deref()),
+                base_exception_type: base
+                    .as_ref()
+                    .and_then(|event| event.exception_type.as_deref()),
+                pr_exception_type: pr
+                    .as_ref()
+                    .and_then(|event| event.exception_type.as_deref()),
+            })?;
         }
         sequence.end()
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CallTreeItem<'a> {
+    call_id: i64,
+    parent_call_id: Option<i64>,
+    test_id: &'a str,
+    method_full_name: &'a str,
+    ordinal: i32,
+    is_harness: bool,
+    file_path: Option<&'a str>,
+    line: i32,
+    process: &'a str,
 }
 
 struct CallTreeView<'a> {
@@ -1273,16 +1423,203 @@ impl Serialize for CallTreeView<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut sequence = serializer.serialize_seq(Some(self.nodes.len()))?;
         for node in self.nodes {
-            sequence.serialize_element(&json!({
-                "callId": node.call_id,
-                "parentCallId": (node.parent_call_id >= 0).then_some(node.parent_call_id),
-                "testId": self.strings.resolve(node.test), "methodFullName": self.strings.resolve(node.method),
-                "ordinal": node.ordinal, "isHarness": node.flags & 1 != 0,
-                "filePath": self.strings.optional(node.path), "line": node.line,
-                "process": self.strings.resolve(node.process),
-            }))?;
+            sequence.serialize_element(&CallTreeItem {
+                call_id: node.call_id,
+                parent_call_id: (node.parent_call_id >= 0).then_some(node.parent_call_id),
+                test_id: self.strings.resolve(node.test),
+                method_full_name: self.strings.resolve(node.method),
+                ordinal: node.ordinal,
+                is_harness: node.flags & 1 != 0,
+                file_path: self.strings.optional(node.path),
+                line: node.line,
+                process: self.strings.resolve(node.process),
+            })?;
         }
         sequence.end()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GapItem<'a> {
+    scope: &'a str,
+    assembly: &'a str,
+    method_full_name: Option<&'a str>,
+    base_state: &'a str,
+    pr_state: &'a str,
+    reason: &'a str,
+}
+
+struct GapView<'a> {
+    values: &'a [Gap],
+}
+
+impl Serialize for GapView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.values.len()))?;
+        for gap in self.values {
+            sequence.serialize_element(&GapItem {
+                scope: &gap.scope,
+                assembly: &gap.assembly,
+                method_full_name: gap.method.as_deref(),
+                base_state: &gap.base_state,
+                pr_state: &gap.pr_state,
+                reason: &gap.reason,
+            })?;
+        }
+        sequence.end()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ManifestNoiseItem<'a> {
+    scope: &'a str,
+    assembly: &'a str,
+    method_full_name: Option<&'a str>,
+    run1_state: &'a str,
+    run2_state: &'a str,
+    reason: &'static str,
+}
+
+struct ManifestNoiseView<'a> {
+    values: &'a [Gap],
+}
+
+impl Serialize for ManifestNoiseView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.values.len()))?;
+        for gap in self.values {
+            sequence.serialize_element(&ManifestNoiseItem {
+                scope: &gap.scope,
+                assembly: &gap.assembly,
+                method_full_name: gap.method.as_deref(),
+                run1_state: &gap.base_state,
+                run2_state: &gap.pr_state,
+                reason:
+                    "nondeterministic tracer coverage: differs between two runs of the same build",
+            })?;
+        }
+        sequence.end()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HarnessDivergenceItem<'a> {
+    test_id: &'a str,
+    method_full_name: &'a str,
+    kind: &'static str,
+    detail: &'a str,
+    is_test_root: Option<bool>,
+}
+
+struct HarnessDivergenceView<'a> {
+    values: &'a [Divergence],
+    strings: &'a Interner,
+    base: &'a RunData,
+}
+
+impl Serialize for HarnessDivergenceView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.values.len()))?;
+        for item in self.values {
+            let method_full_name = self.strings.resolve(item.key.method);
+            sequence.serialize_element(&HarnessDivergenceItem {
+                test_id: self.strings.resolve(item.key.test),
+                method_full_name,
+                kind: item.kind,
+                detail: &item.detail,
+                is_test_root: member(self.base, method_full_name).map(|entry| entry.is_test_root),
+            })?;
+        }
+        sequence.end()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemberItem<'a> {
+    method_full_name: Option<&'a str>,
+    assembly: &'a str,
+    status: &'a str,
+    skip_reason: Option<&'a str>,
+    detail: Option<&'a str>,
+    source_resolution: Option<&'a str>,
+    is_test_root: bool,
+}
+
+struct MemberView<'a> {
+    values: &'a [MemberEntry],
+}
+
+impl Serialize for MemberView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.values.len()))?;
+        for item in self.values {
+            sequence.serialize_element(&MemberItem {
+                method_full_name: item.method_full_name.as_deref(),
+                assembly: &item.assembly,
+                status: &item.status,
+                skip_reason: item.skip_reason.as_deref(),
+                detail: item.detail.as_deref(),
+                source_resolution: item.source_resolution.as_deref(),
+                is_test_root: item.is_test_root,
+            })?;
+        }
+        sequence.end()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssemblyItem<'a> {
+    assembly: &'a str,
+    instrumented: bool,
+    source_partial: bool,
+    source_unavailable: bool,
+}
+
+struct AssemblyView<'a> {
+    values: &'a [AssemblyEntry],
+}
+
+impl Serialize for AssemblyView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.values.len()))?;
+        for item in self.values {
+            sequence.serialize_element(&AssemblyItem {
+                assembly: &item.assembly,
+                instrumented: item.instrumented,
+                source_partial: item.source_partial,
+                source_unavailable: item.source_unavailable,
+            })?;
+        }
+        sequence.end()
+    }
+}
+
+struct CoverageView<'a> {
+    members: &'a [MemberEntry],
+    assemblies: &'a [AssemblyEntry],
+}
+
+impl Serialize for CoverageView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("Coverage", 2)?;
+        state.serialize_field(
+            "members",
+            &MemberView {
+                values: self.members,
+            },
+        )?;
+        state.serialize_field(
+            "assemblies",
+            &AssemblyView {
+                values: self.assemblies,
+            },
+        )?;
+        state.end()
     }
 }
 
@@ -1358,6 +1695,7 @@ fn marker_bits(value: Option<&str>) -> u8 {
         | (u8::from(value.contains("<error:")) << 2)
         | (u8::from(value.contains("<truncated>")) << 3)
 }
+#[cfg(test)]
 fn marker_names(markers: u8) -> Vec<&'static str> {
     [(2, "depth"), (4, "error"), (1, "skipped"), (8, "truncated")]
         .into_iter()
@@ -1590,17 +1928,17 @@ fn is_method_lifecycle(gap: &Gap) -> bool {
         && ((gap.base_state == "absent" && gap.pr_state == "Patched")
             || (gap.base_state == "Patched" && gap.pr_state == "absent"))
 }
-fn describe_run(run: &RunData) -> Value {
-    json!({ "name": run.name, "schema": run.schema, "language": run.language, "root": run.root, "traceFiles": run.files.len(), "events": run.events, "subjectEvents": run.subject_events, "harnessEvents": run.harness_events })
-}
-fn describe_gap(gap: &Gap) -> Value {
-    json!({ "scope": gap.scope, "assembly": gap.assembly, "methodFullName": gap.method, "baseState": gap.base_state, "prState": gap.pr_state, "reason": gap.reason })
-}
-fn describe_member(member: &MemberEntry) -> Value {
-    json!({ "methodFullName": member.method_full_name, "assembly": member.assembly, "status": member.status, "skipReason": member.skip_reason, "detail": member.detail, "sourceResolution": member.source_resolution, "isTestRoot": member.is_test_root })
-}
-fn describe_assembly(assembly: &AssemblyEntry) -> Value {
-    json!({ "assembly": assembly.assembly, "instrumented": assembly.instrumented, "sourcePartial": assembly.source_partial, "sourceUnavailable": assembly.source_unavailable })
+fn describe_run(run: &RunData) -> RunView<'_> {
+    RunView {
+        name: &run.name,
+        schema: &run.schema,
+        language: &run.language,
+        root: &run.root,
+        trace_files: run.files.len(),
+        events: run.events,
+        subject_events: run.subject_events,
+        harness_events: run.harness_events,
+    }
 }
 fn member<'a>(run: &'a RunData, method: &str) -> Option<&'a MemberEntry> {
     run.members
