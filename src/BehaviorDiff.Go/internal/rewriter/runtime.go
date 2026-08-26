@@ -426,6 +426,8 @@ func writeManifestLocked() {
 				"status": member.Status, "returnKind": member.ReturnKind,
 				"sourceResolution": member.SourceResolution,
 			}
+			if member.File != "" { record["filePath"] = member.File }
+			if member.Line > 0 { record["line"] = member.Line }
 			if member.SkipReason != "" { record["skipReason"] = member.SkipReason }
 			if member.Detail != "" { record["detail"] = member.Detail }
 			if member.IsTestRoot { record["isTestRoot"] = true }

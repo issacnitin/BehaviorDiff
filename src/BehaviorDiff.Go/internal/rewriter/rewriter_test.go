@@ -131,6 +131,8 @@ type emittedManifestRecord struct {
 	SkipReason          string `json:"skipReason"`
 	Detail              string `json:"detail"`
 	IsTestRoot          bool   `json:"isTestRoot"`
+	File                string `json:"filePath"`
+	Line                int    `json:"line"`
 	PatchedMembers      int    `json:"patchedMembers"`
 	DiscoveredMembers   int    `json:"discoveredMembers"`
 	SkippedMembers      int    `json:"skippedMembers"`
@@ -305,6 +307,9 @@ func verifyEmittedManifest(t *testing.T, records []emittedManifestRecord, events
 	testRoots := 0
 	templateCount := 0
 	for _, member := range members {
+		if member.File == "" || member.Line <= 0 {
+			t.Fatalf("member source identity missing: %+v", member)
+		}
 		if member.IsTestRoot {
 			testRoots++
 		}
