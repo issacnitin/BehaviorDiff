@@ -4,10 +4,15 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use syn::visit_mut::{self, VisitMut};
+use syn::{parse_quote, Block, ImplItemFn, ItemFn, ItemImpl, ItemTrait, TraitItemFn};
+use toml_edit::{DocumentMut, InlineTable, Item, Value};
 use walkdir::{DirEntry, WalkDir};
 
-const CACHE_VERSION: &str = "behaviordiff.rust-rewrite-cache/1";
+const CACHE_VERSION: &str = "behaviordiff.rust-rewrite-cache/2";
 const ORIGIN_MANIFEST: &str = ".behaviordiff-rust-origin.json";
+const RUNTIME_CARGO: &str = include_str!("../runtime/Cargo.toml");
+const RUNTIME_SOURCE: &str = include_str!("../runtime/src/lib.rs");
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +33,8 @@ struct OriginManifest {
     source_hash: String,
     source_files: usize,
     rust_files: Vec<OriginFile>,
+    instrumented_functions: usize,
+    skipped_functions: usize,
 }
 
 #[derive(Serialize)]
@@ -125,6 +132,8 @@ fn build_cache_entry(
     staging: &Path,
 ) -> Result<(), String> {
     let mut origins = Vec::new();
+    let mut instrumented_functions = 0;
+    let mut skipped_functions = 0;
     for relative in files {
         let input = source.join(relative);
         let output = staging.join(relative);
@@ -133,8 +142,14 @@ fn build_cache_entry(
         }
         if is_rust_source(relative) {
             let text = fs::read_to_string(&input).map_err(|error| error.to_string())?;
-            let syntax =
+            let mut syntax =
                 syn::parse_file(&text).map_err(|error| format!("{}: {error}", input.display()))?;
+            if should_instrument(relative) {
+                let mut instrumenter = ExitHookInstrumenter::new(slash(relative));
+                instrumenter.visit_file_mut(&mut syntax);
+                instrumented_functions += instrumenter.instrumented;
+                skipped_functions += instrumenter.skipped;
+            }
             let tokens = syntax.to_token_stream();
             let reparsed =
                 syn::parse2(tokens).map_err(|error| format!("{}: {error}", input.display()))?;
@@ -149,14 +164,138 @@ fn build_cache_entry(
         }
     }
 
+    write_runtime(staging)?;
+    inject_runtime_dependencies(staging, files)?;
+
     let manifest = OriginManifest {
         schema: CACHE_VERSION,
         source_hash: source_hash.to_owned(),
         source_files: files.len(),
         rust_files: origins,
+        instrumented_functions,
+        skipped_functions,
     };
     let manifest_text = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
     fs::write(staging.join(ORIGIN_MANIFEST), manifest_text).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+struct ExitHookInstrumenter {
+    relative_path: String,
+    context: Option<String>,
+    instrumented: usize,
+    skipped: usize,
+}
+
+impl ExitHookInstrumenter {
+    fn new(relative_path: String) -> Self {
+        Self {
+            relative_path,
+            context: None,
+            instrumented: 0,
+            skipped: 0,
+        }
+    }
+
+    fn instrument(&mut self, signature: &syn::Signature, block: &mut Block) {
+        if signature.constness.is_some() || signature.abi.is_some() {
+            self.skipped += 1;
+            return;
+        }
+        let method = match &self.context {
+            Some(context) => format!("{}::{context}::{}", self.relative_path, signature.ident),
+            None => format!("{}::{}", self.relative_path, signature.ident),
+        };
+        let file = self.relative_path.clone();
+        let line = signature.ident.span().start().line as u32;
+        let original = block.clone();
+        *block = if signature.asyncness.is_some() {
+            parse_quote!({
+                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line);
+                let __behaviordiff_result = (async move #original).await;
+                __behaviordiff_guard.complete();
+                __behaviordiff_result
+            })
+        } else {
+            parse_quote!({
+                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line);
+                let __behaviordiff_result = (|| #original)();
+                __behaviordiff_guard.complete();
+                __behaviordiff_result
+            })
+        };
+        self.instrumented += 1;
+    }
+}
+
+impl VisitMut for ExitHookInstrumenter {
+    fn visit_item_fn_mut(&mut self, function: &mut ItemFn) {
+        visit_mut::visit_item_fn_mut(self, function);
+        self.instrument(&function.sig, &mut function.block);
+    }
+
+    fn visit_impl_item_fn_mut(&mut self, function: &mut ImplItemFn) {
+        visit_mut::visit_impl_item_fn_mut(self, function);
+        self.instrument(&function.sig, &mut function.block);
+    }
+
+    fn visit_trait_item_fn_mut(&mut self, function: &mut TraitItemFn) {
+        visit_mut::visit_trait_item_fn_mut(self, function);
+        if let Some(block) = &mut function.default {
+            self.instrument(&function.sig, block);
+        }
+    }
+
+    fn visit_item_impl_mut(&mut self, item: &mut ItemImpl) {
+        let previous = self.context.take();
+        let self_type = item.self_ty.to_token_stream().to_string();
+        self.context = Some(match &item.trait_ {
+            Some((_, path, _)) => format!("{} for {self_type}", path.to_token_stream()),
+            None => self_type,
+        });
+        visit_mut::visit_item_impl_mut(self, item);
+        self.context = previous;
+    }
+
+    fn visit_item_trait_mut(&mut self, item: &mut ItemTrait) {
+        let previous = self.context.take();
+        self.context = Some(format!("trait {}", item.ident));
+        visit_mut::visit_item_trait_mut(self, item);
+        self.context = previous;
+    }
+}
+
+fn write_runtime(staging: &Path) -> Result<(), String> {
+    let runtime = staging.join(".behaviordiff/runtime");
+    fs::create_dir_all(runtime.join("src")).map_err(|error| error.to_string())?;
+    fs::write(runtime.join("Cargo.toml"), RUNTIME_CARGO).map_err(|error| error.to_string())?;
+    fs::write(runtime.join("src/lib.rs"), RUNTIME_SOURCE).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn inject_runtime_dependencies(staging: &Path, files: &[PathBuf]) -> Result<(), String> {
+    let runtime = staging.join(".behaviordiff/runtime");
+    for relative in files
+        .iter()
+        .filter(|path| path.file_name().is_some_and(|name| name == "Cargo.toml"))
+    {
+        let manifest = staging.join(relative);
+        let text = fs::read_to_string(&manifest).map_err(|error| error.to_string())?;
+        let mut document = text
+            .parse::<DocumentMut>()
+            .map_err(|error| format!("{}: {error}", manifest.display()))?;
+        if !document.contains_key("package") {
+            continue;
+        }
+        let package_directory = manifest.parent().unwrap();
+        let dependency_path = pathdiff::diff_paths(&runtime, package_directory)
+            .ok_or_else(|| format!("cannot address runtime from {}", manifest.display()))?;
+        let mut dependency = InlineTable::new();
+        dependency.insert("path", Value::from(slash(&dependency_path)));
+        document["dependencies"]["behaviordiff-rust-runtime"] =
+            Item::Value(Value::InlineTable(dependency));
+        fs::write(&manifest, document.to_string()).map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
 
@@ -252,6 +391,10 @@ fn is_rust_source(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "rs")
 }
 
+fn should_instrument(path: &Path) -> bool {
+    path.file_name().is_none_or(|name| name != "build.rs")
+}
+
 fn hash_bytes(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
@@ -332,6 +475,12 @@ mod tests {
             .join(".behaviordiff-rust-origin.json")
             .is_file());
         assert!(first.output.join("src/lib.rs").is_file());
+        assert!(first
+            .output
+            .join(".behaviordiff/runtime/src/lib.rs")
+            .is_file());
+        let rewritten = fs::read_to_string(first.output.join("src/lib.rs")).unwrap();
+        assert!(rewritten.contains("behaviordiff_rust_runtime::enter"));
 
         fs::remove_dir_all(root).unwrap();
     }
