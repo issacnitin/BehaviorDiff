@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 import unittest
@@ -116,6 +117,61 @@ class RuntimeTests(unittest.TestCase):
             event = next(item for item in events if item["methodFullName"].endswith("ExampleTests.test_value"))
             self.assertEqual(f"{ExampleTests.__module__}.{ExampleTests.__qualname__}.test_value", event["testId"])
             self.assertTrue(event["isHarness"])
+
+    def test_generators_and_coroutines_emit_only_at_final_completion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root_path = Path(temporary)
+            trace = root_path / "run.ndjson"
+            runtime = Runtime(trace, Scope(root_path, (), ()))
+            install(runtime.on_event, runtime.scope)
+
+            def values():
+                yield 1
+                yield 2
+                return 3
+
+            async def coroutine():
+                await asyncio.sleep(0)
+                return 4
+
+            async def async_values():
+                yield 5
+                await asyncio.sleep(0)
+                yield 6
+
+            async def consume_async():
+                return [value async for value in async_values()]
+
+            def test_root():
+                iterator = values()
+                self.assertEqual(1, next(iterator))
+                self.assertEqual("", trace.read_text(encoding="utf-8"))
+                self.assertEqual(2, next(iterator))
+                with self.assertRaisesRegex(StopIteration, "3"):
+                    next(iterator)
+                return asyncio.run(coroutine()), asyncio.run(consume_async())
+
+            source = str(root_path / "test_async.py")
+            for callable_ in (values, coroutine, async_values, consume_async, test_root):
+                callable_.__code__ = callable_.__code__.replace(co_filename=source)
+            runtime.register_test_root(test_root.__code__, "tests/test_async.py::test_root")
+            self.assertEqual((4, [5, 6]), test_root())
+            runtime.clear_test_root()
+            uninstall()
+            runtime.close()
+
+            events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+            root_event = next(event for event in events if event.get("isHarness"))
+            consume_event = next(
+                event for event in events if event["methodFullName"].endswith(consume_async.__code__.co_qualname)
+            )
+            for callable_ in (values, coroutine, async_values, consume_async):
+                matching = [event for event in events if event["methodFullName"].endswith(callable_.__code__.co_qualname)]
+                self.assertEqual(1, len(matching), callable_.__name__)
+                self.assertEqual(0, matching[0]["ordinal"])
+                expected_parent = consume_event["callId"] if callable_ is async_values else root_event["callId"]
+                self.assertEqual(expected_parent, matching[0]["parentCallId"])
+                self.assertEqual(root_event["testId"], matching[0]["testId"])
 
 
 if __name__ == "__main__":
