@@ -14,6 +14,8 @@ namespace BehaviorDiff.Contracts
         public const string GoLanguage = "go";
 
         public const string RustLanguage = "rust";
+
+        public const string PythonLanguage = "python";
     }
 
     /// <summary>Language-neutral reasons a discovered member was not instrumented.</summary>

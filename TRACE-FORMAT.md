@@ -27,7 +27,7 @@ Every process manifest begins with exactly one run record:
 | --- | --- | --- | --- |
 | `kind` | string | yes | Always `run`. |
 | `schema` | string | yes | Exactly `behaviordiff.trace/1`. An unsupported value is refused. |
-| `language` | string | yes | Digest/canonicalizer domain. Version 1 reserves `dotnet`, `java`, `node`, `go`, and `rust`. |
+| `language` | string | yes | Digest/canonicalizer domain. Version 1 reserves `dotnet`, `java`, `node`, `go`, `rust`, and `python`. |
 
 All process manifests merged into one run MUST agree on `schema` and `language`. Base samples and the proposed run MUST have the same language. The engine refuses a cross-language comparison because digest equality is defined only within one language.
 
@@ -75,6 +75,8 @@ Instrumentation MUST enter before user instructions and MUST emit exactly once a
 - asynchronous return: retain the frame and emit when the promise/task/future settles, not when the method synchronously returns its handle;
 - asynchronous failure/cancellation: include the escaping/settlement exception category and no return digest.
 
+Python generators, coroutines, and async generators retain one logical call across suspension. `PY_YIELD` suspends a call without emitting it, and resumption does not allocate another `callId` or ordinal. Final `PY_RETURN` emits once. A `RAISE` event emits only when the exception escapes that frame, with `exceptionType` and no return digest; an exception handled inside the same frame does not complete the call.
+
 Emission at synchronous return from an asynchronous method records an unfinished handle instead of behavior. Missing the exceptional path removes calls from one side and creates false call-count or missing-key divergences. Double emission shifts every later ordinal.
 
 ### Call-tree and harness invariant
@@ -107,6 +109,8 @@ Node worker threads are separate JavaScript isolates with separate globals and a
 
 For Rust rewritten into a content-addressed build cache, the stable parser position in the original ungenerated `.rs` file is `debugInfo`. Events and members MUST use the original repository-relative path and line, never the cache or staging path. A callable generated only by a macro expansion unavailable to stable source parsing is outside the transformer's callable inventory. The transformer MUST add a stable skipped boundary member for the original macro invocation with `skipReason:"UnsupportedShape"` and detail `Rust: MacroExpansionUnavailable`; it MUST NOT report unknown generated callables as patched or fabricate generated source positions.
 
+For Python monitored directly from repository source, `code.co_filename` and `code.co_firstlineno` establish `debugInfo` after the real path is normalized beneath the repository root. A code object whose filename is absent, synthetic, outside the repository, or cannot be normalized is `unresolved` with no path. Python does not infer a source path from `__module__`, a class name, an import name, or a traceback string.
+
 Usable attribution requires `debugInfo`, `generatedState`, or `declaringType`. Exact source statistics count only `debugInfo` and `generatedState`. An unresolved state is evidence, not permission to infer a path. Guessing makes every changed path miss and can invert an unexpected change into a clean result.
 
 The conformance source tripwire requires all exercised subject events in the reference project to have a usable state and requires zero subject roots. Harness events may be unresolved because they are not attributed.
@@ -123,7 +127,7 @@ The historical wire discriminator and identifier are `kind:"assembly"` and `asse
 | --- | --- | --- | --- |
 | `kind` | string | yes | `assembly`. |
 | `assembly` | non-empty string | yes | Stable module identity within the run. |
-| `discovery` | string | yes | Instrumentation mechanism: `BuildTimeWeave`, `JavaAgentTransform`, `NodeAstTransform`, `GoAstRewrite`, or `RustAstRewrite`. |
+| `discovery` | string | yes | Instrumentation mechanism: `BuildTimeWeave`, `JavaAgentTransform`, `NodeAstTransform`, `GoAstRewrite`, `RustAstRewrite`, or `SysMonitoring`. |
 | `scanned` | boolean | yes | Member discovery completed for this module. |
 | `instrumented` | boolean | yes | At least one member was instrumented. |
 | `patchedMembers` | non-negative integer | yes | Number of instrumented members. The historical name means `instrumentedMembers`. |
@@ -225,6 +229,8 @@ Canonicalization MUST NOT execute user code. In particular it MUST NOT invoke ge
 
 Runtime reflection is not required. A language without sufficient reflection MAY generate type-specific canonicalization code at build time from the target's source, compiler metadata, or another semantics-preserving intermediate representation. Generated code is held to the same no-user-code and determinism rules as a reflective canonicalizer. Requiring target-owned derives, annotations, trait implementations, or handwritten serializers is not conforming to the transparent tracer contract unless the language integration explicitly declares an opt-in product boundary.
 
+Python canonicalization MAY read an instance's concrete `__dict__` without dynamic attribute lookup. It MUST NOT invoke properties, `__getattr__`, overridden `__getattribute__`, slot descriptors, container subclass overrides, iteration hooks, `repr`, formatting, equality, or hashing. Every state region represented only by one of those mechanisms emits a counted partial marker. Exact built-in `list`, `tuple`, `dict`, `set`, and `frozenset` shapes may use their sealed runtime operations; subclasses require a partial marker unless their contents can be read without user dispatch.
+
 Every discovered field or value region that the canonicalizer cannot inspect MUST remain visible as evidence. Opaque private/unexported fields, erased trait/interface objects, unions whose active field cannot be established safely, dependency-owned external types without usable layout, and comparable opaque shapes emit a deterministic `<skipped:DETAIL>` marker and increment a manifest counter covering the omitted region. They MUST NOT be silently omitted or replaced by a marker that is indistinguishable from a fully observed value. Equal digests containing such markers are partial and do not establish equality inside those regions.
 
 Sealed standard-library collection traversal is permitted only through a language/runtime primitive or generated shape rule that cannot dispatch into target-defined code. The rule MAY read backing storage or use a runtime-guaranteed non-overridable traversal operation. It MUST NOT call user-overridable iteration, hashing, equality, comparison, formatting, or callbacks. If the runtime cannot provide such traversal, the collection or unreadable region is represented by a counted `<skipped:...>` marker rather than iterated unsafely.
@@ -298,5 +304,7 @@ Language-specific components are:
 - source resolution (PDB/sequence points, JVM debug attributes, or JavaScript source maps);
 - test-root recognition and correlation adapters where structural correlation cannot open the root;
 - async frame propagation and runtime concurrency integration.
+
+Python has no build-injection phase. Its tracer attaches at interpreter process start and fingerprints the staged tracer directory for the base-trace cache key. The Python executable version, effective include/exclude scope, redaction configuration, and test command remain cache inputs through the normal scope configuration. Python 3.12 or newer is required for `sys.monitoring`; a producer MUST refuse older interpreters and MUST NOT fall back to `sys.settrace`.
 
 Path normalization after a tracer has supplied a real source path is engine-owned and language-agnostic. A tracer never fabricates a path to satisfy attribution.
