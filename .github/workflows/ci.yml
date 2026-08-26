@@ -198,9 +198,14 @@ jobs:
           }
       - name: Build, install, and execute packaged binaries
         shell: pwsh
-        run: pwsh -NoProfile -File tools/verify-cli-package.ps1 -WorkDirectory artifacts/package-proof -KeepWork
+        run: |
+          $work = Join-Path $env:RUNNER_TEMP 'behaviordiff-package-proof'
+          pwsh -NoProfile -File tools/verify-cli-package.ps1 -WorkDirectory $work -KeepWork
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Path artifacts/packages -Force | Out-Null
+          Copy-Item (Join-Path $work 'packages/*.nupkg') artifacts/packages -Force
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: behaviordiff-tool
-          path: artifacts/package-proof/packages/*.nupkg
+          path: artifacts/packages/*.nupkg
