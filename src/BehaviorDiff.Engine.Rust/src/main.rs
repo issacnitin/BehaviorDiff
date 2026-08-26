@@ -2,6 +2,7 @@ use std::env;
 
 mod dotnet_json;
 mod engine;
+mod findings;
 mod frontier;
 mod loader;
 mod matcher;
@@ -95,12 +96,77 @@ fn run(args: Vec<String>) -> i32 {
                 EXIT_USAGE
             }
         },
+        "findings" => match parse_findings_options(&args[1..]) {
+            Ok(options) => match findings::run(&options) {
+                Ok(exit_code) => exit_code,
+                Err(message) => {
+                    eprintln!("Input error: {message}");
+                    EXIT_USAGE
+                }
+            },
+            Err(message) => {
+                eprintln!("{message}");
+                EXIT_USAGE
+            }
+        },
         _ => {
             eprintln!("Unknown command '{command}'.");
             print_usage();
             EXIT_USAGE
         }
     }
+}
+
+fn parse_findings_options(args: &[String]) -> Result<findings::FindingsOptions, String> {
+    let mut options = findings::FindingsOptions::default();
+    let mut index = 0;
+    while index < args.len() {
+        let option = &args[index];
+        if option == "--strict" {
+            options.strict = true;
+            index += 1;
+            continue;
+        }
+        let Some(value) = args.get(index + 1) else {
+            return Err(format!("Missing value for {option}"));
+        };
+        match option.as_str() {
+            "--divergences" => options.divergences = value.clone(),
+            "--frontier" => options.frontier = value.clone(),
+            "--out" => options.output = value.clone(),
+            "--exit-code" => options.exit_code = parse_number(option, value)?,
+            "--base-sha" => options.base_sha = value.clone(),
+            "--pr-sha" => options.pr_sha = value.clone(),
+            "--merge-base" => options.merge_base = value.clone(),
+            "--cache-status" => options.cache_status = value.clone(),
+            "--cache-key" => options.cache_key = value.clone(),
+            "--cache-backend" => options.cache_backend = value.clone(),
+            "--cache-saved-ms" => {
+                options.cache_saved_wall_clock_milliseconds = parse_number(option, value)?
+            }
+            "--build-ms" => options.build_milliseconds = parse_number(option, value)?,
+            "--weave-ms" => options.weave_milliseconds = parse_number(option, value)?,
+            "--run-ms" => options.instrumented_run_milliseconds = parse_number(option, value)?,
+            "--cache-restore-ms" => {
+                options.cache_restore_milliseconds = parse_number(option, value)?
+            }
+            "--cache-store-ms" => options.cache_store_milliseconds = parse_number(option, value)?,
+            "--diff-ms" => options.diff_milliseconds = parse_number(option, value)?,
+            "--frontier-ms" => options.frontier_milliseconds = parse_number(option, value)?,
+            _ => return Err(format!("Unknown option {option}")),
+        }
+        index += 2;
+    }
+    if options.divergences.is_empty() || options.frontier.is_empty() || options.output.is_empty() {
+        return Err(findings_usage().to_owned());
+    }
+    Ok(options)
+}
+
+fn parse_number<T: std::str::FromStr>(option: &str, value: &str) -> Result<T, String> {
+    value
+        .parse()
+        .map_err(|_| format!("Invalid numeric value for {option}: {value}"))
 }
 
 fn parse_frontier_options(args: &[String]) -> Result<frontier::FrontierOptions, String> {
@@ -176,6 +242,11 @@ fn print_usage() {
         "       behaviordiff-engine stream-diff --base1 <dir> --base2 <dir> --base3 <dir> --pr <dir> --out <set.json>"
     );
     println!("       behaviordiff-engine frontier --in <set.json> --changed-files <paths.txt> --out <report.json>");
+    println!("       behaviordiff-engine findings --divergences <set.json> --frontier <report.json> --out <findings.json> --exit-code <code> --base-sha <sha> --pr-sha <sha> --merge-base <sha>");
+}
+
+fn findings_usage() -> &'static str {
+    "usage: findings --divergences <set.json> --frontier <report.json> --out <findings.json> --exit-code <code> --base-sha <sha> --pr-sha <sha> --merge-base <sha> [timing/cache options] [--strict]"
 }
 
 fn diff_usage() -> &'static str {
@@ -237,5 +308,25 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, diff_usage());
+    }
+
+    #[test]
+    fn findings_refs_are_optional_like_the_dotnet_contract() {
+        let options = parse_findings_options(&strings(&[
+            "--divergences",
+            "set.json",
+            "--frontier",
+            "frontier.json",
+            "--out",
+            "findings.json",
+            "--strict",
+        ]))
+        .unwrap();
+
+        assert_eq!(options.divergences, "set.json");
+        assert_eq!(options.frontier, "frontier.json");
+        assert_eq!(options.output, "findings.json");
+        assert!(options.base_sha.is_empty());
+        assert!(options.strict);
     }
 }

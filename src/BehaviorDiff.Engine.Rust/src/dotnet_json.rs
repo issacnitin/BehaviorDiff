@@ -8,6 +8,11 @@ pub(crate) fn to_vec_pretty<T: Serialize>(value: &T) -> Result<Vec<u8>, String> 
     Ok(encoded.into_bytes())
 }
 
+pub(crate) fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
+    let source = serde_json::to_string(value).map_err(|error| error.to_string())?;
+    Ok(encode_strings(&source)?.into_bytes())
+}
+
 fn encode_strings(source: &str) -> Result<String, String> {
     let mut input = source.chars().peekable();
     let mut output = String::with_capacity(source.len());
