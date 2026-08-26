@@ -1,5 +1,5 @@
 use quote::ToTokens;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
@@ -13,7 +13,7 @@ use syn::{
 use toml_edit::{DocumentMut, InlineTable, Item as TomlItem, Value};
 use walkdir::{DirEntry, WalkDir};
 
-const CACHE_VERSION: &str = "behaviordiff.rust-rewrite-cache/2";
+const CACHE_VERSION: &str = "behaviordiff.rust-rewrite-cache/3";
 const ORIGIN_MANIFEST: &str = ".behaviordiff-rust-origin.json";
 const RUNTIME_CARGO: &str = include_str!("../runtime/Cargo.toml");
 const RUNTIME_SOURCE: &str = include_str!("../runtime/src/lib.rs");
@@ -31,23 +31,50 @@ pub struct RewriteReport {
     pub output: PathBuf,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OriginManifest {
-    schema: &'static str,
+    schema: String,
+    package: String,
     source_hash: String,
     source_files: usize,
     rust_files: Vec<OriginFile>,
     instrumented_functions: usize,
     skipped_functions: usize,
     generated_readers: usize,
+    members: Vec<OriginMember>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OriginFile {
     path: String,
     sha256: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OriginMember {
+    method: String,
+    file_path: String,
+    line: u32,
+    status: String,
+    skip_reason: Option<String>,
+    detail: Option<String>,
+    return_kind: String,
+    is_test_root: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FinalizeReport {
+    pub events: usize,
+    pub discovered_members: usize,
+    pub patched_members: usize,
+    pub skipped_members: usize,
+    pub values_digested: u64,
+    pub blocklisted: u64,
+    pub manifest: PathBuf,
 }
 
 pub fn rewrite(source: &Path, cache_root: &Path) -> Result<RewriteReport, String> {
@@ -92,7 +119,8 @@ pub fn rewrite(source: &Path, cache_root: &Path) -> Result<RewriteReport, String
         fs::remove_dir_all(&staging).map_err(|error| error.to_string())?;
     }
 
-    let result = build_cache_entry(&source, &files, &source_hash, &staging);
+    let package = package_name(&source)?;
+    let result = build_cache_entry(&source, &files, &package, &source_hash, &staging);
     if let Err(error) = result {
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
@@ -134,6 +162,7 @@ pub fn rewrite(source: &Path, cache_root: &Path) -> Result<RewriteReport, String
 fn build_cache_entry(
     source: &Path,
     files: &[PathBuf],
+    package: &str,
     source_hash: &str,
     staging: &Path,
 ) -> Result<(), String> {
@@ -141,6 +170,7 @@ fn build_cache_entry(
     let mut instrumented_functions = 0;
     let mut skipped_functions = 0;
     let mut generated_readers = 0;
+    let mut members = Vec::new();
     for relative in files {
         let input = source.join(relative);
         let output = staging.join(relative);
@@ -158,6 +188,7 @@ fn build_cache_entry(
                 instrumenter.visit_file_mut(&mut syntax);
                 instrumented_functions += instrumenter.instrumented;
                 skipped_functions += instrumenter.skipped;
+                members.extend(instrumenter.members);
                 generated_readers += generate_readers(&mut syntax.items, &local_types)?;
             }
             let tokens = syntax.to_token_stream();
@@ -178,17 +209,134 @@ fn build_cache_entry(
     inject_runtime_dependencies(staging, files)?;
 
     let manifest = OriginManifest {
-        schema: CACHE_VERSION,
+        schema: CACHE_VERSION.to_owned(),
+        package: package.to_owned(),
         source_hash: source_hash.to_owned(),
         source_files: files.len(),
         rust_files: origins,
         instrumented_functions,
         skipped_functions,
         generated_readers,
+        members,
     };
     let manifest_text = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
     fs::write(staging.join(ORIGIN_MANIFEST), manifest_text).map_err(|error| error.to_string())?;
     Ok(())
+}
+
+pub fn finalize(origin: &Path, trace: &Path, output: &Path) -> Result<FinalizeReport, String> {
+    let origin: OriginManifest =
+        serde_json::from_slice(&fs::read(origin).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+    if origin.schema != CACHE_VERSION || origin.members.is_empty() {
+        return Err(format!(
+            "Rust origin inventory is invalid or empty: schema={} members={}",
+            origin.schema,
+            origin.members.len()
+        ));
+    }
+    let trace_text = fs::read_to_string(trace).map_err(|error| error.to_string())?;
+    let events = trace_text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str::<serde_json::Value>(line).map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if events.is_empty() {
+        return Err(format!("Rust trace is empty: {}", trace.display()));
+    }
+
+    let patched_members = origin
+        .members
+        .iter()
+        .filter(|item| item.status == "Patched")
+        .count();
+    let skipped_members = origin.members.len() - patched_members;
+    let mut values_digested = 0_u64;
+    let mut depth_limited = 0_u64;
+    let mut blocklisted = 0_u64;
+    let mut rendered_truncated = 0_u64;
+    for event in &events {
+        for prefix in ["args", "return"] {
+            values_digested += event_counter(event, &format!("{prefix}ValuesDigested"));
+            depth_limited += event_counter(event, &format!("{prefix}DepthLimited"));
+            blocklisted += event_counter(event, &format!("{prefix}Blocklisted"));
+            rendered_truncated += event_counter(event, &format!("{prefix}RenderedTruncated"));
+        }
+    }
+
+    let mut lines = Vec::new();
+    lines.push(serde_json::json!({
+        "kind": "run", "schema": "behaviordiff.trace/1", "language": "rust"
+    }));
+    lines.push(serde_json::json!({
+        "kind": "assembly", "assembly": origin.package, "discovery": "RustAstRewrite",
+        "scanned": true, "instrumented": patched_members > 0,
+        "patchedMembers": patched_members, "discoveredMembers": origin.members.len(),
+        "skippedMembers": skipped_members, "patchFailedMembers": 0,
+        "queuedAtMs": 0, "patchedAtMs": 0, "tracedCalls": events.len(),
+        "membersWithExactSource": patched_members, "exactSourcePercent": 100,
+        "sourceRule": "ratio", "sourceUnavailable": false, "sourcePartial": false,
+        "isTestAssembly": false, "detail": "Rust: stable cached AST rewrite"
+    }));
+    for member in &origin.members {
+        lines.push(serde_json::json!({
+            "kind": "member", "assembly": origin.package, "method": member.method,
+            "status": member.status, "skipReason": member.skip_reason,
+            "detail": member.detail, "returnKind": member.return_kind,
+            "isTestRoot": member.is_test_root, "sourceResolution": "debugInfo",
+            "filePath": member.file_path, "line": member.line
+        }));
+    }
+    lines.push(serde_json::json!({
+        "kind": "digest", "valuesDigested": values_digested,
+        "depthLimited": depth_limited, "blocklisted": blocklisted,
+        "errored": 0, "renderedTruncated": rendered_truncated,
+        "unreadableFields": 0, "ambiguousMapEntries": 0
+    }));
+    lines.push(serde_json::json!({
+        "kind": "writer", "enqueued": events.len(), "written": events.len(),
+        "dropped": 0, "capacity": 65536
+    }));
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let text = lines
+        .iter()
+        .map(|line| serde_json::to_string(line).map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?
+        .join("\n")
+        + "\n";
+    fs::write(output, text).map_err(|error| error.to_string())?;
+    Ok(FinalizeReport {
+        events: events.len(),
+        discovered_members: origin.members.len(),
+        patched_members,
+        skipped_members,
+        values_digested,
+        blocklisted,
+        manifest: user_path(output),
+    })
+}
+
+fn event_counter(event: &serde_json::Value, name: &str) -> u64 {
+    event
+        .get(name)
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn package_name(source: &Path) -> Result<String, String> {
+    let text = fs::read_to_string(source.join("Cargo.toml")).map_err(|error| error.to_string())?;
+    let document = text
+        .parse::<DocumentMut>()
+        .map_err(|error| error.to_string())?;
+    document["package"]["name"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| "Rust source Cargo.toml has no package.name".to_owned())
 }
 
 fn generate_readers(items: &mut Vec<Item>, local_types: &HashSet<String>) -> Result<usize, String> {
@@ -533,6 +681,7 @@ struct ExitHookInstrumenter {
     local_types: HashSet<String>,
     instrumented: usize,
     skipped: usize,
+    members: Vec<OriginMember>,
 }
 
 impl ExitHookInstrumenter {
@@ -544,20 +693,41 @@ impl ExitHookInstrumenter {
             local_types,
             instrumented: 0,
             skipped: 0,
+            members: Vec::new(),
         }
     }
 
     fn instrument(&mut self, signature: &syn::Signature, block: &mut Block, is_test_root: bool) {
-        if signature.constness.is_some() || signature.abi.is_some() {
-            self.skipped += 1;
-            return;
-        }
         let method = match &self.context {
             Some(context) => format!("{}::{context}::{}", self.relative_path, signature.ident),
             None => format!("{}::{}", self.relative_path, signature.ident),
         };
         let file = self.relative_path.clone();
         let line = signature.ident.span().start().line as u32;
+        if signature.constness.is_some() || signature.abi.is_some() {
+            self.skipped += 1;
+            self.members.push(OriginMember {
+                method,
+                file_path: file,
+                line,
+                status: "Skipped".to_owned(),
+                skip_reason: Some("UnsupportedShape".to_owned()),
+                detail: Some("Rust: ConstOrExternFunction".to_owned()),
+                return_kind: return_kind(&signature.output),
+                is_test_root,
+            });
+            return;
+        }
+        self.members.push(OriginMember {
+            method: method.clone(),
+            file_path: file.clone(),
+            line,
+            status: "Patched".to_owned(),
+            skip_reason: None,
+            detail: None,
+            return_kind: return_kind(&signature.output),
+            is_test_root,
+        });
         let mut generic_names = self.context_generics.clone();
         generic_names.extend(generic_type_names(&signature.generics));
         let args = argument_capture(signature, &self.local_types, &generic_names);
@@ -587,6 +757,13 @@ impl ExitHookInstrumenter {
             })
         };
         self.instrumented += 1;
+    }
+}
+
+fn return_kind(output: &ReturnType) -> String {
+    match output {
+        ReturnType::Default => "void".to_owned(),
+        ReturnType::Type(_, ty) => ty.to_token_stream().to_string(),
     }
 }
 
