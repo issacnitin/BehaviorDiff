@@ -116,7 +116,7 @@ jobs:
           cargo fmt --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml -- --check
           cargo clippy --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml
-          pwsh -NoProfile -File tools/verify-rust-redaction.ps1
+          pwsh -NoProfile -File tools/verify-rust-redaction.ps1 -WorkDirectory "$env:RUNNER_TEMP\rust-redaction"
 
   conformance:
     name: ${{ matrix.suite }} conformance
