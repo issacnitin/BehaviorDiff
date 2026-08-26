@@ -1,5 +1,6 @@
 use std::env;
 
+mod baseline;
 mod dotnet_json;
 mod engine;
 mod findings;
@@ -109,12 +110,48 @@ fn run(args: Vec<String>) -> i32 {
                 EXIT_USAGE
             }
         },
+        "baseline" => match parse_baseline_options(&args[1..]) {
+            Ok(options) => match baseline::run(&options) {
+                Ok(exit_code) => exit_code,
+                Err(message) => {
+                    eprintln!("Input error: {message}");
+                    EXIT_USAGE
+                }
+            },
+            Err(message) => {
+                eprintln!("{message}");
+                EXIT_USAGE
+            }
+        },
         _ => {
             eprintln!("Unknown command '{command}'.");
             print_usage();
             EXIT_USAGE
         }
     }
+}
+
+fn parse_baseline_options(args: &[String]) -> Result<baseline::BaselineOptions, String> {
+    let mut options = baseline::BaselineOptions::default();
+    let mut index = 0;
+    while index < args.len() {
+        let option = &args[index];
+        let Some(value) = args.get(index + 1) else {
+            return Err(format!("Missing value for {option}"));
+        };
+        match option.as_str() {
+            "--findings" => options.findings = value.clone(),
+            "--baseline" => options.baseline = value.clone(),
+            _ => return Err(format!("Unknown option {option}")),
+        }
+        index += 2;
+    }
+    if options.findings.is_empty() || options.baseline.is_empty() {
+        return Err(
+            "usage: baseline --findings <findings.json> --baseline <baseline.yml>".to_owned(),
+        );
+    }
+    Ok(options)
 }
 
 fn parse_findings_options(args: &[String]) -> Result<findings::FindingsOptions, String> {
@@ -243,6 +280,9 @@ fn print_usage() {
     );
     println!("       behaviordiff-engine frontier --in <set.json> --changed-files <paths.txt> --out <report.json>");
     println!("       behaviordiff-engine findings --divergences <set.json> --frontier <report.json> --out <findings.json> --exit-code <code> --base-sha <sha> --pr-sha <sha> --merge-base <sha>");
+    println!(
+        "       behaviordiff-engine baseline --findings <findings.json> --baseline <baseline.yml>"
+    );
 }
 
 fn findings_usage() -> &'static str {
