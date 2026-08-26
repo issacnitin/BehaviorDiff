@@ -40,7 +40,7 @@ flowchart LR
 | Java | `java.lang.instrument` agent with ASM | Maven, JUnit/TestNG annotations, `src/main/java` and `src/test/java` | Conventional Maven roots are required; static initializers are skipped; collection shape rules require `java.util` module access. |
 | Node / TypeScript | CommonJS require hook and ESM loader with Babel | npm, direct JavaScript locations, TypeScript source maps, Jest/Vitest adapters | npm/package-lock only; workers are out of scope; generators and unsupported callables are skipped; source maps must resolve rather than be guessed. |
 | Go | Stable module-aware AST rewriting into a build cache | `go test`, original `.go` parser positions | Dynamic interface/function boundaries and unrewritten goroutine boundaries are explicit skips. |
-| Rust | Stable `syn`/`quote` rewriting into a SHA-256 build cache | `cargo test`, structural `#[test]` roots, original `.rs` parser positions | Macro expansions, extern/const callables, unions, trait objects, and dependency values are explicit partial/unsupported boundaries; rendered-value redaction is not yet implemented. |
+| Rust | Stable `syn`/`quote` rewriting into a SHA-256 build cache | `cargo test`, structural `#[test]` roots, original `.rs` parser positions | Macro expansions, extern/const callables, unions, trait objects, and dependency values are explicit partial/unsupported boundaries. |
 
 Every tracer emits the same process-scoped NDJSON contract and a reconciled coverage manifest. A member reported instrumented must be capable of emitting, and every module must satisfy `discovered = instrumented + skipped` with zero patch failures.
 
@@ -245,7 +245,7 @@ behaviordiff C:\src\go-service --base origin/main --pr HEAD
 
 ### Rust
 
-Prerequisites: stable Rust/Cargo and standard `#[test]` tests. The CLI rewrites only into an external content-addressed cache, runs tests there, and maps events back to original `.rs` files. The checkout is never mutated. Do not use the Rust tracer for sensitive values yet: digest capture is qualified, but rendering-only secret redaction remains incomplete.
+Prerequisites: stable Rust/Cargo and standard `#[test]` tests. The CLI rewrites only into an external content-addressed cache, runs tests there, and maps events back to original `.rs` files. The checkout is never mutated.
 
 ```powershell
 behaviordiff C:\src\rust-service --base origin/main --pr HEAD
@@ -468,7 +468,6 @@ BehaviorDiff analyzes executed behavior, not all possible behavior. It complemen
 - Node worker threads are out of scope in version 1 and are recorded as `UnsupportedShape` boundaries rather than silently omitted;
 - Node `Map` and `Set` internals cannot be read without iteration, so they are represented by explicit partial markers;
 - Rust opaque/generic/trait-object/union regions and unavailable macro expansions are explicit partial or unsupported boundaries;
-- Rust rendered values do not yet apply the TRACE-FORMAT sensitive-name/content redaction rules; use only with non-sensitive test values until that confidentiality blocker is closed;
 - generated members without a real repository source path cannot be attributed through a normal Git diff;
 - three base runs sample nondeterminism; they do not characterize every possible schedule or external dependency;
 - identical partial digests do not prove equality inside skipped, depth-limited, errored, or truncated regions;

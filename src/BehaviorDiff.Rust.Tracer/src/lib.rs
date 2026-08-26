@@ -501,7 +501,7 @@ fn struct_reader(item: &ItemStruct, local_types: &HashSet<String>) -> Result<Ite
                 context: &mut ::behaviordiff_rust_runtime::CanonicalContext,
                 output: &mut String,
             ) {
-                context.write_value(stringify!(#ident), output, |context, output| {
+                context.write_value(::std::any::type_name::<Self>(), output, |context, output| {
                     output.push_str(stringify!(#ident));
                     output.push('{');
                     #(#fields)*
@@ -588,7 +588,7 @@ fn enum_reader(item: &ItemEnum, local_types: &HashSet<String>) -> Result<ItemImp
                 context: &mut ::behaviordiff_rust_runtime::CanonicalContext,
                 output: &mut String,
             ) {
-                context.write_value(stringify!(#ident), output, |context, output| {
+                context.write_value(::std::any::type_name::<Self>(), output, |context, output| {
                     output.push_str(stringify!(#ident));
                     output.push(':');
                     match self { #(#arms),* }

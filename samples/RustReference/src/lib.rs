@@ -139,10 +139,10 @@ fn run_digest_proofs() {
     assert!(proof_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)));
     assert!(proof_blocklist(Mutex::new(3)));
     assert_eq!(proof_depth(deep_node(12)), 12);
-    assert_eq!(proof_truncation("x".repeat(5000)), 5000);
+    assert_eq!(proof_truncation("x-".repeat(2500)), 5000);
     assert!(proof_unreadable(UnreadableUnion { integer: 5 }));
-    assert_eq!(proof_beyond_cap(format!("{}A", "z".repeat(5000))), 5001);
-    assert_eq!(proof_beyond_cap(format!("{}B", "z".repeat(5000))), 5001);
+    assert_eq!(proof_beyond_cap(format!("{}A", "z-".repeat(2500))), 5001);
+    assert_eq!(proof_beyond_cap(format!("{}B", "z-".repeat(2500))), 5001);
 }
 
 fn operation_00(value: i32) -> i32 {

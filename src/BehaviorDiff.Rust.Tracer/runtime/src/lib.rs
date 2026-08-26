@@ -1,8 +1,8 @@
 mod canonical;
 
 pub use canonical::{
-    capture, capture_arguments, capture_skipped, write_field, CanonicalContext, Canonicalize,
-    CapturedValue,
+    capture, capture_arguments, capture_skipped, redaction_policy, write_field, CanonicalContext,
+    Canonicalize, CapturedValue, RedactionPolicy,
 };
 
 use std::cell::RefCell;
@@ -219,8 +219,9 @@ fn emit(guard: &Guard, outcome: &str, result: Option<&CapturedValue>) {
     } else {
         ""
     };
-    let args = capture_fields("args", guard.args.as_ref());
-    let result = capture_fields("return", result);
+    let redact_path = redaction_policy().is_digest_only_path(guard.file);
+    let args = capture_fields("args", guard.args.as_ref(), redact_path);
+    let result = capture_fields("return", result, redact_path);
     let parent = guard
         .parent_call_id
         .map_or_else(String::new, |value| format!(",\"parentCallId\":{value}"));
@@ -236,14 +237,14 @@ fn emit(guard: &Guard, outcome: &str, result: Option<&CapturedValue>) {
     );
 }
 
-fn capture_fields(prefix: &str, value: Option<&CapturedValue>) -> String {
+fn capture_fields(prefix: &str, value: Option<&CapturedValue>, redact: bool) -> String {
     let Some(value) = value else {
         return String::new();
     };
     format!(
         ",\"{prefix}Digest\":\"{}\",\"{prefix}Rendered\":\"{}\",\"{prefix}Partial\":{},\"{prefix}ValuesDigested\":{},\"{prefix}DepthLimited\":{},\"{prefix}Blocklisted\":{},\"{prefix}RenderedTruncated\":{}",
         escape(&value.digest),
-        escape(&value.rendered),
+        escape(if redact { "<redacted>" } else { &value.rendered }),
         value.partial,
         value.values_digested,
         value.depth_limited,

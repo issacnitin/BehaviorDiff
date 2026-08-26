@@ -2,11 +2,87 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasher, Hash};
 use std::rc::{Rc, Weak as RcWeak};
-use std::sync::{Arc, Weak as ArcWeak};
+use std::sync::{Arc, OnceLock, Weak as ArcWeak};
 use std::time::{Instant, SystemTime};
 
 const MAX_DEPTH: usize = 8;
 const RENDERED_CAP: usize = 4096;
+const DEFAULT_SENSITIVE_NAMES: [&str; 8] = [
+    "password",
+    "token",
+    "secret",
+    "key",
+    "ssn",
+    "email",
+    "auth",
+    "credential",
+];
+static REDACTION_POLICY: OnceLock<RedactionPolicy> = OnceLock::new();
+
+#[derive(Clone, Debug)]
+pub struct RedactionPolicy {
+    sensitive_names: Vec<String>,
+    digest_only_types: Vec<String>,
+    digest_only_paths: Vec<String>,
+}
+
+impl RedactionPolicy {
+    pub fn from_environment() -> Self {
+        let mut sensitive_names = DEFAULT_SENSITIVE_NAMES
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect::<Vec<_>>();
+        sensitive_names.extend(configured_list("BEHAVIORDIFF_REDACT_NAMES"));
+        sensitive_names.sort();
+        sensitive_names.dedup();
+        Self {
+            sensitive_names,
+            digest_only_types: configured_list("BEHAVIORDIFF_REDACT_TYPES"),
+            digest_only_paths: configured_list("BEHAVIORDIFF_REDACT_PATHS")
+                .into_iter()
+                .map(|value| normalize_path(&value))
+                .collect(),
+        }
+    }
+
+    #[cfg(test)]
+    fn new(names: &[&str], types: &[&str], paths: &[&str]) -> Self {
+        Self {
+            sensitive_names: names.iter().map(|value| (*value).to_owned()).collect(),
+            digest_only_types: types.iter().map(|value| (*value).to_owned()).collect(),
+            digest_only_paths: paths.iter().map(|value| normalize_path(value)).collect(),
+        }
+    }
+
+    pub fn is_digest_only_path(&self, path: &str) -> bool {
+        let path = normalize_path(path);
+        self.digest_only_paths.iter().any(|pattern| {
+            path == *pattern
+                || path.starts_with(&format!("{pattern}/"))
+                || path.ends_with(&format!("/{pattern}"))
+                || path.contains(&format!("/{pattern}/"))
+        })
+    }
+
+    fn is_sensitive_name(&self, name: &str) -> bool {
+        let name = name.to_ascii_lowercase();
+        self.sensitive_names
+            .iter()
+            .any(|pattern| name.contains(&pattern.to_ascii_lowercase()))
+    }
+
+    fn is_digest_only_type(&self, name: &str) -> bool {
+        let name = name.to_ascii_lowercase();
+        self.digest_only_types.iter().any(|pattern| {
+            let pattern = pattern.to_ascii_lowercase();
+            name == pattern || name.starts_with(&format!("{pattern}::"))
+        })
+    }
+}
+
+pub fn redaction_policy() -> &'static RedactionPolicy {
+    REDACTION_POLICY.get_or_init(RedactionPolicy::from_environment)
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CapturedValue {
@@ -29,6 +105,7 @@ pub struct CanonicalContext {
     depth_limited: u64,
     blocklisted: u64,
     partial: bool,
+    redaction: Option<RedactionPolicy>,
 }
 
 pub trait Canonicalize {
@@ -36,17 +113,34 @@ pub trait Canonicalize {
 }
 
 pub fn capture<T: Canonicalize + ?Sized>(value: &T) -> CapturedValue {
+    capture_with_policy(value, redaction_policy())
+}
+
+fn capture_with_policy<T: Canonicalize + ?Sized>(
+    value: &T,
+    policy: &RedactionPolicy,
+) -> CapturedValue {
     let mut context = CanonicalContext::default();
     let mut canonical = String::new();
     value.write_canonical(&mut context, &mut canonical);
-    finish_capture(canonical, context)
+    let mut rendered_context = CanonicalContext {
+        redaction: Some(policy.clone()),
+        ..CanonicalContext::default()
+    };
+    let mut rendered = String::new();
+    if policy.is_digest_only_type(std::any::type_name::<T>()) {
+        rendered.push_str("<redacted>");
+    } else {
+        value.write_canonical(&mut rendered_context, &mut rendered);
+    }
+    finish_capture(canonical, rendered, context)
 }
 
 pub fn capture_skipped(detail: &str) -> CapturedValue {
     let mut context = CanonicalContext::default();
     let mut canonical = String::new();
     context.write_skipped(&mut canonical, detail);
-    finish_capture(canonical, context)
+    finish_capture(canonical.clone(), canonical, context)
 }
 
 pub fn capture_arguments(values: Vec<(&'static str, CapturedValue)>) -> Option<CapturedValue> {
@@ -55,33 +149,44 @@ pub fn capture_arguments(values: Vec<(&'static str, CapturedValue)>) -> Option<C
     }
     let mut context = CanonicalContext::default();
     let mut canonical = String::from("args{");
+    let mut rendered = String::from("args{");
+    let policy = redaction_policy();
     for (name, value) in values {
         write_text(&mut canonical, name);
         canonical.push('=');
         canonical.push_str(&value.canonical);
         canonical.push(';');
+        write_text(&mut rendered, name);
+        rendered.push('=');
+        rendered.push_str(if policy.is_sensitive_name(name) {
+            "<redacted>"
+        } else {
+            &value.rendered
+        });
+        rendered.push(';');
         context.values_digested += value.values_digested;
         context.depth_limited += value.depth_limited;
         context.blocklisted += value.blocklisted;
         context.partial |= value.partial;
     }
     canonical.push('}');
-    finish_capture(canonical, context).into()
+    rendered.push('}');
+    finish_capture(canonical, rendered, context).into()
 }
 
-fn finish_capture(canonical: String, context: CanonicalContext) -> CapturedValue {
+fn finish_capture(canonical: String, rendered: String, context: CanonicalContext) -> CapturedValue {
     let digest = format!(
         "sha256:{}",
         hex::encode(Sha256::digest(canonical.as_bytes()))
     );
-    let (rendered, rendered_truncated) = if canonical.len() > RENDERED_CAP {
+    let (rendered, rendered_truncated) = if rendered.len() > RENDERED_CAP {
         let mut end = RENDERED_CAP;
-        while !canonical.is_char_boundary(end) {
+        while !rendered.is_char_boundary(end) {
             end -= 1;
         }
-        (format!("{}<truncated>", &canonical[..end]), 1)
+        (format!("{}<truncated>", &rendered[..end]), 1)
     } else {
-        (canonical.clone(), 0)
+        (rendered, 0)
     };
     CapturedValue {
         digest,
@@ -103,7 +208,11 @@ pub fn write_field<T: Canonicalize + ?Sized>(
 ) {
     write_text(output, name);
     output.push('=');
-    value.write_canonical(context, output);
+    if context.is_sensitive_name(name) || context.is_digest_only_type(std::any::type_name::<T>()) {
+        output.push_str("<redacted>");
+    } else {
+        value.write_canonical(context, output);
+    }
     output.push(';');
 }
 
@@ -115,6 +224,10 @@ impl CanonicalContext {
         write: impl FnOnce(&mut Self, &mut String),
     ) {
         self.values_digested += 1;
+        if self.is_digest_only_type(type_name) {
+            output.push_str("<redacted>");
+            return;
+        }
         if self.depth >= MAX_DEPTH {
             self.depth_limited += 1;
             self.partial = true;
@@ -135,6 +248,10 @@ impl CanonicalContext {
         output: &mut String,
         write: impl FnOnce(&mut Self, &mut String),
     ) {
+        if self.is_digest_only_type(type_name) {
+            output.push_str("<redacted>");
+            return;
+        }
         if let Some(reference) = self.references.get(&address) {
             output.push_str("ref:");
             output.push_str(&reference.to_string());
@@ -159,6 +276,18 @@ impl CanonicalContext {
         output.push_str("<skipped:");
         write_text(output, detail);
         output.push('>');
+    }
+
+    fn is_sensitive_name(&self, name: &str) -> bool {
+        self.redaction
+            .as_ref()
+            .is_some_and(|policy| policy.is_sensitive_name(name))
+    }
+
+    fn is_digest_only_type(&self, name: &str) -> bool {
+        self.redaction
+            .as_ref()
+            .is_some_and(|policy| policy.is_digest_only_type(name))
     }
 }
 
@@ -214,11 +343,90 @@ impl Canonicalize for f64 {
 
 impl Canonicalize for str {
     fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
+        if context.redaction.is_some() && credential_content(self) {
+            output.push_str("<redacted>");
+            return;
+        }
         context.write_value("str", output, |_, output| {
             output.push_str("str:");
             write_text(output, self);
         });
     }
+}
+
+fn configured_list(name: &str) -> Vec<String> {
+    std::env::var(name)
+        .ok()
+        .into_iter()
+        .flat_map(|value| {
+            value
+                .split([';', ','])
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn normalize_path(value: &str) -> String {
+    value
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_ascii_lowercase()
+}
+
+fn credential_content(value: &str) -> bool {
+    jwt(value) || aws_key(value) || pem(value) || long_base64(value)
+}
+
+fn jwt(value: &str) -> bool {
+    value.split_whitespace().any(|word| {
+        let word = word.trim_matches(|character: char| {
+            !character.is_ascii_alphanumeric()
+                && character != '_'
+                && character != '-'
+                && character != '.'
+        });
+        let segments = word.split('.').collect::<Vec<_>>();
+        segments.len() == 3
+            && segments[0].starts_with("eyJ")
+            && segments.iter().all(|segment| {
+                segment.len() >= 10
+                    && segment
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+            })
+    })
+}
+
+fn aws_key(value: &str) -> bool {
+    value.as_bytes().windows(20).any(|window| {
+        (&window[..4] == b"AKIA" || &window[..4] == b"ASIA")
+            && window[4..]
+                .iter()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+    })
+}
+
+fn pem(value: &str) -> bool {
+    value.contains("-----BEGIN ")
+        && (value.contains("PRIVATE KEY-----") || value.contains("CERTIFICATE-----"))
+}
+
+fn long_base64(value: &str) -> bool {
+    let mut run = 0;
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || byte == b'+' || byte == b'/' {
+            run += 1;
+            if run >= 40 {
+                return true;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    false
 }
 
 impl Canonicalize for String {
@@ -293,7 +501,9 @@ impl<T: Canonicalize + ?Sized> Canonicalize for RcWeak<T> {
     fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
         match self.upgrade() {
             Some(value) => value.write_canonical(context, output),
-            None => context.write_value("Weak", output, |_, output| output.push_str("Weak:dropped")),
+            None => {
+                context.write_value("Weak", output, |_, output| output.push_str("Weak:dropped"))
+            }
         }
     }
 }
@@ -302,20 +512,26 @@ impl<T: Canonicalize + ?Sized> Canonicalize for ArcWeak<T> {
     fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
         match self.upgrade() {
             Some(value) => value.write_canonical(context, output),
-            None => context.write_value("Weak", output, |_, output| output.push_str("Weak:dropped")),
+            None => {
+                context.write_value("Weak", output, |_, output| output.push_str("Weak:dropped"))
+            }
         }
     }
 }
 
 impl Canonicalize for SystemTime {
     fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
-        context.write_value("SystemTime", output, |_, output| output.push_str("SystemTime:normalized"));
+        context.write_value("SystemTime", output, |_, output| {
+            output.push_str("SystemTime:normalized")
+        });
     }
 }
 
 impl Canonicalize for Instant {
     fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
-        context.write_value("Instant", output, |_, output| output.push_str("Instant:normalized"));
+        context.write_value("Instant", output, |_, output| {
+            output.push_str("Instant:normalized")
+        });
     }
 }
 
@@ -540,6 +756,18 @@ fn write_text(output: &mut String, value: &str) {
 mod tests {
     use super::*;
 
+    struct SecretEnvelope(String);
+
+    impl Canonicalize for SecretEnvelope {
+        fn write_canonical(&self, context: &mut CanonicalContext, output: &mut String) {
+            context.write_value(std::any::type_name::<Self>(), output, |context, output| {
+                output.push_str("SecretEnvelope{");
+                write_field(context, output, "value", &self.0);
+                output.push('}');
+            });
+        }
+    }
+
     #[test]
     fn unordered_collections_are_stable_and_shape_sensitive() {
         let left = HashMap::from([("two", 2_i32), ("one", 1_i32)]);
@@ -579,11 +807,65 @@ mod tests {
 
     #[test]
     fn full_digest_precedes_rendering_cap() {
-        let first = capture(&format!("{}A", "x".repeat(RENDERED_CAP + 10)));
-        let second = capture(&format!("{}B", "x".repeat(RENDERED_CAP + 10)));
+        let first = capture(&format!("{}A", "x-".repeat(RENDERED_CAP)));
+        let second = capture(&format!("{}B", "x-".repeat(RENDERED_CAP)));
         assert_ne!(first.digest, second.digest);
         assert_eq!(first.rendered, second.rendered);
         assert_eq!(first.rendered_truncated, 1);
         assert!(first.partial);
+    }
+
+    #[test]
+    fn sensitive_parameter_name_redacts_rendering_but_not_digest() {
+        let policy = RedactionPolicy::new(&[], &[], &[]);
+        let first = capture_arguments(vec![(
+            "password",
+            capture_with_policy("first-password", &policy),
+        )])
+        .unwrap();
+        let second = capture_arguments(vec![(
+            "password",
+            capture_with_policy("second-password", &policy),
+        )])
+        .unwrap();
+        assert_eq!(first.rendered, "args{\"password\"=<redacted>;}");
+        assert_eq!(first.rendered, second.rendered);
+        assert_ne!(first.digest, second.digest);
+    }
+
+    #[test]
+    fn credential_content_redacts_rendering_but_not_digest() {
+        let policy = RedactionPolicy::new(&[], &[], &[]);
+        let first = capture_with_policy("AKIA1234567890ABCDEF", &policy);
+        let second = capture_with_policy("AKIAFEDCBA0987654321", &policy);
+        assert_eq!(first.rendered, "<redacted>");
+        assert_eq!(first.rendered, second.rendered);
+        assert_ne!(first.digest, second.digest);
+    }
+
+    #[test]
+    fn all_credential_shapes_and_configured_names_are_recognized() {
+        let policy = RedactionPolicy::new(&["pin"], &[], &[]);
+        assert!(policy.is_sensitive_name("customer_pin_code"));
+        for value in [
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature_part_123",
+            "AKIA1234567890ABCDEF",
+            "-----BEGIN PRIVATE KEY-----",
+            "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY3ODkw",
+        ] {
+            assert_eq!(capture_with_policy(value, &policy).rendered, "<redacted>");
+        }
+    }
+
+    #[test]
+    fn configured_type_and_path_are_digest_only() {
+        let type_name = std::any::type_name::<SecretEnvelope>();
+        let policy = RedactionPolicy::new(&[], &[type_name], &["src/secrets"]);
+        let first = capture_with_policy(&SecretEnvelope("first".to_owned()), &policy);
+        let second = capture_with_policy(&SecretEnvelope("second".to_owned()), &policy);
+        assert_eq!(first.rendered, "<redacted>");
+        assert_ne!(first.digest, second.digest);
+        assert!(policy.is_digest_only_path("repo/src/secrets/token.rs"));
+        assert!(!policy.is_digest_only_path("repo/src/public/token.rs"));
     }
 }

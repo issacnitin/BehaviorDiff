@@ -7,6 +7,7 @@ All notable changes to BehaviorDiff are documented here.
 ### Added
 
 - Thin Rust launcher owning argument routing, repository config loading, language detection, and managed process spawning.
+- Rust tracer rendering redaction for sensitive names, credential-shaped content, configured types, and configured paths while retaining real-value digests.
 
 ## 0.2.0 - 2026-08-26
 
