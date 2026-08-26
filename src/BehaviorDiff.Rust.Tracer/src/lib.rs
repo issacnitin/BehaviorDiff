@@ -13,7 +13,7 @@ use syn::{
 use toml_edit::{DocumentMut, InlineTable, Item as TomlItem, Value};
 use walkdir::{DirEntry, WalkDir};
 
-const CACHE_VERSION: &str = "behaviordiff.rust-rewrite-cache/4";
+const CACHE_VERSION: &str = "behaviordiff.rust-rewrite-cache/5";
 const ORIGIN_MANIFEST: &str = ".behaviordiff-rust-origin.json";
 const RUNTIME_CARGO: &str = include_str!("../runtime/Cargo.toml");
 const RUNTIME_SOURCE: &str = include_str!("../runtime/src/lib.rs");
@@ -187,6 +187,24 @@ fn build_cache_entry(
                 let mut instrumenter =
                     ExitHookInstrumenter::new(slash(relative), local_types.clone());
                 instrumenter.visit_file_mut(&mut syntax);
+                if instrumenter.members.is_empty() {
+                    let stem = relative
+                        .file_stem()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or("source");
+                    instrumenter.members.push(OriginMember {
+                        method: format!("{stem}.__file_boundary()"),
+                        file_path: slash(relative),
+                        line: 1,
+                        status: "Skipped".to_owned(),
+                        skip_reason: Some("Unobservable".to_owned()),
+                        detail: Some("Rust: NoCallableSourceFile".to_owned()),
+                        return_kind: "void".to_owned(),
+                        is_test_root: false,
+                        generic_template: false,
+                    });
+                    instrumenter.skipped += 1;
+                }
                 instrumented_functions += instrumenter.instrumented;
                 skipped_functions += instrumenter.skipped;
                 members.extend(instrumenter.members);

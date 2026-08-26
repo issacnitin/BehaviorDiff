@@ -1,0 +1,123 @@
+fn coverage_000(value: i32) -> i32 { value + 0 }
+fn coverage_001(value: i32) -> i32 { value + 1 }
+fn coverage_002(value: i32) -> i32 { value + 2 }
+fn coverage_003(value: i32) -> i32 { value + 3 }
+fn coverage_004(value: i32) -> i32 { value + 4 }
+fn coverage_005(value: i32) -> i32 { value + 5 }
+fn coverage_006(value: i32) -> i32 { value + 6 }
+fn coverage_007(value: i32) -> i32 { value + 7 }
+fn coverage_008(value: i32) -> i32 { value + 8 }
+fn coverage_009(value: i32) -> i32 { value + 9 }
+fn coverage_010(value: i32) -> i32 { value + 10 }
+fn coverage_011(value: i32) -> i32 { value + 11 }
+fn coverage_012(value: i32) -> i32 { value + 12 }
+fn coverage_013(value: i32) -> i32 { value + 13 }
+fn coverage_014(value: i32) -> i32 { value + 14 }
+fn coverage_015(value: i32) -> i32 { value + 15 }
+fn coverage_016(value: i32) -> i32 { value + 16 }
+fn coverage_017(value: i32) -> i32 { value + 17 }
+fn coverage_018(value: i32) -> i32 { value + 18 }
+fn coverage_019(value: i32) -> i32 { value + 19 }
+fn coverage_020(value: i32) -> i32 { value + 20 }
+fn coverage_021(value: i32) -> i32 { value + 21 }
+fn coverage_022(value: i32) -> i32 { value + 22 }
+fn coverage_023(value: i32) -> i32 { value + 23 }
+fn coverage_024(value: i32) -> i32 { value + 24 }
+fn coverage_025(value: i32) -> i32 { value + 25 }
+fn coverage_026(value: i32) -> i32 { value + 26 }
+fn coverage_027(value: i32) -> i32 { value + 27 }
+fn coverage_028(value: i32) -> i32 { value + 28 }
+fn coverage_029(value: i32) -> i32 { value + 29 }
+fn coverage_030(value: i32) -> i32 { value + 30 }
+fn coverage_031(value: i32) -> i32 { value + 31 }
+fn coverage_032(value: i32) -> i32 { value + 32 }
+fn coverage_033(value: i32) -> i32 { value + 33 }
+fn coverage_034(value: i32) -> i32 { value + 34 }
+fn coverage_035(value: i32) -> i32 { value + 35 }
+fn coverage_036(value: i32) -> i32 { value + 36 }
+fn coverage_037(value: i32) -> i32 { value + 37 }
+fn coverage_038(value: i32) -> i32 { value + 38 }
+fn coverage_039(value: i32) -> i32 { value + 39 }
+fn coverage_040(value: i32) -> i32 { value + 40 }
+fn coverage_041(value: i32) -> i32 { value + 41 }
+fn coverage_042(value: i32) -> i32 { value + 42 }
+fn coverage_043(value: i32) -> i32 { value + 43 }
+fn coverage_044(value: i32) -> i32 { value + 44 }
+fn coverage_045(value: i32) -> i32 { value + 45 }
+fn coverage_046(value: i32) -> i32 { value + 46 }
+fn coverage_047(value: i32) -> i32 { value + 47 }
+fn coverage_048(value: i32) -> i32 { value + 48 }
+fn coverage_049(value: i32) -> i32 { value + 49 }
+fn coverage_050(value: i32) -> i32 { value + 50 }
+fn coverage_051(value: i32) -> i32 { value + 51 }
+fn coverage_052(value: i32) -> i32 { value + 52 }
+fn coverage_053(value: i32) -> i32 { value + 53 }
+fn coverage_054(value: i32) -> i32 { value + 54 }
+fn coverage_055(value: i32) -> i32 { value + 55 }
+fn coverage_056(value: i32) -> i32 { value + 56 }
+fn coverage_057(value: i32) -> i32 { value + 57 }
+fn coverage_058(value: i32) -> i32 { value + 58 }
+fn coverage_059(value: i32) -> i32 { value + 59 }
+fn coverage_060(value: i32) -> i32 { value + 60 }
+fn coverage_061(value: i32) -> i32 { value + 61 }
+fn coverage_062(value: i32) -> i32 { value + 62 }
+fn coverage_063(value: i32) -> i32 { value + 63 }
+fn coverage_064(value: i32) -> i32 { value + 64 }
+fn coverage_065(value: i32) -> i32 { value + 65 }
+fn coverage_066(value: i32) -> i32 { value + 66 }
+fn coverage_067(value: i32) -> i32 { value + 67 }
+fn coverage_068(value: i32) -> i32 { value + 68 }
+fn coverage_069(value: i32) -> i32 { value + 69 }
+fn coverage_070(value: i32) -> i32 { value + 70 }
+fn coverage_071(value: i32) -> i32 { value + 71 }
+fn coverage_072(value: i32) -> i32 { value + 72 }
+fn coverage_073(value: i32) -> i32 { value + 73 }
+fn coverage_074(value: i32) -> i32 { value + 74 }
+fn coverage_075(value: i32) -> i32 { value + 75 }
+fn coverage_076(value: i32) -> i32 { value + 76 }
+fn coverage_077(value: i32) -> i32 { value + 77 }
+fn coverage_078(value: i32) -> i32 { value + 78 }
+fn coverage_079(value: i32) -> i32 { value + 79 }
+fn coverage_080(value: i32) -> i32 { value + 80 }
+fn coverage_081(value: i32) -> i32 { value + 81 }
+fn coverage_082(value: i32) -> i32 { value + 82 }
+fn coverage_083(value: i32) -> i32 { value + 83 }
+fn coverage_084(value: i32) -> i32 { value + 84 }
+fn coverage_085(value: i32) -> i32 { value + 85 }
+fn coverage_086(value: i32) -> i32 { value + 86 }
+fn coverage_087(value: i32) -> i32 { value + 87 }
+fn coverage_088(value: i32) -> i32 { value + 88 }
+fn coverage_089(value: i32) -> i32 { value + 89 }
+fn coverage_090(value: i32) -> i32 { value + 90 }
+fn coverage_091(value: i32) -> i32 { value + 91 }
+fn coverage_092(value: i32) -> i32 { value + 92 }
+fn coverage_093(value: i32) -> i32 { value + 93 }
+fn coverage_094(value: i32) -> i32 { value + 94 }
+fn coverage_095(value: i32) -> i32 { value + 95 }
+fn coverage_096(value: i32) -> i32 { value + 96 }
+fn coverage_097(value: i32) -> i32 { value + 97 }
+fn coverage_098(value: i32) -> i32 { value + 98 }
+fn coverage_099(value: i32) -> i32 { value + 99 }
+
+pub fn exercise_coverage() -> i32 {
+    coverage_000(1) + coverage_001(1) + coverage_002(1) + coverage_003(1) + coverage_004(1)
+        + coverage_005(1) + coverage_006(1) + coverage_007(1) + coverage_008(1) + coverage_009(1)
+        + coverage_010(1) + coverage_011(1) + coverage_012(1) + coverage_013(1) + coverage_014(1)
+        + coverage_015(1) + coverage_016(1) + coverage_017(1) + coverage_018(1) + coverage_019(1)
+        + coverage_020(1) + coverage_021(1) + coverage_022(1) + coverage_023(1) + coverage_024(1)
+        + coverage_025(1) + coverage_026(1) + coverage_027(1) + coverage_028(1) + coverage_029(1)
+        + coverage_030(1) + coverage_031(1) + coverage_032(1) + coverage_033(1) + coverage_034(1)
+        + coverage_035(1) + coverage_036(1) + coverage_037(1) + coverage_038(1) + coverage_039(1)
+        + coverage_040(1) + coverage_041(1) + coverage_042(1) + coverage_043(1) + coverage_044(1)
+        + coverage_045(1) + coverage_046(1) + coverage_047(1) + coverage_048(1) + coverage_049(1)
+        + coverage_050(1) + coverage_051(1) + coverage_052(1) + coverage_053(1) + coverage_054(1)
+        + coverage_055(1) + coverage_056(1) + coverage_057(1) + coverage_058(1) + coverage_059(1)
+        + coverage_060(1) + coverage_061(1) + coverage_062(1) + coverage_063(1) + coverage_064(1)
+        + coverage_065(1) + coverage_066(1) + coverage_067(1) + coverage_068(1) + coverage_069(1)
+        + coverage_070(1) + coverage_071(1) + coverage_072(1) + coverage_073(1) + coverage_074(1)
+        + coverage_075(1) + coverage_076(1) + coverage_077(1) + coverage_078(1) + coverage_079(1)
+        + coverage_080(1) + coverage_081(1) + coverage_082(1) + coverage_083(1) + coverage_084(1)
+        + coverage_085(1) + coverage_086(1) + coverage_087(1) + coverage_088(1) + coverage_089(1)
+        + coverage_090(1) + coverage_091(1) + coverage_092(1) + coverage_093(1) + coverage_094(1)
+        + coverage_095(1) + coverage_096(1) + coverage_097(1) + coverage_098(1) + coverage_099(1)
+}
