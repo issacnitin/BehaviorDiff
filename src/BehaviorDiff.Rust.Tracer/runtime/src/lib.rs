@@ -5,13 +5,37 @@ pub use canonical::{
     CapturedValue,
 };
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 static NEXT_CALL_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 static WRITER: OnceLock<Mutex<Option<File>>> = OnceLock::new();
+
+thread_local! {
+    static CONTEXT: RefCell<TraceContext> = RefCell::new(TraceContext::new());
+    static THREAD_ID: u64 = NEXT_THREAD_ID.fetch_add(1, Ordering::Relaxed);
+}
+
+struct TraceContext {
+    stack: Vec<u64>,
+    test_id: Option<String>,
+    ordinals: HashMap<(String, &'static str), i32>,
+}
+
+impl TraceContext {
+    fn new() -> Self {
+        Self {
+            stack: Vec::new(),
+            test_id: None,
+            ordinals: HashMap::new(),
+        }
+    }
+}
 
 pub struct Guard {
     call_id: u64,
@@ -19,6 +43,12 @@ pub struct Guard {
     file: &'static str,
     line: u32,
     args: Option<CapturedValue>,
+    test_id: String,
+    parent_call_id: Option<u64>,
+    call_depth: i32,
+    ordinal: i32,
+    thread_id: u64,
+    is_test_root: bool,
     completed: bool,
 }
 
@@ -27,13 +57,42 @@ pub fn enter(
     file: &'static str,
     line: u32,
     args: Option<CapturedValue>,
+    is_test_root: bool,
 ) -> Guard {
+    let call_id = NEXT_CALL_ID.fetch_add(1, Ordering::Relaxed);
+    let (test_id, parent_call_id, call_depth, ordinal) = CONTEXT.with(|context| {
+        let mut context = context.borrow_mut();
+        if is_test_root {
+            context.test_id = Some(method.to_owned());
+        }
+        let test_id = context
+            .test_id
+            .clone()
+            .unwrap_or_else(|| "(no-test)".to_owned());
+        let parent_call_id = context.stack.last().copied();
+        let call_depth = context.stack.len() as i32;
+        let ordinal = context
+            .ordinals
+            .entry((test_id.clone(), method))
+            .or_insert(0);
+        let current = *ordinal;
+        *ordinal += 1;
+        context.stack.push(call_id);
+        (test_id, parent_call_id, call_depth, current)
+    });
+    let thread_id = THREAD_ID.with(|value| *value);
     Guard {
-        call_id: NEXT_CALL_ID.fetch_add(1, Ordering::Relaxed),
+        call_id,
         method,
         file,
         line,
         args,
+        test_id,
+        parent_call_id,
+        call_depth,
+        ordinal,
+        thread_id,
+        is_test_root,
         completed: false,
     }
 }
@@ -41,15 +100,26 @@ pub fn enter(
 impl Guard {
     pub fn complete(mut self, result: Option<CapturedValue>) {
         self.completed = true;
-        emit(
-            self.call_id,
-            self.method,
-            self.file,
-            self.line,
-            "normal",
-            self.args.as_ref(),
-            result.as_ref(),
-        );
+        emit(&self, "normal", result.as_ref());
+        self.leave();
+    }
+
+    fn leave(&self) {
+        CONTEXT.with(|context| {
+            let mut context = context.borrow_mut();
+            if context.stack.last() == Some(&self.call_id) {
+                context.stack.pop();
+            } else if let Some(index) = context
+                .stack
+                .iter()
+                .rposition(|value| *value == self.call_id)
+            {
+                context.stack.remove(index);
+            }
+            if self.is_test_root {
+                context.test_id = None;
+            }
+        });
     }
 }
 
@@ -63,27 +133,12 @@ impl Drop for Guard {
         } else {
             "cancelled"
         };
-        emit(
-            self.call_id,
-            self.method,
-            self.file,
-            self.line,
-            outcome,
-            self.args.as_ref(),
-            None,
-        );
+        emit(self, outcome, None);
+        self.leave();
     }
 }
 
-fn emit(
-    call_id: u64,
-    method: &str,
-    file: &str,
-    line: u32,
-    outcome: &str,
-    args: Option<&CapturedValue>,
-    result: Option<&CapturedValue>,
-) {
+fn emit(guard: &Guard, outcome: &str, result: Option<&CapturedValue>) {
     let writer = WRITER.get_or_init(|| Mutex::new(open_trace()));
     let Ok(mut writer) = writer.lock() else {
         return;
@@ -91,8 +146,9 @@ fn emit(
     let Some(stream) = writer.as_mut() else {
         return;
     };
-    let method = escape(method);
-    let file = escape(file);
+    let method = escape(guard.method);
+    let file = escape(guard.file);
+    let test_id = escape(&guard.test_id);
     let exception = if outcome == "panic" {
         ",\"exceptionType\":\"RustPanic\""
     } else if outcome == "cancelled" {
@@ -100,11 +156,20 @@ fn emit(
     } else {
         ""
     };
-    let args = capture_fields("args", args);
+    let args = capture_fields("args", guard.args.as_ref());
     let result = capture_fields("return", result);
+    let parent = guard
+        .parent_call_id
+        .map_or_else(String::new, |value| format!(",\"parentCallId\":{value}"));
+    let call_id = guard.call_id;
+    let line = guard.line;
+    let call_depth = guard.call_depth;
+    let ordinal = guard.ordinal;
+    let thread_id = guard.thread_id;
+    let is_test_root = guard.is_test_root;
     let _ = writeln!(
         stream,
-        "{{\"schema\":\"behaviordiff.rust-exit-hook/2\",\"callId\":{call_id},\"method\":\"{method}\",\"filePath\":\"{file}\",\"filePathResolution\":\"debugInfo\",\"line\":{line},\"outcome\":\"{outcome}\"{args}{result}{exception}}}"
+        "{{\"schema\":\"behaviordiff.trace/1\",\"testId\":\"{test_id}\",\"methodFullName\":\"{method}\",\"filePath\":\"{file}\",\"filePathResolution\":\"debugInfo\",\"line\":{line},\"callDepth\":{call_depth}{parent},\"callId\":{call_id},\"ordinal\":{ordinal},\"threadId\":{thread_id},\"isHarness\":{is_test_root},\"outcome\":\"{outcome}\"{args}{result}{exception}}}"
     );
 }
 

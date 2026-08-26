@@ -547,7 +547,7 @@ impl ExitHookInstrumenter {
         }
     }
 
-    fn instrument(&mut self, signature: &syn::Signature, block: &mut Block) {
+    fn instrument(&mut self, signature: &syn::Signature, block: &mut Block, is_test_root: bool) {
         if signature.constness.is_some() || signature.abi.is_some() {
             self.skipped += 1;
             return;
@@ -566,7 +566,7 @@ impl ExitHookInstrumenter {
         *block = if signature.asyncness.is_some() {
             parse_quote!({
                 let __behaviordiff_args = ::behaviordiff_rust_runtime::capture_arguments(vec![#(#args),*]);
-                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line, __behaviordiff_args);
+                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line, __behaviordiff_args, #is_test_root);
                 let __behaviordiff_result = (async move #original).await;
                 let __behaviordiff_return = #result;
                 __behaviordiff_guard.complete(__behaviordiff_return);
@@ -575,7 +575,7 @@ impl ExitHookInstrumenter {
         } else {
             parse_quote!({
                 let __behaviordiff_args = ::behaviordiff_rust_runtime::capture_arguments(vec![#(#args),*]);
-                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line, __behaviordiff_args);
+                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line, __behaviordiff_args, #is_test_root);
                 let __behaviordiff_result = (|| #original)();
                 let __behaviordiff_return = #result;
                 __behaviordiff_guard.complete(__behaviordiff_return);
@@ -589,18 +589,22 @@ impl ExitHookInstrumenter {
 impl VisitMut for ExitHookInstrumenter {
     fn visit_item_fn_mut(&mut self, function: &mut ItemFn) {
         visit_mut::visit_item_fn_mut(self, function);
-        self.instrument(&function.sig, &mut function.block);
+        self.instrument(
+            &function.sig,
+            &mut function.block,
+            has_test_attribute(&function.attrs),
+        );
     }
 
     fn visit_impl_item_fn_mut(&mut self, function: &mut ImplItemFn) {
         visit_mut::visit_impl_item_fn_mut(self, function);
-        self.instrument(&function.sig, &mut function.block);
+        self.instrument(&function.sig, &mut function.block, false);
     }
 
     fn visit_trait_item_fn_mut(&mut self, function: &mut TraitItemFn) {
         visit_mut::visit_trait_item_fn_mut(self, function);
         if let Some(block) = &mut function.default {
-            self.instrument(&function.sig, block);
+            self.instrument(&function.sig, block, false);
         }
     }
 
@@ -624,6 +628,12 @@ impl VisitMut for ExitHookInstrumenter {
         visit_mut::visit_item_trait_mut(self, item);
         self.context = previous;
     }
+}
+
+fn has_test_attribute(attributes: &[syn::Attribute]) -> bool {
+    attributes
+        .iter()
+        .any(|attribute| attribute.path().is_ident("test"))
 }
 
 fn argument_capture(

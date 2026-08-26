@@ -66,9 +66,9 @@ $events = @($lines | ForEach-Object { $_ | ConvertFrom-Json })
 $normal = @($events | Where-Object outcome -ceq 'normal')
 $panic = @($events | Where-Object outcome -ceq 'panic')
 $cancelled = @($events | Where-Object outcome -ceq 'cancelled')
-$question = @($events | Where-Object method -like '*question_mark_return')
-$asyncCompletion = @($events | Where-Object method -like '*async_completion')
-$asyncCancellation = @($events | Where-Object method -like '*async_cancellation')
+$question = @($events | Where-Object methodFullName -like '*question_mark_return')
+$asyncCompletion = @($events | Where-Object methodFullName -like '*async_completion')
+$asyncCancellation = @($events | Where-Object methodFullName -like '*async_cancellation')
 if ($events.Count -ne 15 -or $normal.Count -ne 13 -or $panic.Count -ne 1 -or $cancelled.Count -ne 1) {
     throw "Rust exit counts differ: total=$($events.Count) normal=$($normal.Count) panic=$($panic.Count) cancelled=$($cancelled.Count)"
 }
