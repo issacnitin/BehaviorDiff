@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -68,6 +69,31 @@ namespace BehaviorDiff.Cli
         internal static LoadedRepositoryConfig Load(string repository)
         {
             string root = Path.GetFullPath(repository);
+            string? launcherConfig = Environment.GetEnvironmentVariable("BEHAVIORDIFF_LAUNCHER_CONFIG");
+            if (!string.IsNullOrWhiteSpace(launcherConfig))
+            {
+                try
+                {
+                    var envelope = JsonSerializer.Deserialize<LauncherConfigEnvelope>(
+                        File.ReadAllText(launcherConfig),
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                        ?? throw new CliException("BehaviorDiff launcher config is empty: " + launcherConfig, ExitCodes.RunInvalid);
+                    Validate(envelope.Config, root, envelope.ConfigPath);
+                    return new LoadedRepositoryConfig
+                    {
+                        RepositoryRoot = root,
+                        Path = string.IsNullOrWhiteSpace(envelope.ConfigPath)
+                            ? string.Empty
+                            : Path.Combine(root, ".behaviordiff", "config.yml"),
+                        Value = envelope.Config,
+                    };
+                }
+                catch (JsonException ex)
+                {
+                    throw new CliException("BehaviorDiff launcher config JSON is malformed: " + ex.Message, ExitCodes.RunInvalid);
+                }
+            }
+
             string path = Path.Combine(root, ".behaviordiff", "config.yml");
             if (!File.Exists(path))
             {
@@ -90,6 +116,13 @@ namespace BehaviorDiff.Cli
             {
                 throw new CliException("BehaviorDiff config YAML is malformed: " + ex.Message, ExitCodes.RunInvalid);
             }
+        }
+
+        private sealed class LauncherConfigEnvelope
+        {
+            public string ConfigPath { get; set; } = string.Empty;
+
+            public RepositoryConfig Config { get; set; } = new();
         }
 
         internal static string ResolveWorkDirectory(LoadedRepositoryConfig loaded)

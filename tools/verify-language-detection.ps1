@@ -1,4 +1,7 @@
 #requires -Version 7.0
+[CmdletBinding()]
+param([string]$BehaviorDiffCommand)
+
 $ErrorActionPreference = 'Stop'
 
 $repo = Split-Path -Parent $PSScriptRoot
@@ -6,7 +9,11 @@ $project = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
 $work = Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-language-detection-{0}" -f [Guid]::NewGuid().ToString('N'))
 
 function Invoke-Detect([string]$directory) {
-    $output = @(& dotnet run --project $project -c Release --no-build -- detect $directory 2>&1)
+    $output = if ([string]::IsNullOrWhiteSpace($BehaviorDiffCommand)) {
+        @(& dotnet run --project $project -c Release --no-build -- detect $directory 2>&1)
+    } else {
+        @(& $BehaviorDiffCommand detect $directory 2>&1)
+    }
     [pscustomobject]@{ Exit = $LASTEXITCODE; Text = $output -join "`n" }
 }
 

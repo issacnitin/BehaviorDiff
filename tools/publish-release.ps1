@@ -34,6 +34,7 @@ $staging = Join-Path $output "staging/$RuntimeIdentifier"
 $layout = Join-Path $output "layout/$RuntimeIdentifier"
 $tracers = Join-Path $staging 'tracers'
 $engines = Join-Path $staging 'engines/rust'
+$launcher = Join-Path $staging 'launcher'
 Remove-Item $staging, $layout -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $staging, $layout, $output -Force | Out-Null
 
@@ -41,6 +42,8 @@ New-Item -ItemType Directory -Path $staging, $layout, $output -Force | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Tracer staging failed with exit code $LASTEXITCODE" }
 & (Join-Path $PSScriptRoot 'Stage-RustEngine.ps1') -OutputDirectory $engines
 if ($LASTEXITCODE -ne 0) { throw "Rust engine staging failed with exit code $LASTEXITCODE" }
+& (Join-Path $PSScriptRoot 'Stage-RustLauncher.ps1') -OutputDirectory $launcher
+if ($LASTEXITCODE -ne 0) { throw "Rust launcher staging failed with exit code $LASTEXITCODE" }
 
 $trim = if ($Trimmed) { 'true' } else { 'false' }
 & dotnet publish (Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj') `
@@ -52,7 +55,9 @@ Copy-Item $tracers (Join-Path $layout 'tracers') -Recurse -Force
 Copy-Item $engines (Join-Path $layout 'engines/rust') -Recurse -Force
 
 $executable = Join-Path $layout $(if ($IsWindows) { 'behaviordiff.exe' } else { 'behaviordiff' })
-if (-not (Test-Path $executable -PathType Leaf)) { throw "Published CLI was not found: $executable" }
+$managed = Join-Path $layout $(if ($IsWindows) { 'behaviordiff-managed.exe' } else { 'behaviordiff-managed' })
+Move-Item $executable $managed -Force
+Copy-Item (Join-Path $launcher "$RuntimeIdentifier/$(Split-Path -Leaf $executable)") $executable -Force
 & $executable --help | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Published CLI --help failed with exit code $LASTEXITCODE" }
 
@@ -60,6 +65,7 @@ $required = @(
     'behaviordiff-weaver.dll',
     'behaviordiff-weaver.deps.json',
     'behaviordiff-weaver.runtimeconfig.json',
+    $(Split-Path -Leaf $managed),
     'BehaviorDiff.Contracts.dll',
     'BehaviorDiff.Tracer.dll',
     'Mono.Cecil.dll',
@@ -96,6 +102,7 @@ $metrics = [ordered]@{
     publicRuntimeIdentifier = $publicRid
     trimmed = $Trimmed.IsPresent
     executableBytes = (Get-Item $executable).Length
+    managedBytes = (Get-Item $managed).Length
     layoutBytes = $layoutBytes
     fileCount = $files.Count
     archive = [IO.Path]::GetFileName($archive)

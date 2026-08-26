@@ -1,6 +1,9 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([string]$WorkDirectory)
+param(
+    [string]$WorkDirectory,
+    [string]$BehaviorDiffCommand
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -15,6 +18,14 @@ $findings = Join-Path $work 'findings.json'
 $project = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
 $cli = Join-Path $repo 'src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll'
 $previousNodeTracer = $env:BEHAVIORDIFF_NODE_TRACER
+
+function Invoke-BehaviorDiff([string[]]$arguments) {
+    if ([string]::IsNullOrWhiteSpace($BehaviorDiffCommand)) {
+        & dotnet $cli @arguments
+    } else {
+        & $BehaviorDiffCommand @arguments
+    }
+}
 
 function Invoke-Checked([string]$label, [scriptblock]$command) {
     & $command | ForEach-Object { Write-Host $_ }
@@ -66,8 +77,8 @@ baseline:
     $nodeTracer = Join-Path $repo 'src/BehaviorDiff.Node'
     Invoke-Checked 'Node tracer install' { & npm ci --prefix $nodeTracer --ignore-scripts --no-audit --no-fund }
     $env:BEHAVIORDIFF_NODE_TRACER = $nodeTracer
-    $output = @(& dotnet $cli $fixture --base $base --pr $pr --work $analysisWork --findings $findings `
-        --no-cache --keep --keep-traces 1d 2>&1)
+    $output = @(Invoke-BehaviorDiff @($fixture, '--base', $base, '--pr', $pr, '--work', $analysisWork,
+        '--findings', $findings, '--no-cache', '--keep', '--keep-traces', '1d') 2>&1)
     $exit = $LASTEXITCODE
     $output | ForEach-Object { Write-Host $_ }
     if ($exit -ne 0) { throw "configured analysis exited $exit" }
@@ -95,8 +106,8 @@ baseline:
     }
     finally { Pop-Location }
     $bypassFindings = Join-Path $work 'bypass-findings.json'
-    $bypassOutput = @(& dotnet $cli $fixture --base $bypassBase --pr $bypassPr --work (Join-Path $work 'bypass-work') `
-        --findings $bypassFindings --no-cache 2>&1)
+    $bypassOutput = @(Invoke-BehaviorDiff @($fixture, '--base', $bypassBase, '--pr', $bypassPr,
+        '--work', (Join-Path $work 'bypass-work'), '--findings', $bypassFindings, '--no-cache') 2>&1)
     $bypassExit = $LASTEXITCODE
     if ($bypassExit -ne 3) {
         throw "instrumentation bypass exit was $bypassExit, expected 3: $($bypassOutput -join "`n")"

@@ -29,6 +29,22 @@ jobs:
           cargo clippy --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml
 
+  rust-launcher:
+    name: Rust launcher
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Rust 1.98
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - name: Build, lint, and test
+        shell: pwsh
+        run: |
+          cargo fmt --manifest-path src/BehaviorDiff.Launcher.Rust/Cargo.toml -- --check
+          cargo clippy --manifest-path src/BehaviorDiff.Launcher.Rust/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path src/BehaviorDiff.Launcher.Rust/Cargo.toml
+
   tracer-builds:
     name: ${{ matrix.tracer }} tracer
     runs-on: windows-2022

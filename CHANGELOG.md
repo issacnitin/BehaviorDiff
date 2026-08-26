@@ -2,6 +2,12 @@
 
 All notable changes to BehaviorDiff are documented here.
 
+## Unreleased
+
+### Added
+
+- Thin Rust launcher owning argument routing, repository config loading, language detection, and managed process spawning.
+
 ## 0.2.0 - 2026-08-26
 
 ### Added

@@ -48,6 +48,13 @@ RUN touch src/main.rs \
     && mkdir -p "/out/$rid" \
     && cp target/release/behaviordiff-engine "/out/$rid/behaviordiff-engine"
 
+FROM ${RUST_IMAGE} AS rust-launcher-build
+WORKDIR /source
+COPY src/BehaviorDiff.Launcher.Rust/Cargo.toml src/BehaviorDiff.Launcher.Rust/Cargo.lock ./
+COPY src/BehaviorDiff.Launcher.Rust/src/ ./src/
+RUN cargo build --release --locked \
+    && cp target/release/behaviordiff /out-behaviordiff
+
 FROM ${RUST_IMAGE} AS rust-tracer-build
 ARG TARGETARCH
 WORKDIR /source
@@ -72,7 +79,8 @@ RUN case "$TARGETARCH" in amd64) rid=linux-x64 ;; arm64) rid=linux-arm64 ;; *) e
     && dotnet publish src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj \
         --configuration Release --runtime "$rid" --self-contained true --output /out --nologo \
         --source https://www.nuget.org/api/v2/ \
-        -p:NuGetAudit=false -p:SelfContainedRelease=true -p:PublishTrimmed=false
+        -p:NuGetAudit=false -p:SelfContainedRelease=true -p:PublishTrimmed=false \
+    && mv /out/behaviordiff /out/behaviordiff-managed
 
 FROM ${RUNTIME_IMAGE} AS runtime
 ARG BUILD_VERSION=dev
@@ -103,6 +111,7 @@ RUN ln -s /usr/share/maven/bin/mvn /usr/local/bin/mvn \
         /usr/local/bin/behaviordiff-go-rewrite
 
 COPY --from=dotnet-build /out/ /opt/behaviordiff/
+COPY --from=rust-launcher-build /out-behaviordiff /opt/behaviordiff/behaviordiff
 COPY --from=java-build /out/behaviordiff-java-agent.jar /opt/behaviordiff/tracers/java/behaviordiff-java-agent.jar
 COPY --from=node-build /out/ /opt/behaviordiff/tracers/node/
 COPY --from=go-build /out/ /opt/behaviordiff/tracers/go/

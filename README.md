@@ -8,10 +8,16 @@ BehaviorDiff finds **runtime behavior changes that ordinary source review misses
 
 It builds two Git revisions, observes their tests, learns a noise baseline from three base runs, and reports the first changed behavior in each call tree. A source diff tells you what was edited. BehaviorDiff tells you what the edit did, including effects in files the pull request never touched.
 
-The architecture has one language-neutral trace contract, one tracer per runtime, and a single-pass streaming Rust diff, frontier, and findings engine:
+The public executable is a thin Rust launcher that owns argument routing, repository config loading, and `detect`. It starts a sibling self-contained managed component for ref resolution, builds, caches, instrumentation, and posting. The architecture then has one language-neutral trace contract, one tracer per runtime, and a single-pass streaming Rust diff, frontier, and findings engine:
 
 ```mermaid
 flowchart LR
+  L[Rust argv, config, detect] --> O[Managed orchestration]
+  O --> D
+  O --> J
+  O --> N
+  O --> G
+  O --> R
   D[.NET / Cecil] --> T[behaviordiff.trace/1]
   J[Java / javaagent + ASM] --> T
   N[Node / CJS + ESM + Babel] --> T
@@ -131,7 +137,7 @@ Expand-Archive .\behaviordiff-v0.2.0-win-x64.zip "$env:LOCALAPPDATA\BehaviorDiff
 & "$env:LOCALAPPDATA\BehaviorDiff\behaviordiff.exe" --help
 ```
 
-The complete extracted directory must remain together because it also contains the native engine, language tracers, and the separately launched .NET Weaver. The NuGet tool package remains available as a framework-dependent compatibility distribution:
+The complete extracted directory must remain together because the Rust `behaviordiff` launcher starts `behaviordiff-managed` beside it and the directory also contains the native engine, language tracers, and separately launched .NET Weaver. The NuGet tool package remains available as a framework-dependent managed compatibility distribution:
 
 ```powershell
 dotnet tool install --global BehaviorDiff.Tool --version 0.2.0 --add-source .
@@ -475,8 +481,9 @@ See [evidence/FINDINGS.md](evidence/FINDINGS.md) for measured instrumentation an
 
 | Path | Purpose |
 | --- | --- |
+| `src/BehaviorDiff.Launcher.Rust` | Public argv/config/detect launcher and managed-process boundary |
 | `src/BehaviorDiff.Engine.Rust` | Single-pass streaming Rust diff, frontier, baseline policy, and findings engine |
-| `src/BehaviorDiff.Cli` | Repository orchestration and PR providers |
+| `src/BehaviorDiff.Cli` | Managed refs, builds, caches, instrumentation orchestration, and PR providers |
 | `src/BehaviorDiff.Tracer` | .NET runtime hooks, value rendering, coverage manifests |
 | `src/BehaviorDiff.Java.Agent` | Java agent, ASM rewriting, JVM canonicalizer |
 | `src/BehaviorDiff.Node` | CommonJS/ESM hooks, Babel rewriting, Node canonicalizer and test adapters |
