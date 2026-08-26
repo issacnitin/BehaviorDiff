@@ -11,14 +11,12 @@ namespace BehaviorDiff.Cli
     {
         internal static int Main(string[] args)
         {
-            if (args.Length == 2 && args[0] == "detect-language")
+            if (args.Length == 2 && (args[0] == "detect" || args[0] == "detect-language"))
             {
                 try
                 {
                     LanguageDetection detection = LanguageDetector.Detect(args[1]);
-                    Console.WriteLine(detection.Language.ToString().ToLowerInvariant());
-                    Console.WriteLine(detection.Evidence);
-                    Console.WriteLine(detection.EntryPoint);
+                    Console.WriteLine(LanguageDetector.Render(detection));
                     return ExitCodes.NoUnexpected;
                 }
                 catch (CliException ex)
@@ -252,7 +250,7 @@ namespace BehaviorDiff.Cli
         {
             Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--work <dir>] [--findings <file>] [--baseline <file>|--no-baseline] [--strict] [--cache-dir <dir>] [--cache-retention <12h|7d>] [--keep-traces <12h|7d>] [--keep]");
             Console.WriteLine("       behaviordiff warm <repo> --target <ref> --cache-dir <dir> [--cache-retention <12h|7d>] [--work <dir>] [--keep]");
-            Console.WriteLine("       behaviordiff detect-language <repo>");
+            Console.WriteLine("       behaviordiff detect <repo>");
             Console.WriteLine("       behaviordiff [<repo>] --ci=azuredevops [--work <dir>] [--findings <file>] [--keep]");
             Console.WriteLine("       behaviordiff [<repo>] --ci=github [--work <dir>] [--findings <file>] [--keep]");
             Console.WriteLine("       behaviordiff post --provider=<azuredevops|github> --findings <file> [--gate warn-only|fail-on-findings]");
