@@ -1,5 +1,6 @@
 use std::env;
 
+mod dotnet_json;
 mod engine;
 mod frontier;
 mod loader;

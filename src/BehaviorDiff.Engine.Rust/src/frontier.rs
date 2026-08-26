@@ -549,11 +549,8 @@ pub(crate) fn run(options: &FrontierOptions) -> Result<i32, String> {
     if let Some(parent) = Path::new(&options.output).parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    fs::write(
-        &options.output,
-        serde_json::to_vec_pretty(&report).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
+    fs::write(&options.output, crate::dotnet_json::to_vec_pretty(&report)?)
+        .map_err(|error| error.to_string())?;
     println!(
         "Frontier report written: {}",
         Path::new(&options.output)
