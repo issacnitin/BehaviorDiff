@@ -43,6 +43,17 @@ RUN cargo build --release --locked \
     && mkdir -p "/out/$rid" \
     && cp target/release/behaviordiff-engine "/out/$rid/behaviordiff-engine"
 
+FROM ${RUST_IMAGE} AS rust-tracer-build
+ARG TARGETARCH
+WORKDIR /source
+COPY src/BehaviorDiff.Rust.Tracer/Cargo.toml src/BehaviorDiff.Rust.Tracer/Cargo.lock ./
+COPY src/BehaviorDiff.Rust.Tracer/runtime/ ./runtime/
+COPY src/BehaviorDiff.Rust.Tracer/src/ ./src/
+RUN cargo build --release --locked \
+    && case "$TARGETARCH" in amd64) rid=linux-x64 ;; arm64) rid=linux-arm64 ;; *) exit 1 ;; esac \
+    && mkdir -p "/out/$rid" \
+    && cp target/release/behaviordiff-rust-rewrite "/out/$rid/behaviordiff-rust-rewrite"
+
 FROM ${DOTNET_IMAGE} AS dotnet-build
 WORKDIR /source
 COPY global.json Directory.Build.props README.md ./
@@ -87,6 +98,7 @@ COPY --from=java-build /out/behaviordiff-java-agent.jar /opt/behaviordiff/tracer
 COPY --from=node-build /out/ /opt/behaviordiff/tracers/node/
 COPY --from=go-build /out/behaviordiff-go-rewrite /usr/local/bin/behaviordiff-go-rewrite
 COPY --from=rust-build /out/ /opt/behaviordiff/engines/rust/
+COPY --from=rust-tracer-build /out/ /opt/behaviordiff/tracers/rust/
 COPY docker/behaviordiff.sh /usr/local/bin/behaviordiff
 COPY docker/action-entrypoint.sh /usr/local/bin/behaviordiff-action
 COPY docker/entrypoint.sh /usr/local/bin/behaviordiff-entrypoint
@@ -101,6 +113,7 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
 RUN chmod +x /usr/local/bin/behaviordiff /usr/local/bin/behaviordiff-action \
     /usr/local/bin/behaviordiff-entrypoint /usr/local/bin/behaviordiff-go-rewrite \
     /opt/behaviordiff/engines/rust/*/behaviordiff-engine \
+    /opt/behaviordiff/tracers/rust/*/behaviordiff-rust-rewrite \
     && dotnet --info >/dev/null \
     && java -version \
     && mvn --version \

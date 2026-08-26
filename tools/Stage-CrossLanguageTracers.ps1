@@ -15,6 +15,7 @@ $output = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
 $javaProject = Join-Path $repo 'src/BehaviorDiff.Java.Agent/pom.xml'
 $javaTarget = Join-Path $repo 'src/BehaviorDiff.Java.Agent/target'
 $nodeSource = Join-Path $repo 'src/BehaviorDiff.Node'
+$rustManifest = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml'
 
 function Invoke-Checked([string]$label, [scriptblock]$command) {
     & $command
@@ -47,7 +48,12 @@ if (Test-Path $output) {
 }
 $javaOutput = Join-Path $output 'java'
 $nodeOutput = Join-Path $output 'node'
-New-Item -ItemType Directory -Path $javaOutput, $nodeOutput -Force | Out-Null
+$rustRid = if ($IsWindows) { 'win-x64' } elseif ($IsLinux) { 'linux-x64' } else { 'osx-x64' }
+if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [Runtime.InteropServices.Architecture]::Arm64) {
+    $rustRid = $rustRid.Replace('x64', 'arm64')
+}
+$rustOutput = Join-Path $output "rust/$rustRid"
+New-Item -ItemType Directory -Path $javaOutput, $nodeOutput, $rustOutput -Force | Out-Null
 Copy-Item $javaAgent.FullName (Join-Path $javaOutput 'behaviordiff-java-agent.jar') -Force
 
 Write-Host '=== Stage Node tracer ===' -ForegroundColor Cyan
@@ -97,6 +103,14 @@ foreach ($relative in $required) {
 if (Test-Path (Join-Path $nodeOutput 'test')) {
     throw 'The staged Node tracer unexpectedly contains tests.'
 }
+
+Write-Host '=== Build Rust tracer ===' -ForegroundColor Cyan
+Invoke-Checked 'Rust tracer build' { & cargo build --release --locked --manifest-path $rustManifest }
+$rustName = if ($IsWindows) { 'behaviordiff-rust-rewrite.exe' } else { 'behaviordiff-rust-rewrite' }
+$rustBinary = Join-Path $repo "src/BehaviorDiff.Rust.Tracer/target/release/$rustName"
+Assert-Path $rustBinary 'Rust tracer binary'
+Copy-Item $rustBinary (Join-Path $rustOutput $rustName) -Force
+Assert-Path (Join-Path $rustOutput $rustName) 'Staged Rust tracer binary'
 
 Write-Host 'Cross-language tracers staged:' -ForegroundColor Green
 Write-Host "  $output"

@@ -16,6 +16,7 @@ $toolPath = Join-Path $work 'tool'
 $cliProject = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
 $previousJavaAgent = $env:BEHAVIORDIFF_JAVA_AGENT
 $previousNodeTracer = $env:BEHAVIORDIFF_NODE_TRACER
+$previousRustTracer = $env:BEHAVIORDIFF_RUST_TRACER
 
 function Invoke-Checked([string]$label, [scriptblock]$command) {
     & $command | ForEach-Object { Write-Host $_ }
@@ -59,7 +60,11 @@ function Assert-RunArtifacts(
     [string]$findingsPath,
     [object[]]$output) {
     $text = $output -join "`n"
-    $label = if ($language -eq 'java') { 'java agent' } else { 'node tracer' }
+    $label = switch ($language) {
+        'java' { 'java agent' }
+        'node' { 'node tracer' }
+        'rust' { 'rust tracer' }
+    }
     $pathMatch = [regex]::Match($text, "(?m)^\s*$label\s*:\s*(.+)$")
     if (-not $pathMatch.Success) {
         throw "$language CLI output did not report the selected packaged tracer path"
@@ -139,6 +144,8 @@ try {
     $rustArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
     $rustFile = if ($IsWindows) { 'behaviordiff-engine.exe' } else { 'behaviordiff-engine' }
     $rustPackageEntry = "tools/net8.0/any/engines/rust/$rustOs-$rustArchitecture/$rustFile"
+    $rustTracerFile = if ($IsWindows) { 'behaviordiff-rust-rewrite.exe' } else { 'behaviordiff-rust-rewrite' }
+    $rustTracerPackageEntry = "tools/net8.0/any/tracers/rust/$rustOs-$rustArchitecture/$rustTracerFile"
     $requiredEntries = @(
         'tools/net8.0/any/tracers/java/behaviordiff-java-agent.jar',
         'tools/net8.0/any/tracers/node/register.cjs',
@@ -152,7 +159,8 @@ try {
         'tools/net8.0/any/tracers/node/adapters/vitest.mjs',
         'tools/net8.0/any/tracers/node/node_modules/@babel/parser/package.json',
         'tools/net8.0/any/Mono.Cecil.dll',
-        $rustPackageEntry
+        $rustPackageEntry,
+        $rustTracerPackageEntry
     )
     $missing = @($requiredEntries | Where-Object { $_ -notin $entries })
     if ($missing.Count -ne 0) { throw "Package entries are missing: $($missing -join ', ')" }
@@ -173,23 +181,29 @@ try {
 
     $env:BEHAVIORDIFF_JAVA_AGENT = $null
     $env:BEHAVIORDIFF_NODE_TRACER = $null
+    $env:BEHAVIORDIFF_RUST_TRACER = $null
     $java = New-ReferenceRepository 'java' (Join-Path $repo 'samples/JavaReference')
     $node = New-ReferenceRepository 'node' (Join-Path $repo 'samples/NodeReference')
+    $rust = New-ReferenceRepository 'rust' (Join-Path $repo 'samples/RustReference')
 
     Write-Host '=== Installed Java CLI invocation ===' -ForegroundColor Cyan
     $javaResult = Invoke-LanguageProof 'java' $java $cli
     Write-Host '=== Installed Node CLI invocation ===' -ForegroundColor Cyan
     $nodeResult = Invoke-LanguageProof 'node' $node $cli
+    Write-Host '=== Installed Rust CLI invocation ===' -ForegroundColor Cyan
+    $rustResult = Invoke-LanguageProof 'rust' $rust $cli
 
     $size = [Math]::Round($package.Length / 1MB, 2)
     Write-Host 'CLI package proof: PASS' -ForegroundColor Green
     Write-Host ("  package: {0} ({1} MiB, {2} entries)" -f $package.Name, $size, $entries.Count)
     Write-Host ("  Java: runs={0} events={1}" -f $javaResult.Runs, $javaResult.Events)
     Write-Host ("  Node : runs={0} events={1}" -f $nodeResult.Runs, $nodeResult.Events)
+    Write-Host ("  Rust : runs={0} events={1}" -f $rustResult.Runs, $rustResult.Events)
 }
 finally {
     $env:BEHAVIORDIFF_JAVA_AGENT = $previousJavaAgent
     $env:BEHAVIORDIFF_NODE_TRACER = $previousNodeTracer
+    $env:BEHAVIORDIFF_RUST_TRACER = $previousRustTracer
     if ($ownsWork -and -not $KeepWork) {
         Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
     } else {

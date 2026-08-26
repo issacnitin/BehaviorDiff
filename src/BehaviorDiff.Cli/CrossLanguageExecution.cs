@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Runtime.InteropServices;
 
 namespace BehaviorDiff.Cli
 {
@@ -704,7 +705,9 @@ namespace BehaviorDiff.Cli
                 return Path.GetFullPath(configured);
             }
             string fileName = OperatingSystem.IsWindows() ? "behaviordiff-rust-rewrite.exe" : "behaviordiff-rust-rewrite";
-            string packaged = Path.Combine(AppContext.BaseDirectory, "tracers", "rust", fileName);
+            string os = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsLinux() ? "linux" : "osx";
+            string architecture = RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "arm64" : "x64";
+            string packaged = Path.Combine(AppContext.BaseDirectory, "tracers", "rust", os + "-" + architecture, fileName);
             if (File.Exists(packaged))
             {
                 return packaged;
