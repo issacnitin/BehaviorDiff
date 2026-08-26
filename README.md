@@ -1,6 +1,7 @@
 # BehaviorDiff
 
 [![CI](https://github.com/issacnitin/BehaviorDiff/actions/workflows/ci.yml/badge.svg)](https://github.com/issacnitin/BehaviorDiff/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/issacnitin/BehaviorDiff)](https://github.com/issacnitin/BehaviorDiff/releases/tag/v0.3.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
 
@@ -101,6 +102,20 @@ pwsh -File tools/verify-demo-fixtures.ps1
 
 This covers sort stability, retry policy, and configuration parsing.
 
+### Cross-language release demos
+
+The `v0.3.0` release is exercised by five public sort-stability pull requests. Each fixture has exactly three tests, changes one configuration file, and leaves two broad assertions passing while one exact tie-winner assertion reacts. In every packaged run, the edited file contributes zero traced members, the frontier is in unedited pricing code, at least one call site is untested, and no tooling or manifest noise is present.
+
+| Language | Matched keys | Frontier collapse | Pull request | Hosted run |
+| --- | ---: | ---: | --- | --- |
+| .NET | 319 | 9 to 3 (3.0x) | [behaviordiff-sort-dotnet#1](https://github.com/issacnitin/behaviordiff-sort-dotnet/pull/1) | [successful run](https://github.com/issacnitin/behaviordiff-sort-dotnet/actions/runs/32996384741) |
+| Node | 129 | 117 to 3 (39.0x) | [behaviordiff-sort-node#1](https://github.com/issacnitin/behaviordiff-sort-node/pull/1) | [successful run](https://github.com/issacnitin/behaviordiff-sort-node/actions/runs/32996450162) |
+| Java | 132 | 117 to 3 (39.0x) | [behaviordiff-sort-java#1](https://github.com/issacnitin/behaviordiff-sort-java/pull/1) | [successful run](https://github.com/issacnitin/behaviordiff-sort-java/actions/runs/32996460852) |
+| Go | 315 | 9 to 3 (3.0x) | [behaviordiff-sort-go#1](https://github.com/issacnitin/behaviordiff-sort-go/pull/1) | [successful run](https://github.com/issacnitin/behaviordiff-sort-go/actions/runs/32996478489) |
+| Rust | 312 | 9 to 3 (3.0x) | [behaviordiff-sort-rust#1](https://github.com/issacnitin/behaviordiff-sort-rust/pull/1) | [successful run](https://github.com/issacnitin/behaviordiff-sort-rust/actions/runs/32996497931) |
+
+Two fresh packaged runs per language produced identical normalized behavioral artifacts. Each hosted workflow also posted exactly one BehaviorDiff PR comment.
+
 ## Install the CLI
 
 ### Use the all-language container
@@ -108,10 +123,10 @@ This covers sort stability, retry policy, and configuration parsing.
 The published Linux image contains the BehaviorDiff CLI, default Rust diff engine, .NET 8 SDK/tracer, Java 17 agent, Node 24 tracer, Go rewriter, and stable Rust toolchain/tracer. The host needs only Docker:
 
 ```bash
-docker pull ghcr.io/issacnitin/behaviordiff:main
+docker pull ghcr.io/issacnitin/behaviordiff:v0.3.0
 docker run --rm \
   --volume "$PWD:/workspace" \
-  ghcr.io/issacnitin/behaviordiff:main \
+  ghcr.io/issacnitin/behaviordiff:v0.3.0 \
   /workspace --base origin/main --pr HEAD \
   --findings /workspace/.behaviordiff/artifacts/findings.json
 ```
@@ -122,7 +137,7 @@ The current locally verified Linux/amd64 image is 898,678,469 bytes by Docker im
 
 ### Install the GitHub release
 
-Download the archive for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, or `win-x64` from the [latest release](https://github.com/issacnitin/BehaviorDiff/releases/latest). Verify it against `SHA256SUMS`, extract it, and place the extracted directory on `PATH`. The executable is self-contained; the host does not need a .NET runtime.
+Download the archive for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, or `win-x64` from the [v0.3.0 release](https://github.com/issacnitin/BehaviorDiff/releases/tag/v0.3.0). Verify it against `SHA256SUMS`, extract it, and place the extracted directory on `PATH`. The executable is self-contained; the host does not need a .NET runtime.
 
 ```bash
 sha256sum --check SHA256SUMS --ignore-missing
@@ -298,7 +313,9 @@ On the 99,000-event-per-run FluentValidation scale case, a cold four-run analysi
 
 Every analyzed `findings.json` includes `timings` for build, weave, instrumented runs, cache restore/store, engine diff, engine frontier, and their measured total. This makes CI cost visible without parsing console output.
 
-On retained FluentValidation #2136, the default Rust path measured 6.626 seconds cold and 7.331 seconds warm across diff plus shared frontier, with 321.410/314.102 MiB host process-tree peaks. C# measured 13.685/14.037 seconds and 2,130.137/2,155.504 MiB. Full methodology, byte-equivalence gates, and container measurements are in [evidence/RUST-STREAMING-KILL-GATE.md](evidence/RUST-STREAMING-KILL-GATE.md) and [evidence/CONTAINER-PROOF.md](evidence/CONTAINER-PROOF.md).
+On retained FluentValidation #2136, the default Rust path measured 6.626 seconds cold and 7.331 seconds warm across diff plus shared frontier, with 321.410/314.102 MiB host process-tree peaks. C# measured 13.685/14.037 seconds and 2,130.137/2,155.504 MiB.
+
+The like-for-like container proof separately sampled descendant process RSS and cgroup-v2 accounting. Cold/warm process-tree peaks were 1,777.156/2,064.219 MiB; `memory.current` peaked at 2,661.461/2,524.680 MiB. The cold cgroup split was 1,259.879 MiB anonymous and 1,345.234 MiB file cache; warm was 1,555.715 MiB anonymous and 926.832 MiB file cache. The previously observed 1.96 GiB ceiling was a sparse-sampling artifact, not the container ceiling. Provision above the observed 2.66 GiB peak with workload margin. Full methodology and byte-equivalence gates are in [evidence/RUST-STREAMING-KILL-GATE.md](evidence/RUST-STREAMING-KILL-GATE.md) and [evidence/CONTAINER-PROOF.md](evidence/CONTAINER-PROOF.md).
 
 Warm a target branch from a nightly job without running a synthetic PR comparison:
 
@@ -398,7 +415,7 @@ steps:
   - uses: actions/checkout@v4
     with:
       fetch-depth: 0
-  - uses: issacnitin/BehaviorDiff@main
+  - uses: issacnitin/BehaviorDiff@v0.3.0
     env:
       GITHUB_TOKEN: ${{ github.token }}
 ```
