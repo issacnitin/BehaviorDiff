@@ -58,7 +58,6 @@ FROM ${DOTNET_IMAGE} AS dotnet-build
 WORKDIR /source
 COPY global.json Directory.Build.props README.md ./
 COPY src/BehaviorDiff.Contracts/ src/BehaviorDiff.Contracts/
-COPY src/BehaviorDiff.Engine/ src/BehaviorDiff.Engine/
 COPY src/BehaviorDiff.Tracer/ src/BehaviorDiff.Tracer/
 COPY src/BehaviorDiff.Tracer.Xunit/ src/BehaviorDiff.Tracer.Xunit/
 COPY src/BehaviorDiff.Cli/ src/BehaviorDiff.Cli/
