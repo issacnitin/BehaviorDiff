@@ -69,7 +69,7 @@ $cancelled = @($events | Where-Object outcome -ceq 'cancelled')
 $question = @($events | Where-Object methodFullName -like '*question_mark_return')
 $asyncCompletion = @($events | Where-Object methodFullName -like '*async_completion')
 $asyncCancellation = @($events | Where-Object methodFullName -like '*async_cancellation')
-if ($events.Count -ne 15 -or $normal.Count -ne 13 -or $panic.Count -ne 1 -or $cancelled.Count -ne 1) {
+if ($events.Count -ne 16 -or $normal.Count -ne 14 -or $panic.Count -ne 1 -or $cancelled.Count -ne 1) {
     throw "Rust exit counts differ: total=$($events.Count) normal=$($normal.Count) panic=$($panic.Count) cancelled=$($cancelled.Count)"
 }
 if ($question.Count -ne 2 -or @($question | Where-Object outcome -cne 'normal').Count -ne 0) {

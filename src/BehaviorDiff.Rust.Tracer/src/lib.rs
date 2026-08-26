@@ -13,7 +13,7 @@ use syn::{
 use toml_edit::{DocumentMut, InlineTable, Item as TomlItem, Value};
 use walkdir::{DirEntry, WalkDir};
 
-const CACHE_VERSION: &str = "behaviordiff.rust-rewrite-cache/3";
+const CACHE_VERSION: &str = "behaviordiff.rust-rewrite-cache/4";
 const ORIGIN_MANIFEST: &str = ".behaviordiff-rust-origin.json";
 const RUNTIME_CARGO: &str = include_str!("../runtime/Cargo.toml");
 const RUNTIME_SOURCE: &str = include_str!("../runtime/src/lib.rs");
@@ -63,6 +63,7 @@ struct OriginMember {
     detail: Option<String>,
     return_kind: String,
     is_test_root: bool,
+    generic_template: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -247,12 +248,43 @@ pub fn finalize(origin: &Path, trace: &Path, output: &Path) -> Result<FinalizeRe
         return Err(format!("Rust trace is empty: {}", trace.display()));
     }
 
-    let patched_members = origin
-        .members
+    let observed_methods = events
+        .iter()
+        .filter_map(|event| {
+            event
+                .get("methodFullName")
+                .and_then(serde_json::Value::as_str)
+        })
+        .collect::<HashSet<_>>();
+    let mut manifest_members = Vec::new();
+    for member in &origin.members {
+        if member.generic_template && member.status == "Patched" {
+            let prefix = format!("{}<", member.method);
+            let concrete = observed_methods
+                .iter()
+                .filter(|method| method.starts_with(&prefix))
+                .copied()
+                .collect::<Vec<_>>();
+            let mut template = member.clone();
+            template.status = "Skipped".to_owned();
+            template.skip_reason = Some("Unobservable".to_owned());
+            template.detail = Some("Rust: GenericTemplate".to_owned());
+            manifest_members.push(template);
+            for method in concrete {
+                let mut concrete_member = member.clone();
+                concrete_member.method = method.to_owned();
+                concrete_member.generic_template = false;
+                manifest_members.push(concrete_member);
+            }
+        } else {
+            manifest_members.push(member.clone());
+        }
+    }
+    let patched_members = manifest_members
         .iter()
         .filter(|item| item.status == "Patched")
         .count();
-    let skipped_members = origin.members.len() - patched_members;
+    let skipped_members = manifest_members.len() - patched_members;
     let mut values_digested = 0_u64;
     let mut depth_limited = 0_u64;
     let mut blocklisted = 0_u64;
@@ -273,14 +305,14 @@ pub fn finalize(origin: &Path, trace: &Path, output: &Path) -> Result<FinalizeRe
     lines.push(serde_json::json!({
         "kind": "assembly", "assembly": origin.package, "discovery": "RustAstRewrite",
         "scanned": true, "instrumented": patched_members > 0,
-        "patchedMembers": patched_members, "discoveredMembers": origin.members.len(),
+        "patchedMembers": patched_members, "discoveredMembers": manifest_members.len(),
         "skippedMembers": skipped_members, "patchFailedMembers": 0,
         "queuedAtMs": 0, "patchedAtMs": 0, "tracedCalls": events.len(),
         "membersWithExactSource": patched_members, "exactSourcePercent": 100,
         "sourceRule": "ratio", "sourceUnavailable": false, "sourcePartial": false,
         "isTestAssembly": false, "detail": "Rust: stable cached AST rewrite"
     }));
-    for member in &origin.members {
+    for member in &manifest_members {
         lines.push(serde_json::json!({
             "kind": "member", "assembly": origin.package, "method": member.method,
             "status": member.status, "skipReason": member.skip_reason,
@@ -311,7 +343,7 @@ pub fn finalize(origin: &Path, trace: &Path, output: &Path) -> Result<FinalizeRe
     fs::write(output, text).map_err(|error| error.to_string())?;
     Ok(FinalizeReport {
         events: events.len(),
-        discovered_members: origin.members.len(),
+        discovered_members: manifest_members.len(),
         patched_members,
         skipped_members,
         values_digested,
@@ -704,6 +736,8 @@ impl ExitHookInstrumenter {
         };
         let file = self.relative_path.clone();
         let line = signature.ident.span().start().line as u32;
+        let mut generic_names = self.context_generics.clone();
+        generic_names.extend(generic_type_names(&signature.generics));
         if signature.constness.is_some() || signature.abi.is_some() {
             self.skipped += 1;
             self.members.push(OriginMember {
@@ -715,6 +749,7 @@ impl ExitHookInstrumenter {
                 detail: Some("Rust: ConstOrExternFunction".to_owned()),
                 return_kind: return_kind(&signature.output),
                 is_test_root,
+                generic_template: false,
             });
             return;
         }
@@ -727,16 +762,16 @@ impl ExitHookInstrumenter {
             detail: None,
             return_kind: return_kind(&signature.output),
             is_test_root,
+            generic_template: !generic_names.is_empty(),
         });
-        let mut generic_names = self.context_generics.clone();
-        generic_names.extend(generic_type_names(&signature.generics));
+        let method_expression = method_expression(&method, &generic_names);
         let args = argument_capture(signature, &self.local_types, &generic_names);
         let result = return_capture(&signature.output, &self.local_types, &generic_names);
         let original = block.clone();
         *block = if signature.asyncness.is_some() {
             parse_quote!({
                 let __behaviordiff_args = ::behaviordiff_rust_runtime::capture_arguments(vec![#(#args),*]);
-                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line, __behaviordiff_args, #is_test_root);
+                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method_expression, #file, #line, __behaviordiff_args, #is_test_root);
                 let (__behaviordiff_guard, __behaviordiff_result) =
                     ::behaviordiff_rust_runtime::trace_future(
                         __behaviordiff_guard,
@@ -749,7 +784,7 @@ impl ExitHookInstrumenter {
         } else {
             parse_quote!({
                 let __behaviordiff_args = ::behaviordiff_rust_runtime::capture_arguments(vec![#(#args),*]);
-                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method, #file, #line, __behaviordiff_args, #is_test_root);
+                let __behaviordiff_guard = ::behaviordiff_rust_runtime::enter(#method_expression, #file, #line, __behaviordiff_args, #is_test_root);
                 let __behaviordiff_result = (|| #original)();
                 let __behaviordiff_return = #result;
                 __behaviordiff_guard.complete(__behaviordiff_return);
@@ -764,6 +799,24 @@ fn return_kind(output: &ReturnType) -> String {
     match output {
         ReturnType::Default => "void".to_owned(),
         ReturnType::Type(_, ty) => ty.to_token_stream().to_string(),
+    }
+}
+
+fn method_expression(method: &str, generic_names: &HashSet<String>) -> proc_macro2::TokenStream {
+    if generic_names.is_empty() {
+        quote::quote!(#method.to_owned())
+    } else {
+        let mut names = generic_names.iter().cloned().collect::<Vec<_>>();
+        names.sort();
+        let identifiers = names
+            .iter()
+            .map(|name| quote::format_ident!("{name}"))
+            .collect::<Vec<_>>();
+        quote::quote!(format!(
+            "{}<{}>",
+            #method,
+            [#(::std::any::type_name::<#identifiers>()),*].join(",")
+        ))
     }
 }
 

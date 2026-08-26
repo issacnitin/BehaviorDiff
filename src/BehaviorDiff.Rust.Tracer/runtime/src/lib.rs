@@ -27,7 +27,7 @@ thread_local! {
 struct TraceContext {
     stack: Vec<u64>,
     test_id: Option<String>,
-    ordinals: HashMap<(String, &'static str), i32>,
+    ordinals: HashMap<(String, String), i32>,
 }
 
 impl TraceContext {
@@ -42,7 +42,7 @@ impl TraceContext {
 
 pub struct Guard {
     call_id: u64,
-    method: &'static str,
+    method: String,
     file: &'static str,
     line: u32,
     args: Option<CapturedValue>,
@@ -57,7 +57,7 @@ pub struct Guard {
 }
 
 pub fn enter(
-    method: &'static str,
+    method: String,
     file: &'static str,
     line: u32,
     args: Option<CapturedValue>,
@@ -67,7 +67,7 @@ pub fn enter(
     let (test_id, parent_call_id, call_depth, ordinal) = CONTEXT.with(|context| {
         let mut context = context.borrow_mut();
         if is_test_root {
-            context.test_id = Some(method.to_owned());
+            context.test_id = Some(method.clone());
         }
         let test_id = context
             .test_id
@@ -77,7 +77,7 @@ pub fn enter(
         let call_depth = context.stack.len() as i32;
         let ordinal = context
             .ordinals
-            .entry((test_id.clone(), method))
+            .entry((test_id.clone(), method.clone()))
             .or_insert(0);
         let current = *ordinal;
         *ordinal += 1;
@@ -209,7 +209,7 @@ fn emit(guard: &Guard, outcome: &str, result: Option<&CapturedValue>) {
     let Some(stream) = writer.as_mut() else {
         return;
     };
-    let method = escape(guard.method);
+    let method = escape(&guard.method);
     let file = escape(guard.file);
     let test_id = escape(&guard.test_id);
     let exception = if outcome == "panic" {
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn pending_future_suspends_logical_context_before_drop() {
-        let guard = enter("async_test", "src/lib.rs", 1, None, false);
+        let guard = enter("async_test".to_owned(), "src/lib.rs", 1, None, false);
         let mut future = Box::pin(trace_future(guard, AlwaysPending));
         let waker = Waker::noop();
         let mut context = Context::from_waker(waker);

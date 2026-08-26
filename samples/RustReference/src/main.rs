@@ -99,6 +99,7 @@ fn main() {
     let record = PrivateRecord { secret: 17 };
     assert_eq!(private_struct_and_enum(), 7);
     assert_eq!(generic_identity(String::from("generic")), "generic");
+    assert_eq!(generic_identity(42_i32), 42);
     assert_eq!(trait_object(&record), 17);
     assert_eq!(block_on(async_completion()), 11);
     cancel_after_first_poll(async_cancellation());
