@@ -6,3 +6,7 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+hex = "0.4"
+sha2 = "0.10"

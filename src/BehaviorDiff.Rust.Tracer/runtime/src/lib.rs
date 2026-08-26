@@ -1,3 +1,7 @@
+mod canonical;
+
+pub use canonical::{capture, write_field, CanonicalContext, Canonicalize, CapturedValue};
+
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};

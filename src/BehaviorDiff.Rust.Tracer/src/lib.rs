@@ -5,14 +5,18 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use syn::visit_mut::{self, VisitMut};
-use syn::{parse_quote, Block, ImplItemFn, ItemFn, ItemImpl, ItemTrait, TraitItemFn};
-use toml_edit::{DocumentMut, InlineTable, Item, Value};
+use syn::{
+    parse_quote, Block, Fields, GenericParam, ImplItemFn, Item, ItemEnum, ItemFn, ItemImpl,
+    ItemStruct, ItemTrait, TraitItemFn,
+};
+use toml_edit::{DocumentMut, InlineTable, Item as TomlItem, Value};
 use walkdir::{DirEntry, WalkDir};
 
 const CACHE_VERSION: &str = "behaviordiff.rust-rewrite-cache/2";
 const ORIGIN_MANIFEST: &str = ".behaviordiff-rust-origin.json";
 const RUNTIME_CARGO: &str = include_str!("../runtime/Cargo.toml");
 const RUNTIME_SOURCE: &str = include_str!("../runtime/src/lib.rs");
+const RUNTIME_CANONICAL: &str = include_str!("../runtime/src/canonical.rs");
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +39,7 @@ struct OriginManifest {
     rust_files: Vec<OriginFile>,
     instrumented_functions: usize,
     skipped_functions: usize,
+    generated_readers: usize,
 }
 
 #[derive(Serialize)]
@@ -134,6 +139,7 @@ fn build_cache_entry(
     let mut origins = Vec::new();
     let mut instrumented_functions = 0;
     let mut skipped_functions = 0;
+    let mut generated_readers = 0;
     for relative in files {
         let input = source.join(relative);
         let output = staging.join(relative);
@@ -149,6 +155,7 @@ fn build_cache_entry(
                 instrumenter.visit_file_mut(&mut syntax);
                 instrumented_functions += instrumenter.instrumented;
                 skipped_functions += instrumenter.skipped;
+                generated_readers += generate_readers(&mut syntax.items)?;
             }
             let tokens = syntax.to_token_stream();
             let reparsed =
@@ -174,10 +181,174 @@ fn build_cache_entry(
         rust_files: origins,
         instrumented_functions,
         skipped_functions,
+        generated_readers,
     };
     let manifest_text = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
     fs::write(staging.join(ORIGIN_MANIFEST), manifest_text).map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn generate_readers(items: &mut Vec<Item>) -> Result<usize, String> {
+    let mut generated = 0;
+    for item in items.iter_mut() {
+        if let Item::Mod(module) = item {
+            if let Some((_, nested)) = &mut module.content {
+                generated += generate_readers(nested)?;
+            }
+        }
+    }
+
+    let mut output = Vec::with_capacity(items.len() * 2);
+    for item in std::mem::take(items) {
+        let reader = match &item {
+            Item::Struct(structure) => Some(struct_reader(structure)?),
+            Item::Enum(enumeration) => Some(enum_reader(enumeration)?),
+            _ => None,
+        };
+        output.push(item);
+        if let Some(reader) = reader {
+            output.push(Item::Impl(reader));
+            generated += 1;
+        }
+    }
+    *items = output;
+    Ok(generated)
+}
+
+fn struct_reader(item: &ItemStruct) -> Result<ItemImpl, String> {
+    let ident = &item.ident;
+    let mut generics = item.generics.clone();
+    add_canonical_bounds(&mut generics);
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    let fields = match &item.fields {
+        Fields::Named(fields) => fields
+            .named
+            .iter()
+            .map(|field| {
+                let name = field.ident.as_ref().unwrap();
+                let label = name.to_string();
+                quote::quote! {
+                    ::behaviordiff_rust_runtime::write_field(context, output, #label, &self.#name);
+                }
+            })
+            .collect::<Vec<_>>(),
+        Fields::Unnamed(fields) => fields
+            .unnamed
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                let member = syn::Index::from(index);
+                let label = index.to_string();
+                quote::quote! {
+                    ::behaviordiff_rust_runtime::write_field(context, output, #label, &self.#member);
+                }
+            })
+            .collect::<Vec<_>>(),
+        Fields::Unit => Vec::new(),
+    };
+    syn::parse2(quote::quote! {
+        impl #impl_generics ::behaviordiff_rust_runtime::Canonicalize for #ident #type_generics #where_clause {
+            fn write_canonical(
+                &self,
+                context: &mut ::behaviordiff_rust_runtime::CanonicalContext,
+                output: &mut String,
+            ) {
+                context.write_value(stringify!(#ident), output, |context, output| {
+                    output.push_str(stringify!(#ident));
+                    output.push('{');
+                    #(#fields)*
+                    output.push('}');
+                });
+            }
+        }
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn enum_reader(item: &ItemEnum) -> Result<ItemImpl, String> {
+    let ident = &item.ident;
+    let mut generics = item.generics.clone();
+    add_canonical_bounds(&mut generics);
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    let arms = item
+        .variants
+        .iter()
+        .map(|variant| {
+            let variant_ident = &variant.ident;
+            let variant_name = variant_ident.to_string();
+            match &variant.fields {
+                Fields::Named(fields) => {
+                    let names = fields
+                        .named
+                        .iter()
+                        .map(|field| field.ident.as_ref().unwrap())
+                        .collect::<Vec<_>>();
+                    let writes = names.iter().map(|name| {
+                        let label = name.to_string();
+                        quote::quote! {
+                            ::behaviordiff_rust_runtime::write_field(context, output, #label, #name);
+                        }
+                    });
+                    quote::quote! {
+                        Self::#variant_ident { #(#names),* } => {
+                            output.push_str(#variant_name);
+                            output.push('{');
+                            #(#writes)*
+                            output.push('}');
+                        }
+                    }
+                }
+                Fields::Unnamed(fields) => {
+                    let names = (0..fields.unnamed.len())
+                        .map(|index| quote::format_ident!("field_{index}"))
+                        .collect::<Vec<_>>();
+                    let writes = names.iter().enumerate().map(|(index, name)| {
+                        let label = index.to_string();
+                        quote::quote! {
+                            ::behaviordiff_rust_runtime::write_field(context, output, #label, #name);
+                        }
+                    });
+                    quote::quote! {
+                        Self::#variant_ident(#(#names),*) => {
+                            output.push_str(#variant_name);
+                            output.push('{');
+                            #(#writes)*
+                            output.push('}');
+                        }
+                    }
+                }
+                Fields::Unit => quote::quote! {
+                    Self::#variant_ident => output.push_str(#variant_name)
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+    syn::parse2(quote::quote! {
+        impl #impl_generics ::behaviordiff_rust_runtime::Canonicalize for #ident #type_generics #where_clause {
+            fn write_canonical(
+                &self,
+                context: &mut ::behaviordiff_rust_runtime::CanonicalContext,
+                output: &mut String,
+            ) {
+                context.write_value(stringify!(#ident), output, |context, output| {
+                    output.push_str(stringify!(#ident));
+                    output.push(':');
+                    match self { #(#arms),* }
+                });
+            }
+        }
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn add_canonical_bounds(generics: &mut syn::Generics) {
+    for parameter in &mut generics.params {
+        if let GenericParam::Type(parameter) = parameter {
+            parameter
+                .bounds
+                .push(parse_quote!(::behaviordiff_rust_runtime::Canonicalize));
+        }
+    }
 }
 
 struct ExitHookInstrumenter {
@@ -270,6 +441,8 @@ fn write_runtime(staging: &Path) -> Result<(), String> {
     fs::create_dir_all(runtime.join("src")).map_err(|error| error.to_string())?;
     fs::write(runtime.join("Cargo.toml"), RUNTIME_CARGO).map_err(|error| error.to_string())?;
     fs::write(runtime.join("src/lib.rs"), RUNTIME_SOURCE).map_err(|error| error.to_string())?;
+    fs::write(runtime.join("src/canonical.rs"), RUNTIME_CANONICAL)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -293,7 +466,7 @@ fn inject_runtime_dependencies(staging: &Path, files: &[PathBuf]) -> Result<(), 
         let mut dependency = InlineTable::new();
         dependency.insert("path", Value::from(slash(&dependency_path)));
         document["dependencies"]["behaviordiff-rust-runtime"] =
-            Item::Value(Value::InlineTable(dependency));
+            TomlItem::Value(Value::InlineTable(dependency));
         fs::write(&manifest, document.to_string()).map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -456,7 +629,7 @@ mod tests {
         .unwrap();
         fs::write(
             source.join("src/lib.rs"),
-            "pub fn answer( ) -> i32 { 42 }\n",
+            "struct Answer { value: i32 }\npub fn answer( ) -> i32 { Answer { value: 42 }.value }\n",
         )
         .unwrap();
 
@@ -481,6 +654,7 @@ mod tests {
             .is_file());
         let rewritten = fs::read_to_string(first.output.join("src/lib.rs")).unwrap();
         assert!(rewritten.contains("behaviordiff_rust_runtime::enter"));
+        assert!(rewritten.contains("impl ::behaviordiff_rust_runtime::Canonicalize"));
 
         fs::remove_dir_all(root).unwrap();
     }

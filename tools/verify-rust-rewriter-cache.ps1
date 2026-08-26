@@ -77,6 +77,9 @@ $origin = Get-Content (Join-Path $first.output '.behaviordiff-rust-origin.json')
 if (@($origin.rustFiles).Count -ne $first.rustFiles -or @($origin.rustFiles).Count -le 0) {
     throw "Rust origin manifest count mismatch: report=$($first.rustFiles) manifest=$(@($origin.rustFiles).Count)"
 }
+if ($origin.generatedReaders -le 0) {
+    throw "Rust rewrite generated no local type readers from $($first.rustFiles) non-empty Rust input file(s)"
+}
 
 & cargo check --manifest-path (Join-Path $first.output 'Cargo.toml')
 if ($LASTEXITCODE -ne 0) { throw "Rewritten Rust project failed cargo check: $LASTEXITCODE" }
@@ -89,6 +92,7 @@ if ($LASTEXITCODE -ne 0) { throw "Rewritten Rust project failed cargo check: $LA
     Miss = $first.cacheStatus
     Hit = $second.cacheStatus
     SourceHashChanges = 0
+    GeneratedReaders = $origin.generatedReaders
     Output = $first.output
 } | Format-List
 Write-Host 'RUST_REWRITER_CACHE: PASS'

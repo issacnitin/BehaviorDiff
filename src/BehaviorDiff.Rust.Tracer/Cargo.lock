@@ -5,6 +5,10 @@ version = 4
 [[package]]
 name = "behaviordiff-rust-runtime"
 version = "0.1.0"
+dependencies = [
+ "hex",
+ "sha2",
+]
 
 [[package]]
 name = "behaviordiff-rust-tracer"
