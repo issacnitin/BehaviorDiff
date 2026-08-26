@@ -102,6 +102,11 @@ pub(crate) fn run(options: &BaselineOptions) -> Result<i32, String> {
     apply(options, OffsetDateTime::now_utc().date())
 }
 
+pub(crate) fn validate_file(path: &str) -> Result<i32, String> {
+    read_baseline(path)?;
+    Ok(0)
+}
+
 fn apply(options: &BaselineOptions, today: Date) -> Result<i32, String> {
     let baseline = read_baseline(&options.baseline)?;
     let mut rules = build_rules(&baseline, today)?;

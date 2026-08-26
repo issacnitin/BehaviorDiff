@@ -136,11 +136,31 @@ fn run(args: Vec<String>) -> i32 {
                 EXIT_USAGE
             }
         },
+        "baseline-validate" => match parse_baseline_validate_options(&args[1..]) {
+            Ok(path) => match baseline::validate_file(&path) {
+                Ok(exit_code) => exit_code,
+                Err(message) => {
+                    eprintln!("Input error: {message}");
+                    EXIT_USAGE
+                }
+            },
+            Err(message) => {
+                eprintln!("{message}");
+                EXIT_USAGE
+            }
+        },
         _ => {
             eprintln!("Unknown command '{command}'.");
             print_usage();
             EXIT_USAGE
         }
+    }
+}
+
+fn parse_baseline_validate_options(args: &[String]) -> Result<String, String> {
+    match args {
+        [option, path] if option == "--baseline" => Ok(path.clone()),
+        _ => Err("usage: baseline-validate --baseline <baseline.yml>".to_owned()),
     }
 }
 
@@ -325,6 +345,7 @@ fn print_usage() {
     println!(
         "       behaviordiff-engine baseline --findings <findings.json> --baseline <baseline.yml>"
     );
+    println!("       behaviordiff-engine baseline-validate --baseline <baseline.yml>");
 }
 
 fn findings_usage() -> &'static str {
