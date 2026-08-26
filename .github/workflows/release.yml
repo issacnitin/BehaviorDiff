@@ -8,7 +8,7 @@ on:
       version:
         description: Version without the v prefix
         required: true
-        default: '0.2.0'
+        default: '0.3.0'
 
 permissions:
   contents: write
@@ -110,6 +110,7 @@ jobs:
     needs: [publish, clean-linux-proof]
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: behaviordiff-*
@@ -126,4 +127,5 @@ jobs:
             artifacts/*.sha256
             artifacts/*.metrics.json
             artifacts/SHA256SUMS
+          body_path: RELEASE-NOTES.md
           generate_release_notes: true

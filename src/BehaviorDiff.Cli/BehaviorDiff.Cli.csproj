@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>behaviordiff</ToolCommandName>
     <PackageId>BehaviorDiff.Tool</PackageId>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Authors>Nitin Issac Joy</Authors>
     <Description>Detect behavior changes between two .NET, Java, Node, Go, or Rust builds by tracing and comparing test execution.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

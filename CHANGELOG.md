@@ -2,7 +2,7 @@
 
 All notable changes to BehaviorDiff are documented here.
 
-## Unreleased
+## 0.3.0 - 2026-08-26
 
 ### Added
 
