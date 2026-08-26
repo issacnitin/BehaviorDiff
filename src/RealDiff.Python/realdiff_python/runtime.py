@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import ast
 import json
 import os
 import threading
@@ -66,6 +67,7 @@ class Runtime:
         self._closed = False
         trace_path.parent.mkdir(parents=True, exist_ok=True)
         self._stream = trace_path.open("w", encoding="utf-8", newline="\n")
+        self._discover_excluded_members()
         atexit.register(self.close)
 
     @classmethod
@@ -89,6 +91,38 @@ class Runtime:
                 self._complete(frame, return_value=value)
             elif event == "unwind":
                 self._complete(frame, exception=value)
+
+    def _discover_excluded_members(self) -> None:
+        if not self.scope.excludes:
+            return
+        for source in sorted(self.scope.root.rglob("*.py")):
+            try:
+                relative = source.relative_to(self.scope.root).as_posix()
+            except ValueError:
+                continue
+            if not self.scope.is_excluded(relative):
+                continue
+            try:
+                tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+            except (OSError, SyntaxError, UnicodeError):
+                continue
+            module = _module_name(relative)
+            for qualified, node in _source_callables(tree):
+                method = f"{module}::{qualified}"
+                return_kind = "Coroutine" if isinstance(node, ast.AsyncFunctionDef) else "Sync"
+                self._members.setdefault(
+                    method,
+                    Member(
+                        module,
+                        method,
+                        relative,
+                        node.lineno,
+                        "Skipped",
+                        return_kind,
+                        "ExcludedByScope",
+                        "Python: ExcludedPath",
+                    ),
+                )
 
     def register_test_root(self, code: CodeType, test_id: str) -> None:
         with self._lock:
@@ -340,6 +374,21 @@ def _capture_arguments(code: CodeType, frame: FrameType) -> dict[str, object]:
         names.append(code.co_varnames[next_index])
     locals_ = frame.f_locals
     return {name: dict.get(locals_, name, MISSING) for name in names}
+
+
+def _source_callables(tree: ast.AST):
+    def visit(nodes, parents):
+        for node in nodes:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                separator = ".<locals>." if parents and parents[-1][1] == "function" else "."
+                qualified = parents[-1][0] + separator + node.name if parents else node.name
+                yield qualified, node
+                yield from visit(node.body, parents + [(qualified, "function")])
+            elif isinstance(node, ast.ClassDef):
+                qualified = parents[-1][0] + "." + node.name if parents else node.name
+                yield from visit(node.body, parents + [(qualified, "class")])
+
+    yield from visit(getattr(tree, "body", ()), [])
 
 
 def _unittest_test_id(code: CodeType, frame: FrameType) -> str | None:

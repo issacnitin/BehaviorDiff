@@ -17,6 +17,7 @@ $javaTarget = Join-Path $repo 'src/RealDiff.Java.Agent/target'
 $nodeSource = Join-Path $repo 'src/RealDiff.Node'
 $goModule = Join-Path $repo 'src/RealDiff.Go'
 $rustManifest = Join-Path $repo 'src/RealDiff.Rust.Tracer/Cargo.toml'
+$pythonSource = Join-Path $repo 'src/RealDiff.Python'
 
 function Invoke-Checked([string]$label, [scriptblock]$command) {
     & $command
@@ -49,13 +50,14 @@ if (Test-Path $output) {
 }
 $javaOutput = Join-Path $output 'java'
 $nodeOutput = Join-Path $output 'node'
+$pythonOutput = Join-Path $output 'python'
 $rustRid = if ($IsWindows) { 'win-x64' } elseif ($IsLinux) { 'linux-x64' } else { 'osx-x64' }
 if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [Runtime.InteropServices.Architecture]::Arm64) {
     $rustRid = $rustRid.Replace('x64', 'arm64')
 }
 $rustOutput = Join-Path $output "rust/$rustRid"
 $goOutput = Join-Path $output "go/$rustRid"
-New-Item -ItemType Directory -Path $javaOutput, $nodeOutput, $goOutput, $rustOutput -Force | Out-Null
+New-Item -ItemType Directory -Path $javaOutput, $nodeOutput, $pythonOutput, $goOutput, $rustOutput -Force | Out-Null
 Copy-Item $javaAgent.FullName (Join-Path $javaOutput 'realdiff-java-agent.jar') -Force
 
 Write-Host '=== Stage Node tracer ===' -ForegroundColor Cyan
@@ -104,6 +106,25 @@ foreach ($relative in $required) {
 }
 if (Test-Path (Join-Path $nodeOutput 'test')) {
     throw 'The staged Node tracer unexpectedly contains tests.'
+}
+
+Write-Host '=== Stage Python tracer ===' -ForegroundColor Cyan
+Copy-Item (Join-Path $pythonSource 'sitecustomize.py') $pythonOutput -Force
+Copy-Item (Join-Path $pythonSource 'realdiff_python') $pythonOutput -Recurse -Force
+Get-ChildItem $pythonOutput -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
+    Remove-Item -Recurse -Force
+if (Test-Path (Join-Path $pythonOutput 'tests')) {
+    throw 'The staged Python tracer unexpectedly contains tests.'
+}
+foreach ($relative in @(
+    'python/sitecustomize.py',
+    'python/realdiff_python/__init__.py',
+    'python/realdiff_python/monitor.py',
+    'python/realdiff_python/runtime.py',
+    'python/realdiff_python/canonical.py',
+    'python/realdiff_python/pytest_plugin.py'
+)) {
+    Assert-Path (Join-Path $output $relative) "Staged tracer file '$relative'"
 }
 
 Write-Host '=== Build Go tracer ===' -ForegroundColor Cyan

@@ -85,13 +85,13 @@ RUN case "$TARGETARCH" in amd64) rid=linux-x64 ;; arm64) rid=linux-arm64 ;; *) e
 FROM ${RUNTIME_IMAGE} AS runtime
 ARG BUILD_VERSION=dev
 LABEL org.opencontainers.image.title="RealDiff" \
-    org.opencontainers.image.description="RealDiff CLI, engine, and .NET, Java, Node, Go, and Rust tracing toolchains" \
+    org.opencontainers.image.description="RealDiff CLI, engine, and .NET, Java, Node, Go, Rust, and Python tracing toolchains" \
       org.opencontainers.image.source="https://github.com/issacnitin/RealDiff" \
       org.opencontainers.image.version="${BUILD_VERSION}" \
       org.opencontainers.image.licenses="MIT"
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends build-essential ca-certificates git libicu74 \
+    && apt-get install --yes --no-install-recommends build-essential ca-certificates git libicu74 python3.12 python3-pytest \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=dotnet-build /usr/share/dotnet /usr/share/dotnet
@@ -117,6 +117,8 @@ COPY --from=node-build /out/ /opt/realdiff/tracers/node/
 COPY --from=go-build /out/ /opt/realdiff/tracers/go/
 COPY --from=rust-build /out/ /opt/realdiff/engines/rust/
 COPY --from=rust-tracer-build /out/ /opt/realdiff/tracers/rust/
+COPY src/RealDiff.Python/sitecustomize.py /opt/realdiff/tracers/python/sitecustomize.py
+COPY src/RealDiff.Python/realdiff_python/ /opt/realdiff/tracers/python/realdiff_python/
 COPY docker/realdiff.sh /usr/local/bin/realdiff
 COPY docker/action-entrypoint.sh /usr/local/bin/realdiff-action
 COPY docker/entrypoint.sh /usr/local/bin/realdiff-entrypoint
@@ -128,6 +130,8 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     RUSTUP_HOME=/usr/local/rustup \
     REALDIFF_JAVA_AGENT=/opt/realdiff/tracers/java/realdiff-java-agent.jar \
     REALDIFF_NODE_TRACER=/opt/realdiff/tracers/node \
+    REALDIFF_PYTHON=/usr/bin/python3.12 \
+    REALDIFF_PYTHON_TRACER=/opt/realdiff/tracers/python \
     DOTNET_ROOT=/usr/share/dotnet \
     PATH=/opt/java/openjdk/bin:/usr/local/go/bin:/usr/local/cargo/bin:/usr/share/dotnet:${PATH}
 
@@ -143,7 +147,9 @@ RUN chmod +x /usr/local/bin/realdiff /usr/local/bin/realdiff-action \
     && npm --version \
     && go version \
     && cargo --version \
-    && rustc --version
+    && rustc --version \
+    && python3.12 --version \
+    && python3.12 -m pytest --version
 
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/realdiff-entrypoint"]

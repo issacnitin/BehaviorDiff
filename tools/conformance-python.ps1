@@ -51,6 +51,7 @@ try {
     $version = @(& $python -c "import sys; print('.'.join(map(str, sys.version_info[:3]))); raise SystemExit(0 if sys.version_info >= (3, 12) and hasattr(sys, 'monitoring') else 12)" 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "Python 3.12+ with sys.monitoring is required: $version" }
     $env:REALDIFF_PYTHON = $python
+    $env:REALDIFF_PYTHON_TRACER = Join-Path $repo 'src/RealDiff.Python'
     $env:PYTHONPATH = Join-Path $repo 'samples/PythonReference/src'
     $pytestOutput = Invoke-Checked 'Python reference pytest' { & $python -m pytest -q (Join-Path $repo 'samples/PythonReference/tests_pytest') }
     if (($pytestOutput -join "`n") -notmatch '6 passed') { throw 'Python pytest runner count was not 6.' }
@@ -58,7 +59,7 @@ try {
     if (($unittestOutput -join "`n") -notmatch 'Ran 6 tests') { throw 'Python unittest runner count was not 6.' }
     $env:PYTHONPATH = Join-Path $repo 'src/RealDiff.Python'
     $unitOutput = Invoke-Checked 'Python tracer tests' { & $python -m unittest discover -s (Join-Path $repo 'src/RealDiff.Python/tests') -v }
-    if (($unitOutput -join "`n") -notmatch 'Ran 14 tests') { throw 'Python tracer test count was not 14.' }
+    if (($unitOutput -join "`n") -notmatch 'Ran 15 tests') { throw 'Python tracer test count was not 15.' }
 
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
     $target = Join-Path $work 'repository'

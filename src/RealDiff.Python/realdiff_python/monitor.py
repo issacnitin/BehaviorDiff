@@ -36,17 +36,32 @@ class Scope:
         return cls(Path(root_value).resolve(), includes, excludes)
 
     def relative_path(self, code: CodeType) -> str | None:
+        relative = self.repository_path(code)
+        if relative is None:
+            return None
+        if self.is_excluded(relative):
+            return None
+        if not self.is_included(relative):
+            return None
+        return relative
+
+    def is_excluded(self, relative: str) -> bool:
+        parts = _path_parts(relative)
+        return any(_prefix_matches(parts, prefix) for prefix in self.excludes)
+
+    def is_included(self, relative: str) -> bool:
+        if not self.includes:
+            return True
+        parts = _path_parts(relative)
+        return any(_prefix_matches(parts, prefix) for prefix in self.includes)
+
+    def repository_path(self, code: CodeType) -> str | None:
         filename = code.co_filename
         if not filename or filename.startswith("<"):
             return None
         try:
             relative = Path(filename).resolve().relative_to(self.root).as_posix()
         except (OSError, ValueError):
-            return None
-        parts = _path_parts(relative)
-        if any(_prefix_matches(parts, prefix) for prefix in self.excludes):
-            return None
-        if self.includes and not any(_prefix_matches(parts, prefix) for prefix in self.includes):
             return None
         return relative
 

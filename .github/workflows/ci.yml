@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tracer: [dotnet, java, node, go, rust]
+        tracer: [dotnet, java, node, go, rust, python]
     steps:
       - uses: actions/checkout@v4
       - name: Use .NET 8
@@ -85,6 +85,11 @@ jobs:
         uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt, clippy
+      - name: Use Python 3.12
+        if: matrix.tracer == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Build .NET tracer
         if: matrix.tracer == 'dotnet'
         shell: pwsh
@@ -118,6 +123,13 @@ jobs:
           cargo clippy --manifest-path src/RealDiff.Rust.Tracer/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path src/RealDiff.Rust.Tracer/Cargo.toml
           pwsh -NoProfile -File tools/verify-rust-redaction.ps1 -WorkDirectory "$env:RUNNER_TEMP\rust-redaction"
+      - name: Test Python tracer
+        if: matrix.tracer == 'python'
+        shell: pwsh
+        run: |
+          python -m pip install pytest==8.4.2
+          $env:PYTHONPATH = 'src/RealDiff.Python'
+          python -m unittest discover -s src/RealDiff.Python/tests -v
 
   conformance:
     name: ${{ matrix.suite }} conformance
@@ -126,7 +138,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [dotnet, java, node-js, node-ts, go, rust]
+        suite: [dotnet, java, node-js, node-ts, go, rust, python]
     steps:
       - uses: actions/checkout@v4
       - name: Use Rust 1.98
@@ -159,6 +171,14 @@ jobs:
           cache-dependency-path: |
             src/RealDiff.Go/go.mod
             samples/GoReference/go.mod
+      - name: Use Python 3.12
+        if: matrix.suite == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python test runner
+        if: matrix.suite == 'python'
+        run: python -m pip install pytest==8.4.2
       - name: Run conformance suite
         shell: pwsh
         run: pwsh -NoProfile -File tools/conformance-${{ matrix.suite }}.ps1
@@ -209,6 +229,11 @@ jobs:
           cache-dependency-path: |
             src/RealDiff.Go/go.mod
             samples/GoReference/go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python test runner
+        run: python -m pip install pytest==8.4.2
       - name: Assert removed engine surfaces stay absent
         shell: pwsh
         run: |

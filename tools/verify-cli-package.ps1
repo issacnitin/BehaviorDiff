@@ -18,6 +18,8 @@ $previousJavaAgent = $env:REALDIFF_JAVA_AGENT
 $previousNodeTracer = $env:REALDIFF_NODE_TRACER
 $previousGoRewriter = $env:REALDIFF_GO_REWRITER
 $previousRustTracer = $env:REALDIFF_RUST_TRACER
+$previousPythonTracer = $env:REALDIFF_PYTHON_TRACER
+$previousPython = $env:REALDIFF_PYTHON
 
 function Invoke-Checked([string]$label, [scriptblock]$command) {
     & $command | ForEach-Object { Write-Host $_ }
@@ -31,7 +33,7 @@ function New-ReferenceRepository([string]$name, [string]$sample) {
         Copy-Item $_.FullName -Destination $directory -Recurse -Force
     }
     Get-ChildItem $directory -Directory -Recurse -Force |
-        Where-Object Name -In @('target', 'node_modules', 'dist') |
+        Where-Object Name -In @('target', 'node_modules', 'dist', '__pycache__', '.pytest_cache') |
         Sort-Object { $_.FullName.Length } -Descending |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -66,6 +68,7 @@ function Assert-RunArtifacts(
         'node' { 'node tracer' }
         'go' { 'go rewriter' }
         'rust' { 'rust tracer' }
+        'python' { 'python tracer' }
     }
     $pathMatch = [regex]::Match($text, "(?m)^\s*$label\s*:\s*(.+)$")
     if (-not $pathMatch.Success) {
@@ -162,6 +165,11 @@ try {
         'tools/net8.0/any/tracers/node/adapters/jest.cjs',
         'tools/net8.0/any/tracers/node/adapters/vitest.mjs',
         'tools/net8.0/any/tracers/node/node_modules/@babel/parser/package.json',
+        'tools/net8.0/any/tracers/python/sitecustomize.py',
+        'tools/net8.0/any/tracers/python/realdiff_python/monitor.py',
+        'tools/net8.0/any/tracers/python/realdiff_python/runtime.py',
+        'tools/net8.0/any/tracers/python/realdiff_python/canonical.py',
+        'tools/net8.0/any/tracers/python/realdiff_python/pytest_plugin.py',
         'tools/net8.0/any/Mono.Cecil.dll',
         $goTracerPackageEntry,
         $rustPackageEntry,
@@ -171,6 +179,9 @@ try {
     if ($missing.Count -ne 0) { throw "Package entries are missing: $($missing -join ', ')" }
     if (@($entries | Where-Object { $_ -match '/tracers/node/test/' }).Count -ne 0) {
         throw 'The CLI package contains Node tracer tests.'
+    }
+    if (@($entries | Where-Object { $_ -match '/tracers/python/tests/' -or $_ -match '/__pycache__/' }).Count -ne 0) {
+        throw 'The CLI package contains Python tracer tests or bytecode caches.'
     }
 
     [xml]$project = Get-Content $cliProject -Raw
@@ -192,10 +203,12 @@ try {
     $env:REALDIFF_NODE_TRACER = $null
     $env:REALDIFF_GO_REWRITER = $null
     $env:REALDIFF_RUST_TRACER = $null
+    $env:REALDIFF_PYTHON_TRACER = $null
     $java = New-ReferenceRepository 'java' (Join-Path $repo 'samples/JavaReference')
     $node = New-ReferenceRepository 'node' (Join-Path $repo 'samples/NodeReference')
     $go = New-ReferenceRepository 'go' (Join-Path $repo 'samples/GoReference')
     $rust = New-ReferenceRepository 'rust' (Join-Path $repo 'samples/RustReference')
+    $python = New-ReferenceRepository 'python' (Join-Path $repo 'samples/PythonReference')
 
     Write-Host '=== Installed Java CLI invocation ===' -ForegroundColor Cyan
     $javaResult = Invoke-LanguageProof 'java' $java $cli
@@ -205,6 +218,8 @@ try {
     $goResult = Invoke-LanguageProof 'go' $go $cli
     Write-Host '=== Installed Rust CLI invocation ===' -ForegroundColor Cyan
     $rustResult = Invoke-LanguageProof 'rust' $rust $cli
+    Write-Host '=== Installed Python CLI invocation ===' -ForegroundColor Cyan
+    $pythonResult = Invoke-LanguageProof 'python' $python $cli
 
     $size = [Math]::Round($package.Length / 1MB, 2)
     Write-Host 'CLI package proof: PASS' -ForegroundColor Green
@@ -213,12 +228,15 @@ try {
     Write-Host ("  Node : runs={0} events={1}" -f $nodeResult.Runs, $nodeResult.Events)
     Write-Host ("  Go   : runs={0} events={1}" -f $goResult.Runs, $goResult.Events)
     Write-Host ("  Rust : runs={0} events={1}" -f $rustResult.Runs, $rustResult.Events)
+    Write-Host ("  Python: runs={0} events={1}" -f $pythonResult.Runs, $pythonResult.Events)
 }
 finally {
     $env:REALDIFF_JAVA_AGENT = $previousJavaAgent
     $env:REALDIFF_NODE_TRACER = $previousNodeTracer
     $env:REALDIFF_GO_REWRITER = $previousGoRewriter
     $env:REALDIFF_RUST_TRACER = $previousRustTracer
+    $env:REALDIFF_PYTHON_TRACER = $previousPythonTracer
+    $env:REALDIFF_PYTHON = $previousPython
     if ($ownsWork -and -not $KeepWork) {
         Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
     } else {

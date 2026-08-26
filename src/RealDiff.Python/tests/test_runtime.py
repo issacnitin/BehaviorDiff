@@ -118,6 +118,34 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(f"{ExampleTests.__module__}.{ExampleTests.__qualname__}.test_value", event["testId"])
             self.assertTrue(event["isHarness"])
 
+    def test_excluded_repository_member_is_manifest_visible(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root_path = Path(temporary)
+            trace = root_path / "run.ndjson"
+            source = root_path / "src" / "config.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("def excluded():\n    return True\n", encoding="utf-8")
+            runtime = Runtime(trace, Scope(root_path, (("src",),), (("src", "config.py"),)))
+            install(runtime.on_event, runtime.scope)
+
+            def excluded():
+                return True
+
+            excluded.__code__ = excluded.__code__.replace(co_filename=str(source))
+            self.assertTrue(excluded())
+            uninstall()
+            runtime.close()
+
+            self.assertEqual("", trace.read_text(encoding="utf-8"))
+            manifest = [
+                json.loads(line)
+                for line in trace.with_name("run.manifest.ndjson").read_text(encoding="utf-8").splitlines()
+            ]
+            member = next(record for record in manifest if record.get("kind") == "member")
+            self.assertEqual("Skipped", member["status"])
+            self.assertEqual("ExcludedByScope", member["skipReason"])
+            self.assertEqual("src/config.py", member["filePath"])
+
     def test_generators_and_coroutines_emit_only_at_final_completion(self):
         with tempfile.TemporaryDirectory() as temporary:
             root_path = Path(temporary)

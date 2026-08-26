@@ -71,6 +71,8 @@ $required = @(
     'Mono.Cecil.dll',
     'tracers/java/realdiff-java-agent.jar',
     'tracers/node/register.cjs',
+    'tracers/python/sitecustomize.py',
+    'tracers/python/realdiff_python/runtime.py',
     "tracers/go/$RuntimeIdentifier/$(if ($IsWindows) { 'realdiff-go-rewrite.exe' } else { 'realdiff-go-rewrite' })",
     "tracers/rust/$RuntimeIdentifier/$(if ($IsWindows) { 'realdiff-rust-rewrite.exe' } else { 'realdiff-rust-rewrite' })",
     "engines/rust/$RuntimeIdentifier/$(if ($IsWindows) { 'realdiff-engine.exe' } else { 'realdiff-engine' })"
