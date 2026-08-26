@@ -56,7 +56,10 @@ namespace BehaviorDiff.Cli
                 ?? Path.Combine(repository, ".behaviordiff", "baseline.yml"));
             if (operation == "apply")
             {
-                BaselineResult result = BaselinePolicy.Apply(Path.GetFullPath(findings), baselinePath);
+                BaselineResult result = EngineDispatch.ApplyBaseline(
+                    AnalysisEngine.Rust,
+                    Path.GetFullPath(findings),
+                    baselinePath);
                 Report(result, baselinePath);
                 return result.ExitCode;
             }

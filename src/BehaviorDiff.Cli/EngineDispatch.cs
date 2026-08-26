@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using BehaviorDiff.Engine;
 
 namespace BehaviorDiff.Cli
@@ -205,6 +206,64 @@ namespace BehaviorDiff.Cli
                     prSha,
                     mergeBaseSha),
                 "invalid findings");
+        }
+
+        internal static void ValidateBaseline(AnalysisEngine engine, string path)
+        {
+            if (engine == AnalysisEngine.CSharp)
+            {
+                BaselinePolicy.Read(path);
+                return;
+            }
+
+            ProcessResult result = Shell.Run(
+                ResolveRustEngine(),
+                new[] { "baseline-validate", "--baseline", path },
+                Environment.CurrentDirectory);
+            Console.Write(result.Output);
+            if (result.ExitCode != 0)
+            {
+                throw new CliException(
+                    InputError(result.Output)
+                    ?? "The Rust engine rejected the baseline without a structured error.");
+            }
+        }
+
+        internal static BaselineResult ApplyBaseline(
+            AnalysisEngine engine,
+            string findingsPath,
+            string baselinePath)
+        {
+            if (engine == AnalysisEngine.CSharp)
+            {
+                return BaselinePolicy.Apply(findingsPath, baselinePath);
+            }
+
+            ProcessResult result = Shell.Run(
+                ResolveRustEngine(),
+                new[] { "baseline", "--findings", findingsPath, "--baseline", baselinePath },
+                Environment.CurrentDirectory);
+            Console.Write(result.Output);
+            if (result.ExitCode != ExitCodes.NoUnexpected
+                && result.ExitCode != ExitCodes.UnexpectedFound)
+            {
+                throw new CliException(
+                    InputError(result.Output)
+                    ?? "The Rust engine could not apply the baseline; exit " + result.ExitCode + ".");
+            }
+
+            using JsonDocument findings = JsonDocument.Parse(File.ReadAllText(findingsPath));
+            JsonElement root = findings.RootElement;
+            JsonElement summary = root.GetProperty("summary");
+            JsonElement baseline = root.GetProperty("baseline");
+            return new BaselineResult(
+                summary.GetProperty("actionableUnexpectedMembers").GetInt32(),
+                summary.GetProperty("actionableUnexpectedCallSites").GetInt32(),
+                summary.GetProperty("suppressedMembers").GetInt32(),
+                summary.GetProperty("suppressedCallSites").GetInt32(),
+                baseline.GetProperty("staleEntries").GetArrayLength(),
+                baseline.GetProperty("digestMismatchEntries").GetArrayLength(),
+                baseline.GetProperty("expiredEntries").GetArrayLength());
         }
 
         private static IEnumerable<string> Arguments(DiffOptions options)

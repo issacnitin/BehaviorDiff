@@ -163,7 +163,7 @@ namespace BehaviorDiff.Cli
 
                 if (baselinePath is not null)
                 {
-                    BaselinePolicy.Read(baselinePath);
+                    EngineDispatch.ValidateBaseline(engine, baselinePath);
                 }
 
                 pipeline = new Pipeline(
@@ -811,7 +811,7 @@ namespace BehaviorDiff.Cli
             {
                 Console.WriteLine();
                 Console.WriteLine("=== baseline policy ===");
-                BaselineResult baseline = BaselinePolicy.Apply(_findings, _baseline);
+                BaselineResult baseline = EngineDispatch.ApplyBaseline(_engine, _findings, _baseline);
                 BaselineCommand.Report(baseline, _baseline);
                 policyExitCode = baseline.ExitCode;
             }
