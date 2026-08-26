@@ -1,0 +1,19 @@
+[package]
+name = "behaviordiff-rust-tracer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "behaviordiff-rust-rewrite"
+path = "src/main.rs"
+
+[dependencies]
+hex = "0.4"
+prettyplease = "0.2"
+quote = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+syn = { version = "2", features = ["full", "parsing", "printing"] }
+walkdir = "2"
