@@ -4,6 +4,7 @@ import atexit
 import json
 import os
 import threading
+import unittest
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,8 @@ class CallState:
     args_digest: str
     args_rendered: str
     test_id: str = "(no-test)"
+    is_test_root: bool = False
+    is_harness: bool = False
     pending_exception: BaseException | None = None
     suspended: bool = False
 
@@ -40,6 +43,7 @@ class Member:
     return_kind: str
     skip_reason: str | None = None
     detail: str | None = None
+    is_test_root: bool = False
 
 
 class Runtime:
@@ -50,7 +54,9 @@ class Runtime:
         self._lock = threading.RLock()
         self._next_call_id = 1
         self._states: dict[int, CallState] = {}
+        self._calls: dict[int, CallState] = {}
         self._stacks: dict[int, list[int]] = defaultdict(list)
+        self._pending_test_roots: dict[int, tuple[CodeType, str]] = {}
         self._ordinals: dict[tuple[str, str], int] = defaultdict(int)
         self._members: dict[str, Member] = {}
         self._module_calls: dict[str, int] = defaultdict(int)
@@ -84,6 +90,14 @@ class Runtime:
             elif event == "unwind":
                 self._complete(frame, exception=value)
 
+    def register_test_root(self, code: CodeType, test_id: str) -> None:
+        with self._lock:
+            self._pending_test_roots[threading.get_native_id()] = (code, test_id.replace("\\", "/"))
+
+    def clear_test_root(self) -> None:
+        with self._lock:
+            self._pending_test_roots.pop(threading.get_native_id(), None)
+
     def _start(self, code: CodeType, frame: FrameType) -> None:
         file_path = self.scope.relative_path(code)
         if file_path is None:
@@ -99,9 +113,20 @@ class Runtime:
 
         thread_id = threading.get_native_id()
         stack = self._stacks[thread_id]
+        pending_root = self._pending_test_roots.get(thread_id)
+        explicit_root = pending_root is not None and pending_root[0] is code
+        unittest_id = _unittest_test_id(code, frame)
+        is_test_root = explicit_root or unittest_id is not None
+        if explicit_root:
+            test_id = pending_root[1]
+        elif unittest_id is not None:
+            test_id = unittest_id
+        elif stack:
+            test_id = self._calls[stack[-1]].test_id
+        else:
+            test_id = "(no-test)"
         call_id = self._next_call_id
         self._next_call_id += 1
-        test_id = "(no-test)"
         ordinal_key = (test_id, method)
         ordinal = self._ordinals[ordinal_key]
         self._ordinals[ordinal_key] += 1
@@ -116,16 +141,20 @@ class Runtime:
             thread_id=thread_id,
             args_digest="",
             args_rendered="",
+            test_id=test_id,
+            is_test_root=is_test_root,
+            is_harness=is_test_root,
         )
         arguments = _capture_arguments(code, frame)
         canonical_arguments = self._canonicalizer.digest(arguments, source_path=file_path)
         state.args_digest = canonical_arguments.digest
         state.args_rendered = canonical_arguments.rendered
         self._states[id(frame)] = state
+        self._calls[call_id] = state
         stack.append(call_id)
         self._members.setdefault(
             method,
-            Member(module, method, file_path, state.line, "Patched", _return_kind(code)),
+            Member(module, method, file_path, state.line, "Patched", _return_kind(code), is_test_root=is_test_root),
         )
 
     def _resume(self, frame: FrameType) -> None:
@@ -160,6 +189,7 @@ class Runtime:
         if state is None:
             return
         self._pop_stack(state)
+        self._calls.pop(state.call_id, None)
         record: dict[str, object] = {
             "testId": state.test_id,
             "methodFullName": state.method,
@@ -173,6 +203,8 @@ class Runtime:
             "argsRendered": state.args_rendered,
             "threadId": state.thread_id,
         }
+        if state.is_harness:
+            record["isHarness"] = True
         if state.parent_call_id is not None:
             record["parentCallId"] = state.parent_call_id
         if exception is not None:
@@ -242,6 +274,8 @@ class Runtime:
                         "returnKind": member.return_kind,
                         "sourceResolution": "debugInfo",
                     }
+                    if member.is_test_root:
+                        record["isTestRoot"] = True
                     if member.skip_reason is not None:
                         record["skipReason"] = member.skip_reason
                     if member.detail is not None:
@@ -305,3 +339,28 @@ def _capture_arguments(code: CodeType, frame: FrameType) -> dict[str, object]:
         names.append(code.co_varnames[next_index])
     locals_ = frame.f_locals
     return {name: dict.get(locals_, name, MISSING) for name in names}
+
+
+def _unittest_test_id(code: CodeType, frame: FrameType) -> str | None:
+    if not code.co_name.startswith("test"):
+        return None
+    self_value = dict.get(frame.f_locals, "self", MISSING)
+    if self_value is MISSING:
+        return None
+    type_ = type(self_value)
+    hierarchy = type.__getattribute__(type_, "__mro__")
+    if unittest.TestCase not in hierarchy:
+        return None
+    return f"{type_.__module__}.{type_.__qualname__}.{code.co_name}"
+
+
+_active_runtime: Runtime | None = None
+
+
+def set_active_runtime(runtime: Runtime | None) -> None:
+    global _active_runtime
+    _active_runtime = runtime
+
+
+def active_runtime() -> Runtime | None:
+    return _active_runtime
