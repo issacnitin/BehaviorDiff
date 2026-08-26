@@ -11,6 +11,7 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -89,18 +90,30 @@ struct RunData {
 struct Interner {
     ids: HashMap<Arc<str>, u32>,
     values: Vec<Arc<str>>,
+    profile: InternerProfile,
 }
 
 impl Interner {
     fn intern(&mut self, value: &str) -> Result<u32, String> {
+        let started = self.profile.enabled.then(Instant::now);
         if let Some(id) = self.ids.get(value) {
+            if let Some(started) = started {
+                self.profile.hits += 1;
+                self.profile.elapsed += started.elapsed();
+            }
             return Ok(*id);
+        }
+        if self.profile.enabled {
+            self.profile.misses += 1;
         }
         let id = u32::try_from(self.values.len())
             .map_err(|_| "streaming interner exceeded u32 identifiers".to_owned())?;
         let stored: Arc<str> = Arc::from(value);
         self.values.push(stored.clone());
         self.ids.insert(stored, id);
+        if let Some(started) = started {
+            self.profile.elapsed += started.elapsed();
+        }
         Ok(id)
     }
 
@@ -110,6 +123,107 @@ impl Interner {
 
     fn optional(&self, id: u32) -> Option<&str> {
         (id != u32::MAX).then(|| self.resolve(id))
+    }
+}
+
+#[derive(Default)]
+struct InternerProfile {
+    enabled: bool,
+    hits: u64,
+    misses: u64,
+    elapsed: Duration,
+}
+
+#[derive(Default)]
+struct Profile {
+    enabled: bool,
+    total: Duration,
+    load_runs: Vec<(String, Duration)>,
+    trace_events: u64,
+    trace_bytes: u64,
+    stream_positions: u64,
+    stream_position: Duration,
+    line_reads: Duration,
+    event_parse: Duration,
+    digest_compaction: Duration,
+    event_store: Duration,
+    manifest_read: Duration,
+    ordinal_sort: Duration,
+    manifest_compare: Duration,
+    trace_compare: Duration,
+    artifact_runs_counts: Duration,
+    artifact_matched: Duration,
+    artifact_divergences: Duration,
+    artifact_noise: Duration,
+    artifact_coverage: Duration,
+    artifact_call_tree: Duration,
+    artifact_pr_call_tree: Duration,
+    evidence_reads: u64,
+    evidence_bytes: u64,
+    evidence_read: Duration,
+    artifact_total: Duration,
+}
+
+impl Profile {
+    fn new() -> Self {
+        Self {
+            enabled: std::env::var_os("BEHAVIORDIFF_RUST_PROFILE").is_some(),
+            ..Self::default()
+        }
+    }
+
+    fn start(&self) -> Option<Instant> {
+        self.enabled.then(Instant::now)
+    }
+
+    fn report(&self, strings: &Interner) {
+        if !self.enabled {
+            return;
+        }
+        let milliseconds = |duration: Duration| duration.as_secs_f64() * 1000.0;
+        let runs = self
+            .load_runs
+            .iter()
+            .map(|(name, elapsed)| json!({ "name": name, "milliseconds": milliseconds(*elapsed) }))
+            .collect::<Vec<_>>();
+        eprintln!(
+            "BEHAVIORDIFF_RUST_PROFILE {}",
+            serde_json::to_string(&json!({
+                "totalMilliseconds": milliseconds(self.total),
+                "runs": runs,
+                "traceEvents": self.trace_events,
+                "traceBytes": self.trace_bytes,
+                "streamPosition": { "calls": self.stream_positions, "milliseconds": milliseconds(self.stream_position) },
+                "lineReadMilliseconds": milliseconds(self.line_reads),
+                "borrowedEventParseMilliseconds": milliseconds(self.event_parse),
+                "interner": {
+                    "hits": strings.profile.hits,
+                    "misses": strings.profile.misses,
+                    "values": strings.values.len(),
+                    "milliseconds": milliseconds(strings.profile.elapsed),
+                },
+                "digestCompactionMilliseconds": milliseconds(self.digest_compaction),
+                "eventStoreMilliseconds": milliseconds(self.event_store),
+                "manifestReadMilliseconds": milliseconds(self.manifest_read),
+                "ordinalSortMilliseconds": milliseconds(self.ordinal_sort),
+                "manifestCompareMilliseconds": milliseconds(self.manifest_compare),
+                "traceCompareMilliseconds": milliseconds(self.trace_compare),
+                "artifact": {
+                    "totalMilliseconds": milliseconds(self.artifact_total),
+                    "runsAndCountsMilliseconds": milliseconds(self.artifact_runs_counts),
+                    "matchedMilliseconds": milliseconds(self.artifact_matched),
+                    "divergencesMilliseconds": milliseconds(self.artifact_divergences),
+                    "noiseMilliseconds": milliseconds(self.artifact_noise),
+                    "coverageMilliseconds": milliseconds(self.artifact_coverage),
+                    "callTreeMilliseconds": milliseconds(self.artifact_call_tree),
+                    "prCallTreeMilliseconds": milliseconds(self.artifact_pr_call_tree),
+                    "evidenceReadBacks": self.evidence_reads,
+                    "evidenceBytes": self.evidence_bytes,
+                    "evidenceReadMilliseconds": milliseconds(self.evidence_read),
+                },
+            }))
+            .expect("profile JSON must serialize")
+        );
     }
 }
 
@@ -244,13 +358,17 @@ struct EvidenceEvent {
 }
 
 pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
+    let total_started = Instant::now();
+    let mut profile = Profile::new();
     let mut strings = Interner::default();
+    strings.profile.enabled = profile.enabled;
     let base1 = load_run(
         "base_run1",
         &options.base1,
         options.base_root.as_deref(),
         true,
         &mut strings,
+        &mut profile,
     )?;
     let base2 = load_run(
         "base_run2",
@@ -258,6 +376,7 @@ pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
         options.base_root.as_deref(),
         false,
         &mut strings,
+        &mut profile,
     )?;
     let base3 = if options.base3.is_empty() {
         None
@@ -268,6 +387,7 @@ pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
             options.base_root.as_deref(),
             false,
             &mut strings,
+            &mut profile,
         )?)
     };
     let pr = load_run(
@@ -276,6 +396,7 @@ pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
         options.pr_root.as_deref(),
         true,
         &mut strings,
+        &mut profile,
     )?;
     let bases: Vec<_> = [Some(&base1), Some(&base2), base3.as_ref()]
         .into_iter()
@@ -308,6 +429,7 @@ pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
         ));
     }
 
+    let manifest_compare_started = profile.start();
     let mut manifest_noise_signatures = BTreeSet::new();
     let mut manifest_noise = Vec::new();
     for left in 0..bases.len() {
@@ -323,6 +445,9 @@ pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
         .into_iter()
         .filter(|gap| !manifest_noise_signatures.contains(&gap_signature(gap)))
         .collect();
+    if let Some(started) = manifest_compare_started {
+        profile.manifest_compare += started.elapsed();
+    }
     let changed_files = load_changed_files(&options.changed_files)?;
     let method_files = method_files(&base1, &pr, &strings);
     let mut lifecycle = Vec::new();
@@ -344,6 +469,7 @@ pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
         .filter_map(|gap| gap.method.clone())
         .collect();
 
+    let trace_compare_started = profile.start();
     let mut noise_keys = HashSet::new();
     for left in 0..bases.len() {
         for right in left + 1..bases.len() {
@@ -352,6 +478,9 @@ pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
         }
     }
     let (raw, matched, harness_divergences) = compare(&base1, &pr, &strings);
+    if let Some(started) = trace_compare_started {
+        profile.trace_compare += started.elapsed();
+    }
     let mut remaining: Vec<_> = raw
         .iter()
         .filter(|item| {
@@ -399,6 +528,7 @@ pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
     let output = File::create(&options.output).map_err(|error| error.to_string())?;
     let base_readers = open_files(&base1.files)?;
     let pr_readers = open_files(&pr.files)?;
+    let profile = RefCell::new(profile);
     let artifact = Artifact {
         strings: &strings,
         base1: &base1,
@@ -413,11 +543,18 @@ pub(crate) fn run(options: &DiffOptions) -> Result<i32, String> {
         harness_divergences: &harness_divergences,
         base_readers: &base_readers,
         pr_readers: &pr_readers,
+        profile: &profile,
     };
+    let artifact_started = profile.borrow().start();
     let mut serializer = serde_json::Serializer::pretty(output);
     artifact
         .serialize(&mut serializer)
         .map_err(|error| error.to_string())?;
+    if let Some(started) = artifact_started {
+        profile.borrow_mut().artifact_total += started.elapsed();
+    }
+    profile.borrow_mut().total = total_started.elapsed();
+    profile.borrow().report(&strings);
     Ok(0)
 }
 
@@ -557,7 +694,9 @@ fn load_run(
     root: Option<&str>,
     retain_graph: bool,
     strings: &mut Interner,
+    profile: &mut Profile,
 ) -> Result<RunData, String> {
+    let run_started = profile.start();
     let mut trace_files = files_with_suffix(directory, ".ndjson")?;
     trace_files.retain(|path| !path.to_string_lossy().ends_with(".manifest.ndjson"));
     let mut run = RunData {
@@ -583,12 +722,21 @@ fn load_run(
         let mut physical_records = 0_i64;
         loop {
             line.clear();
+            let position_started = profile.start();
             let offset = reader
                 .stream_position()
                 .map_err(|error| error.to_string())?;
+            if let Some(started) = position_started {
+                profile.stream_positions += 1;
+                profile.stream_position += started.elapsed();
+            }
+            let read_started = profile.start();
             let bytes = reader
                 .read_line(&mut line)
                 .map_err(|error| error.to_string())?;
+            if let Some(started) = read_started {
+                profile.line_reads += started.elapsed();
+            }
             if bytes == 0 {
                 break;
             }
@@ -597,9 +745,17 @@ fn load_run(
                 continue;
             }
             physical_records += 1;
+            if profile.enabled {
+                profile.trace_events += 1;
+                profile.trace_bytes += bytes as u64;
+            }
+            let parse_started = profile.start();
             let event: BorrowedEvent<'_> = serde_json::from_str(record).map_err(|error| {
                 format!("{}({physical_records}): {error}", trace_path.display())
             })?;
+            if let Some(started) = parse_started {
+                profile.event_parse += started.elapsed();
+            }
             if event.test_id.is_empty() || event.method_full_name.is_empty() || event.ordinal < 0 {
                 return Err(format!(
                     "{}({physical_records}): invalid event identity",
@@ -625,10 +781,17 @@ fn load_run(
             };
             let markers = marker_bits(event.args_rendered.as_deref())
                 | marker_bits(event.return_rendered.as_deref());
+            let digest_started = profile.start();
+            let args = compact_digest(event.args_digest.as_deref(), strings)?;
+            let result = compact_digest(event.return_digest.as_deref(), strings)?;
+            if let Some(started) = digest_started {
+                profile.digest_compaction += started.elapsed();
+            }
+            let store_started = profile.start();
             let signature = Signature {
                 ordinal: event.ordinal,
-                args: compact_digest(event.args_digest.as_deref(), strings)?,
-                result: compact_digest(event.return_digest.as_deref(), strings)?,
+                args,
+                result,
                 exception: event
                     .exception_type
                     .as_deref()
@@ -665,8 +828,15 @@ fn load_run(
                     flags: u8::from(event.is_harness),
                 });
             }
+            if let Some(started) = store_started {
+                profile.event_store += started.elapsed();
+            }
         }
+        let manifest_started = profile.start();
         let manifest = read_manifest(trace_path, physical_records)?;
+        if let Some(started) = manifest_started {
+            profile.manifest_read += started.elapsed();
+        }
         if !run.schema.is_empty()
             && (run.schema != manifest.schema || run.language != manifest.language)
         {
@@ -681,6 +851,7 @@ fn load_run(
             &mut assembly_indexes,
         );
         if ordinal_error.is_none() {
+            let ordinal_started = profile.start();
             for key in process_keys {
                 let ordinals = process_ordinals
                     .get_mut(&key)
@@ -699,6 +870,9 @@ fn load_run(
                     break;
                 }
             }
+            if let Some(started) = ordinal_started {
+                profile.ordinal_sort += started.elapsed();
+            }
         }
     }
     if let Some(error) = ordinal_error {
@@ -706,6 +880,9 @@ fn load_run(
     }
     for calls in run.calls.values_mut() {
         calls.signatures.sort_by_key(|signature| signature.ordinal);
+    }
+    if let Some(started) = run_started {
+        profile.load_runs.push((name.to_owned(), started.elapsed()));
     }
     Ok(run)
 }
@@ -896,11 +1073,13 @@ struct Artifact<'a> {
     harness_divergences: &'a [Divergence],
     base_readers: &'a [RefCell<File>],
     pr_readers: &'a [RefCell<File>],
+    profile: &'a RefCell<Profile>,
 }
 
 impl Serialize for Artifact<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut state = serializer.serialize_struct("DivergenceSet", 13)?;
+        let runs_counts_started = self.profile.borrow().start();
         state.serialize_field("schema", "behaviordiff.divergenceset/2")?;
         state.serialize_field(
             "generatedUtc",
@@ -918,6 +1097,10 @@ impl Serialize for Artifact<'_> {
             "remainingDivergences": self.remaining.len(),
             "matchedKeysPartial": self.matched.iter().filter(|item| item.confidence == Confidence::Partial).count(),
         }))?;
+        if let Some(started) = runs_counts_started {
+            self.profile.borrow_mut().artifact_runs_counts += started.elapsed();
+        }
+        let matched_started = self.profile.borrow().start();
         state.serialize_field(
             "matchedKeys",
             &MatchedView {
@@ -925,6 +1108,10 @@ impl Serialize for Artifact<'_> {
                 strings: self.strings,
             },
         )?;
+        if let Some(started) = matched_started {
+            self.profile.borrow_mut().artifact_matched += started.elapsed();
+        }
+        let divergences_started = self.profile.borrow().start();
         state.serialize_field(
             "divergences",
             &DivergenceView {
@@ -934,8 +1121,13 @@ impl Serialize for Artifact<'_> {
                 pr: self.pr,
                 base_readers: self.base_readers,
                 pr_readers: self.pr_readers,
+                profile: self.profile,
             },
         )?;
+        if let Some(started) = divergences_started {
+            self.profile.borrow_mut().artifact_divergences += started.elapsed();
+        }
+        let noise_started = self.profile.borrow().start();
         state.serialize_field(
             "noiseExclusions",
             &NoiseView {
@@ -957,10 +1149,18 @@ impl Serialize for Artifact<'_> {
             "kind": item.kind, "detail": item.detail,
             "isTestRoot": member(self.base1, self.strings.resolve(item.key.method)).map(|entry| entry.is_test_root),
         })).collect::<Vec<_>>())?;
+        if let Some(started) = noise_started {
+            self.profile.borrow_mut().artifact_noise += started.elapsed();
+        }
+        let coverage_started = self.profile.borrow().start();
         state.serialize_field("coverage", &json!({
             "members": self.base1.members.iter().map(describe_member).collect::<Vec<_>>(),
             "assemblies": self.base1.assemblies.iter().map(describe_assembly).collect::<Vec<_>>(),
         }))?;
+        if let Some(started) = coverage_started {
+            self.profile.borrow_mut().artifact_coverage += started.elapsed();
+        }
+        let call_tree_started = self.profile.borrow().start();
         state.serialize_field(
             "callTree",
             &CallTreeView {
@@ -968,6 +1168,10 @@ impl Serialize for Artifact<'_> {
                 strings: self.strings,
             },
         )?;
+        if let Some(started) = call_tree_started {
+            self.profile.borrow_mut().artifact_call_tree += started.elapsed();
+        }
+        let pr_call_tree_started = self.profile.borrow().start();
         state.serialize_field(
             "prCallTree",
             &CallTreeView {
@@ -975,6 +1179,9 @@ impl Serialize for Artifact<'_> {
                 strings: self.strings,
             },
         )?;
+        if let Some(started) = pr_call_tree_started {
+            self.profile.borrow_mut().artifact_pr_call_tree += started.elapsed();
+        }
         state.end()
     }
 }
@@ -1022,6 +1229,7 @@ struct DivergenceView<'a> {
     pr: &'a RunData,
     base_readers: &'a [RefCell<File>],
     pr_readers: &'a [RefCell<File>],
+    profile: &'a RefCell<Profile>,
 }
 impl Serialize for DivergenceView<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -1029,12 +1237,12 @@ impl Serialize for DivergenceView<'_> {
         for item in self.values {
             let base = item
                 .base
-                .map(|locator| read_evidence(self.base, self.base_readers, locator))
+                .map(|locator| read_evidence(self.base, self.base_readers, locator, self.profile))
                 .transpose()
                 .map_err(serde::ser::Error::custom)?;
             let pr = item
                 .pr
-                .map(|locator| read_evidence(self.pr, self.pr_readers, locator))
+                .map(|locator| read_evidence(self.pr, self.pr_readers, locator, self.profile))
                 .transpose()
                 .map_err(serde::ser::Error::custom)?;
             sequence.serialize_element(&json!({
@@ -1093,7 +1301,9 @@ fn read_evidence(
     run: &RunData,
     readers: &[RefCell<File>],
     locator: Locator,
+    profile: &RefCell<Profile>,
 ) -> Result<EvidenceEvent, String> {
+    let started = profile.borrow().start();
     let _ = run
         .files
         .get(locator.file as usize)
@@ -1107,7 +1317,14 @@ fn read_evidence(
     let mut bytes = vec![0_u8; locator.length as usize];
     file.read_exact(&mut bytes)
         .map_err(|error| error.to_string())?;
-    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+    let result = serde_json::from_slice(&bytes).map_err(|error| error.to_string());
+    if let Some(started) = started {
+        let mut profile = profile.borrow_mut();
+        profile.evidence_reads += 1;
+        profile.evidence_bytes += locator.length as u64;
+        profile.evidence_read += started.elapsed();
+    }
+    result
 }
 
 fn compare_keys(left: Key, right: Key, strings: &Interner) -> Ordering {

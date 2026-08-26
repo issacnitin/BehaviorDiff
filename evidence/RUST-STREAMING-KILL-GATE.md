@@ -85,6 +85,48 @@ FluentValidation #2136 was then measured through the complete CLI with independe
 
 Rust reduces peak engine-interval RSS by 85.41% cold and 85.83% warm, but is 1.548x slower end-to-end cold, 1.974x slower end-to-end warm, and 4.485x to 4.720x slower across diff plus frontier. The requested default-switch condition therefore does not hold. C# remains the default; Rust remains explicit through `--engine=rust`.
 
+### Streaming profile before optimization
+
+The retained FluentValidation #2136 traces were profiled directly with opt-in phase timers before changing the algorithm. This run consumed 424,024 events and 596,672,852 trace bytes and produced a 129,720,903-byte DivergenceSet with 53,255 matched keys and 3,181 remaining divergences. The direct process took 80.125 seconds wall clock; instrumented internal time was 79.300 seconds.
+
+Profiling is output-neutral. The same release executable rerun against the same retained inputs with `BEHAVIORDIFF_RUST_PROFILE` disabled completed in 79.145 seconds and produced the same 129,720,903-byte artifact. Profiling-enabled and profiling-disabled outputs had the same SHA-256 after excluding only `generatedUtc`: `94B18AF13936FCB0E4E2148E4CB5FDB80100EEA5186AC062A412A10F1270D707`.
+
+| Rust `stream-diff` phase | Time | Share of internal time |
+| --- | ---: | ---: |
+| Artifact serialization, total | 75.144 s | 94.76% |
+| Base and PR call-tree JSON within serialization | 58.720 s | 74.05% |
+| Matched-key JSON within serialization | 13.276 s | 16.74% |
+| Load all four trace runs | 3.033 s | 3.82% |
+| Compare traces | 1.025 s | 1.29% |
+| Borrowed event deserialization | 0.845 s | 1.07% |
+| Reading trace lines | 0.320 s | 0.40% |
+| 424,028 `stream_position` calls | 0.189 s | 0.24% |
+| 1,273,126 interner lookups | 0.121 s | 0.15% |
+| Digest compaction | 0.075 s | 0.09% |
+| Manifest reads | 0.091 s | 0.11% |
+
+Event input does not materialize `serde_json::Value` trees. Each line deserializes directly into a borrowed `BorrowedEvent<'_>` and retains compact IDs, digests, and byte locators. The expensive path is the inverse: call-tree and matched-key output serialize each compact record through a newly constructed `serde_json::Value` from `json!`, then pretty-print 129.7 MB of repeated strings. Compact storage therefore succeeds at the RSS goal but is expanded back into an allocation-heavy interchange artifact before frontier.
+
+There is no spool file and no spool write/read pass. Evidence locators point into the original trace files. Artifact emission performed 400 seek/read/parse operations totaling 628,598 bytes and 3.763 ms: at most two reads for an evidence-bearing divergence, and 0.126 read-backs per remaining divergence averaged over this corpus. Evidence read-back is not a hotspot.
+
+Each trace is read once. The three base runs and PR run took 0.847, 0.805, 0.576, and 0.805 seconds respectively. Additional work compares the retained compact key/signature maps; it does not reread event traces. Base1 and PR retain compact call graphs, while base2 and base3 do not.
+
+The shared C# frontier was separately profiled against the same 129.7 MB Rust artifact:
+
+| Frontier phase | Time | Share of 6.238 s |
+| --- | ---: | ---: |
+| Input JSON deserialization | 0.990 s | 15.86% |
+| Call-tree indexing | 0.107 s | 1.72% |
+| Per-diverged-key frontier loop | 4.848 s | 77.71% |
+| Repeated linear source-line lookup within that loop | 4.445 s | 71.25% |
+| Recursive descendant traversal within that loop | 0.372 s | 5.96% |
+| Attribution | 0.148 s | 2.38% |
+| Report write | 0.047 s | 0.75% |
+
+The frontier graph traversal itself is not the slowdown. For every diverged key, source-line selection independently scans the 106,007-node base call tree with `FirstOrDefault`; that repeated linear lookup accounts for nearly all frontier computation.
+
+The profile identifies two concrete optimization candidates, neither applied in this measurement commit: serialize compact records directly without per-record `json!` value trees, ideally avoiding the expanded call-tree/matched-key interchange entirely; and index source lines by `(testId, methodFullName)` once before frontier iteration. Default selection remains unchanged until an optimized implementation is rerun through the byte-equivalence corpus gate and the same cold/warm pipeline benchmark. The proposed reconsideration threshold is Rust within approximately 1.5x of C# while retaining the approximately 311 MiB peak.
+
 After this qualification, explicit `--engine=rust` dispatch moved from `diff` to `stream-diff`. C# remains the default engine, and the old Rust `diff` command remains available as a qualified fallback.
 
 Run the hard gate with:

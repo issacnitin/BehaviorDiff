@@ -69,7 +69,10 @@ namespace BehaviorDiff.Engine
     {
         internal static int Run(FrontierOptions options)
         {
+            var profile = new FrontierProfile(options.Input);
+            long started = profile.Start();
             DivergenceSetFile set = DivergenceSetReader.Read(options.Input);
+            profile.InputReadMilliseconds = profile.Stop(started);
             var refusals = new List<string>();
 
             Console.WriteLine("=== input ===");
@@ -80,6 +83,7 @@ namespace BehaviorDiff.Engine
 
             Console.WriteLine();
             Console.WriteLine("=== call tree ===");
+            started = profile.Start();
             var byCallId = new Dictionary<long, CallNodeDto>();
             foreach (CallNodeDto node in set.CallTree)
             {
@@ -118,6 +122,7 @@ namespace BehaviorDiff.Engine
 
                 list.Add(node);
             }
+            profile.TreeIndexMilliseconds = profile.Stop(started);
 
             Console.WriteLine("  nodes                    : " + set.CallTree.Count);
             Console.WriteLine("  roots (harness)          : " + roots
@@ -134,6 +139,7 @@ namespace BehaviorDiff.Engine
                     + "Descendant sets would be incomplete, which makes every frontier verdict unsound.");
             }
 
+            started = profile.Start();
             var divergedKeys = new Dictionary<string, List<DivergenceDto>>(StringComparer.Ordinal);
             foreach (DivergenceDto d in set.Divergences)
             {
@@ -196,6 +202,7 @@ namespace BehaviorDiff.Engine
                     .Where(h => h.IsTestRoot != false)
                     .Select(h => h.TestId),
                 StringComparer.Ordinal);
+            profile.MetadataIndexMilliseconds = profile.Stop(started);
 
             Console.WriteLine();
             Console.WriteLine("=== frontier ===");
@@ -204,19 +211,23 @@ namespace BehaviorDiff.Engine
             var nodes = new List<FrontierNode>();
             var collateral = new List<FrontierNode>();
 
+            started = profile.Start();
             foreach (string key in divergedKeys.Keys.OrderBy(k => k, StringComparer.Ordinal))
             {
                 List<DivergenceDto> entries = divergedKeys[key];
                 DivergenceDto first = entries[0];
+                long lineLookupStarted = profile.Start();
+                int? line = set.CallTree.FirstOrDefault(call =>
+                    string.Equals(call.TestId, first.TestId, StringComparison.Ordinal)
+                    && string.Equals(call.MethodFullName, first.MethodFullName, StringComparison.Ordinal))?.Line;
+                profile.LineLookupMilliseconds += profile.Stop(lineLookupStarted);
 
                 var node = new FrontierNode
                 {
                     TestId = first.TestId,
                     MethodFullName = first.MethodFullName,
                     FilePath = first.FilePath,
-                    Line = set.CallTree.FirstOrDefault(call =>
-                        string.Equals(call.TestId, first.TestId, StringComparison.Ordinal)
-                        && string.Equals(call.MethodFullName, first.MethodFullName, StringComparison.Ordinal))?.Line,
+                    Line = line,
                 };
 
                 foreach (DivergenceDto entry in entries.OrderBy(e => e.Kind, StringComparer.Ordinal))
@@ -234,12 +245,14 @@ namespace BehaviorDiff.Engine
                 var descendantMethods = new HashSet<string>(StringComparer.Ordinal);
                 if (!unalignable)
                 {
+                    long descendantStarted = profile.Start();
                     foreach (CallNodeDto call in set.CallTree.Where(n =>
                         string.Equals(n.TestId, first.TestId, StringComparison.Ordinal)
                         && string.Equals(n.MethodFullName, first.MethodFullName, StringComparison.Ordinal)))
                     {
                         CollectDescendants(call, children, descendantKeys, descendantMethods);
                     }
+                    profile.DescendantTraversalMilliseconds += profile.Stop(descendantStarted);
                 }
 
                 node.DescendantKeys = descendantKeys.Count;
@@ -323,6 +336,7 @@ namespace BehaviorDiff.Engine
 
                 nodes.Add(node);
             }
+            profile.FrontierMilliseconds = profile.Stop(started);
 
             Console.WriteLine("  frontier nodes           : " + nodes.Count);
             Console.WriteLine("    verified               : " + nodes.Count(n => n.Verified));
@@ -334,6 +348,7 @@ namespace BehaviorDiff.Engine
 
             Console.WriteLine();
             Console.WriteLine("=== attribution ===");
+            started = profile.Start();
             var changed = LoadChangedFiles(options.ChangedFiles);
             Console.WriteLine("  changed files            : " + changed.Count);
             foreach (string file in changed.Take(10))
@@ -421,6 +436,7 @@ namespace BehaviorDiff.Engine
             var expected = nodes.Where(n => n.Attribution == "EXPECTED").ToList();
             Console.WriteLine("  EXPECTED (edited file)   : " + RollupLine(expected));
             Console.WriteLine("  UNEXPECTED (headline)    : " + RollupLine(unexpected));
+            profile.AttributionMilliseconds = profile.Stop(started);
 
             if (refusals.Count > 0)
             {
@@ -433,6 +449,7 @@ namespace BehaviorDiff.Engine
                 }
 
                 // An unattributable run is invalid input, not a malformed trace.
+                profile.Report(set);
                 return unattributable ? 3 : 4;
             }
 
@@ -463,6 +480,7 @@ namespace BehaviorDiff.Engine
                 Console.WriteLine("    " + node.MethodFullName + "  [" + node.TestId + "]");
             }
 
+            started = profile.Start();
             WriteReport(
                 options,
                 set,
@@ -473,9 +491,62 @@ namespace BehaviorDiff.Engine
                 changedFileCoverage,
                 exactMatches,
                 namespaceMatches);
+            profile.ReportWriteMilliseconds = profile.Stop(started);
             Console.WriteLine();
             Console.WriteLine("Frontier report written: " + Path.GetFullPath(options.Output));
+            profile.Report(set);
             return 0;
+        }
+
+        private sealed class FrontierProfile
+        {
+            private readonly bool enabled = Environment.GetEnvironmentVariable("BEHAVIORDIFF_FRONTIER_PROFILE") != null;
+            private readonly long totalStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+            private readonly string input;
+
+            internal FrontierProfile(string input)
+            {
+                this.input = input;
+            }
+
+            internal double InputReadMilliseconds { get; set; }
+            internal double TreeIndexMilliseconds { get; set; }
+            internal double MetadataIndexMilliseconds { get; set; }
+            internal double FrontierMilliseconds { get; set; }
+            internal double LineLookupMilliseconds { get; set; }
+            internal double DescendantTraversalMilliseconds { get; set; }
+            internal double AttributionMilliseconds { get; set; }
+            internal double ReportWriteMilliseconds { get; set; }
+
+            internal long Start() => enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+
+            internal double Stop(long start) => enabled
+                ? System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds
+                : 0;
+
+            internal void Report(DivergenceSetFile set)
+            {
+                if (!enabled)
+                {
+                    return;
+                }
+
+                Console.Error.WriteLine("BEHAVIORDIFF_FRONTIER_PROFILE " + JsonSerializer.Serialize(new
+                {
+                    totalMilliseconds = System.Diagnostics.Stopwatch.GetElapsedTime(totalStarted).TotalMilliseconds,
+                    inputBytes = new FileInfo(input).Length,
+                    callTreeNodes = set.CallTree.Count,
+                    prCallTreeNodes = set.PrCallTree.Count,
+                    inputReadMilliseconds = InputReadMilliseconds,
+                    treeIndexMilliseconds = TreeIndexMilliseconds,
+                    metadataIndexMilliseconds = MetadataIndexMilliseconds,
+                    frontierMilliseconds = FrontierMilliseconds,
+                    lineLookupMilliseconds = LineLookupMilliseconds,
+                    descendantTraversalMilliseconds = DescendantTraversalMilliseconds,
+                    attributionMilliseconds = AttributionMilliseconds,
+                    reportWriteMilliseconds = ReportWriteMilliseconds,
+                }));
+            }
         }
 
         private static void Print(FrontierNode node)
