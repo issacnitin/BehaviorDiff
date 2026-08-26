@@ -6,6 +6,13 @@
 **/node_modules
 **/target
 artifacts
+!artifacts/self-contained-proof/
+!artifacts/self-contained-proof/behaviordiff/
+!artifacts/self-contained-proof/behaviordiff/**
 evidence
 samples
+!samples/NodeSortDemo/
+!samples/NodeSortDemo/**
+!samples/GoReference/
+!samples/GoReference/**
 *.user

@@ -81,10 +81,33 @@ jobs:
             artifacts/release/behaviordiff-*.metrics.json
           if-no-files-found: error
 
+  clean-linux-proof:
+    name: Clean Linux Node and Go proof
+    needs: publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: behaviordiff-linux-x64
+          path: artifacts/self-contained-proof/download
+      - name: Extract downloaded release archive
+        shell: bash
+        run: |
+          mkdir -p artifacts/self-contained-proof/behaviordiff
+          tar -xzf artifacts/self-contained-proof/download/behaviordiff-*-linux-x64.tar.gz \
+            -C artifacts/self-contained-proof/behaviordiff
+      - name: Run without a .NET runtime
+        shell: bash
+        run: |
+          docker build -f docker/self-contained-proof.Dockerfile \
+            -t behaviordiff:self-contained-linux-proof .
+          docker run --rm behaviordiff:self-contained-linux-proof
+
   release:
     name: Publish GitHub Release
     if: github.ref_type == 'tag'
-    needs: publish
+    needs: [publish, clean-linux-proof]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
