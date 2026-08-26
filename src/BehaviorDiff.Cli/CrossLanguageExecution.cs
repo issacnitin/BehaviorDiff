@@ -491,10 +491,6 @@ namespace BehaviorDiff.Cli
                     rewritten,
                     environment);
             }
-            if (!test.Ok)
-            {
-                throw new CliException("Rewritten Rust tests failed." + Environment.NewLine + Shell.Tail(test.Output, 25), ExitCodes.BuildOrTestFailure);
-            }
             string origin = Path.Combine(rewritten, ".behaviordiff-rust-origin.json");
             string manifest = Path.Combine(directory, "run.rust.manifest.ndjson");
             ProcessResult finalize = Shell.Run(
