@@ -159,9 +159,9 @@ fn parse_invalid_findings_options(
             "--status" => options.status = value.clone(),
             "--reason" => options.reason = value.clone(),
             "--exit-code" => options.exit_code = parse_number(option, value)?,
-            "--base-sha" => options.base_sha = value.clone(),
-            "--pr-sha" => options.pr_sha = value.clone(),
-            "--merge-base" => options.merge_base = value.clone(),
+            "--base-sha" => options.base_sha = Some(value.clone()),
+            "--pr-sha" => options.pr_sha = Some(value.clone()),
+            "--merge-base" => options.merge_base = Some(value.clone()),
             _ => return Err(format!("Unknown option {option}")),
         }
         index += 2;

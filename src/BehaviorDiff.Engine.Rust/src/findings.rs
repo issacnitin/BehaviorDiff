@@ -37,9 +37,9 @@ pub(crate) struct InvalidFindingsOptions {
     pub(crate) status: String,
     pub(crate) reason: String,
     pub(crate) exit_code: i32,
-    pub(crate) base_sha: String,
-    pub(crate) pr_sha: String,
-    pub(crate) merge_base: String,
+    pub(crate) base_sha: Option<String>,
+    pub(crate) pr_sha: Option<String>,
+    pub(crate) merge_base: Option<String>,
 }
 
 struct TreeIndex<'a> {
@@ -451,9 +451,9 @@ pub(crate) fn write_invalid(options: &InvalidFindingsOptions) -> Result<i32, Str
         (
             "refs",
             object([
-                ("baseSha", Value::String(options.base_sha.clone())),
-                ("prSha", Value::String(options.pr_sha.clone())),
-                ("mergeBaseSha", Value::String(options.merge_base.clone())),
+                ("baseSha", option_string(options.base_sha.clone())),
+                ("prSha", option_string(options.pr_sha.clone())),
+                ("mergeBaseSha", option_string(options.merge_base.clone())),
             ]),
         ),
         (
