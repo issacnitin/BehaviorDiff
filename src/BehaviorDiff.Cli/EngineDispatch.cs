@@ -74,6 +74,35 @@ namespace BehaviorDiff.Cli
             return result.ExitCode;
         }
 
+        internal static int RunFrontier(AnalysisEngine engine, FrontierOptions options)
+        {
+            if (engine == AnalysisEngine.CSharp)
+            {
+                return FrontierCommand.Run(options);
+            }
+
+            ProcessResult result = Shell.Run(
+                ResolveRustEngine(),
+                FrontierArguments(options),
+                Environment.CurrentDirectory);
+            Console.Write(result.Output);
+            if (result.ExitCode == 0)
+            {
+                return 0;
+            }
+
+            if (result.ExitCode == 2)
+            {
+                options.RefusalReason = InputError(result.Output)
+                    ?? "The Rust frontier analysis was refused before a report was produced.";
+                return ExitCodes.RunInvalid;
+            }
+
+            throw new CliException(
+                "The Rust frontier engine exited " + result.ExitCode + "." + Environment.NewLine
+                + Shell.Tail(result.Output, 20));
+        }
+
         private static IEnumerable<string> Arguments(DiffOptions options)
         {
             yield return "stream-diff";
@@ -109,6 +138,24 @@ namespace BehaviorDiff.Cli
 
             yield return "--out";
             yield return options.Output;
+        }
+
+        private static IEnumerable<string> FrontierArguments(FrontierOptions options)
+        {
+            yield return "frontier";
+            yield return "--in";
+            yield return options.Input;
+            yield return "--changed-files";
+            yield return options.ChangedFiles;
+            yield return "--out";
+            yield return options.Output;
+        }
+
+        private static string? InputError(string output)
+        {
+            const string prefix = "Input error: ";
+            int index = output.LastIndexOf(prefix, StringComparison.Ordinal);
+            return index < 0 ? null : output.Substring(index + prefix.Length).Trim();
         }
 
         private static string ResolveRustEngine()

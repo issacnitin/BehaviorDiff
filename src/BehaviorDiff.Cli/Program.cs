@@ -760,7 +760,7 @@ namespace BehaviorDiff.Cli
                 ChangedFiles = changedList,
                 Output = report,
             };
-            int frontierExit = FrontierCommand.Run(frontierOptions);
+            int frontierExit = EngineDispatch.RunFrontier(_engine, frontierOptions);
             frontierStopwatch.Stop();
             _timings.FrontierMilliseconds += frontierStopwatch.ElapsedMilliseconds;
             if (frontierExit != 0)
