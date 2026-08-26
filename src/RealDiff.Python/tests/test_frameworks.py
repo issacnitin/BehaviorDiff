@@ -59,6 +59,8 @@ class FrameworkCorrelationTests(unittest.TestCase):
             environment["PYTHONPATH"] = str(TRACER_ROOT)
             environment["REALDIFF_TRACE"] = str(trace)
             environment["REALDIFF_REPOSITORY_ROOT"] = str(root)
+            environment["REALDIFF_INCLUDE_NAMESPACES"] = ""
+            environment["REALDIFF_EXCLUDE_NAMESPACES"] = ""
             command = (
                 [sys.executable, "-m", "pytest", "-q", str(root / "test_sample.py")]
                 if framework == "pytest"

@@ -104,10 +104,11 @@ class Runtime:
             return
         module = _module_name(file_path)
         method = _method_name(file_path, code)
-        if code.co_name == "<module>":
+        if code.co_name == "<module>" or _is_class_body(code, frame):
+            detail = "Python: ModuleBody" if code.co_name == "<module>" else "Python: ClassBody"
             self._members.setdefault(
                 method,
-                Member(module, method, file_path, code.co_firstlineno, "Skipped", "Module", "UnsupportedShape", "Python: ModuleBody"),
+                Member(module, method, file_path, code.co_firstlineno, "Skipped", "Setup", "UnsupportedShape", detail),
             )
             return
 
@@ -352,6 +353,11 @@ def _unittest_test_id(code: CodeType, frame: FrameType) -> str | None:
     if unittest.TestCase not in hierarchy:
         return None
     return f"{type_.__module__}.{type_.__qualname__}.{code.co_name}"
+
+
+def _is_class_body(code: CodeType, frame: FrameType) -> bool:
+    del frame
+    return code.co_name != "<module>" and not (code.co_flags & 0x02)
 
 
 _active_runtime: Runtime | None = None

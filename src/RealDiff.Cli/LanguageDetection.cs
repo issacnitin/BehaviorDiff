@@ -259,8 +259,12 @@ namespace RealDiff.Cli
             }
             if (language == RepositoryLanguage.Python)
             {
-                string[] scopes = new[] { "src", "lib", "app", "tests" }
-                    .Where(candidate => Directory.Exists(Path.Combine(workDirectory, candidate)))
+                string[] scopes = Directory.EnumerateDirectories(workDirectory, "*", SearchOption.TopDirectoryOnly)
+                    .Select(Path.GetFileName)
+                    .OfType<string>()
+                    .Where(candidate => candidate is "src" or "lib" or "app"
+                        || candidate.StartsWith("test", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(candidate => candidate, StringComparer.Ordinal)
                     .ToArray();
                 return scopes.Length > 0 ? scopes : new[] { Relative(repositoryRoot, workDirectory) };
             }

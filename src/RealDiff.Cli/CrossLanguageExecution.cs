@@ -24,6 +24,8 @@ namespace RealDiff.Cli
 
     internal sealed class CrossLanguageExecution
     {
+        private sealed record PythonRuntimeInfo(string Executable, string Version);
+
         private static readonly Regex JavaPackage = new(
             @"^\s*package\s+([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)\s*;",
             RegexOptions.Compiled | RegexOptions.Multiline | RegexOptions.CultureInvariant);
@@ -43,7 +45,7 @@ namespace RealDiff.Cli
         {
             int removed = 0;
             foreach (string directory in Directory.EnumerateDirectories(tree, "*", SearchOption.AllDirectories)
-                .Where(path => Path.GetFileName(path) is "target" or "node_modules" or "dist")
+                .Where(path => Path.GetFileName(path) is "target" or "node_modules" or "dist" or "__pycache__" or ".pytest_cache")
                 .OrderByDescending(path => path.Length)
                 .ToList())
             {
@@ -73,6 +75,7 @@ namespace RealDiff.Cli
                 RepositoryLanguage.Node => RunNode(baseDetection, prDetection, baseTree, prTree, targetSha),
                 RepositoryLanguage.Go => RunGo(baseDetection, prDetection, baseTree, prTree, targetSha),
                 RepositoryLanguage.Rust => RunRust(baseDetection, prDetection, baseTree, prTree, targetSha),
+                RepositoryLanguage.Python => RunPython(baseDetection, prDetection, baseTree, prTree, targetSha),
                 _ => throw new CliException("Cross-language execution was requested for " + baseDetection.Language + "."),
             };
         }
@@ -92,6 +95,9 @@ namespace RealDiff.Cli
                     break;
                 case RepositoryLanguage.Rust:
                     WarmRust(detection, baseTree, targetSha);
+                    break;
+                case RepositoryLanguage.Python:
+                    WarmPython(detection, baseTree, targetSha);
                     break;
                 default:
                     throw new CliException("Cache warming was requested for " + detection.Language + ".");
@@ -398,6 +404,127 @@ namespace RealDiff.Cli
             TraceSummary summary = ValidateTrace(directory, label, test.Output);
             ReportTrace(label, summary, test.ExitCode);
             return directory;
+        }
+
+        private void WarmPython(LanguageDetection detection, string baseTree, string targetSha)
+        {
+            PythonRuntimeInfo python = ResolvePythonRuntime(detection.WorkDirectory);
+            string tracer = ResolvePythonTracer();
+            TraceCacheKey key = PythonCacheKey(targetSha, detection, tracer, python);
+            if (_cache.TryRestore(key, out _))
+            {
+                return;
+            }
+            var stopwatch = Stopwatch.StartNew();
+            string base1 = RunPythonTests("base_run1", detection, python, tracer);
+            RunPythonTests("base_run2", detection, python, tracer);
+            RunPythonTests("base_run3", detection, python, tracer);
+            stopwatch.Stop();
+            Pipeline.AssertTestIdsPresent(base1);
+            _cache.Store(key, baseTree, stopwatch.ElapsedMilliseconds);
+        }
+
+        private CrossLanguageRunSet RunPython(
+            LanguageDetection baseDetection,
+            LanguageDetection prDetection,
+            string baseTree,
+            string prTree,
+            string targetSha)
+        {
+            Console.WriteLine();
+            Console.WriteLine("=== 2. Python process-start monitoring ===");
+            if (baseDetection.HasCustomBuild) RunConfiguredBuild("base", baseDetection);
+            if (prDetection.HasCustomBuild) RunConfiguredBuild("pr", prDetection);
+            PythonRuntimeInfo python = ResolvePythonRuntime(baseDetection.WorkDirectory);
+            string tracer = ResolvePythonTracer();
+            Console.WriteLine("  python runtime: " + python.Executable + " (" + python.Version + ")");
+            Console.WriteLine("  python tracer : " + tracer);
+            TraceCacheKey key = PythonCacheKey(targetSha, baseDetection, tracer, python);
+            bool cacheHit = _cache.TryRestore(key, out TraceCacheEntry? cacheEntry);
+            string base1;
+            string base2;
+            string base3;
+            string baseRoot;
+            if (cacheHit)
+            {
+                base1 = TraceCacheSession.RunPath(_work, 1);
+                base2 = TraceCacheSession.RunPath(_work, 2);
+                base3 = TraceCacheSession.RunPath(_work, 3);
+                baseRoot = cacheEntry!.BaseRoot;
+            }
+            else
+            {
+                var stopwatch = Stopwatch.StartNew();
+                base1 = RunPythonTests("base_run1", baseDetection, python, tracer);
+                base2 = RunPythonTests("base_run2", baseDetection, python, tracer);
+                base3 = RunPythonTests("base_run3", baseDetection, python, tracer);
+                stopwatch.Stop();
+                _timings.InstrumentedRunMilliseconds += stopwatch.ElapsedMilliseconds;
+                baseRoot = baseTree;
+                _cache.Store(key, baseRoot, stopwatch.ElapsedMilliseconds);
+            }
+            Pipeline.AssertTestIdsPresent(base1);
+            var prStopwatch = Stopwatch.StartNew();
+            string pr = RunPythonTests("pr_run", prDetection, python, tracer);
+            prStopwatch.Stop();
+            _timings.InstrumentedRunMilliseconds += prStopwatch.ElapsedMilliseconds;
+            return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
+        }
+
+        private string RunPythonTests(
+            string label,
+            LanguageDetection detection,
+            PythonRuntimeInfo python,
+            string tracer)
+        {
+            string directory = PrepareRunDirectory(label);
+            string existingPythonPath = Environment.GetEnvironmentVariable("PYTHONPATH") ?? string.Empty;
+            var pythonPaths = new List<string> { tracer };
+            string sourceDirectory = Path.Combine(detection.WorkDirectory, "src");
+            if (Directory.Exists(sourceDirectory)) pythonPaths.Add(sourceDirectory);
+            if (!string.IsNullOrEmpty(existingPythonPath)) pythonPaths.Add(existingPythonPath);
+            string pythonPath = string.Join(Path.PathSeparator, pythonPaths);
+            var environment = new Dictionary<string, string>
+            {
+                ["PYTHONPATH"] = pythonPath,
+                ["PYTHONDONTWRITEBYTECODE"] = "1",
+                ["REALDIFF_TRACE"] = Path.Combine(directory, "run.python.ndjson"),
+                ["REALDIFF_REPOSITORY_ROOT"] = detection.Config.RepositoryRoot,
+                ["REALDIFF_INCLUDE_NAMESPACES"] = string.Join(",", detection.IncludeNamespaces),
+                ["REALDIFF_EXCLUDE_NAMESPACES"] = string.Join(",", detection.ExcludeNamespaces),
+            };
+            ProcessResult result;
+            if (detection.HasCustomTest)
+            {
+                Console.WriteLine("  " + label.PadRight(10) + " configured command: " + detection.TestCommand);
+                result = Shell.RunCommand(detection.TestCommand, detection.WorkDirectory, environment);
+            }
+            else
+            {
+                Console.WriteLine("  " + label.PadRight(10) + " command: python -m pytest");
+                result = Shell.Run(
+                    python.Executable,
+                    new[] { "-m", "pytest", "-p", "realdiff_python.pytest_plugin" },
+                    detection.WorkDirectory,
+                    environment);
+            }
+            TraceSummary summary = ValidateTrace(directory, label, result.Output);
+            ReportTrace(label, summary, result.ExitCode);
+            return directory;
+        }
+
+        private static TraceCacheKey PythonCacheKey(
+            string targetSha,
+            LanguageDetection detection,
+            string tracer,
+            PythonRuntimeInfo python)
+        {
+            string fingerprint = TracerFingerprint.ForDirectory(
+                tracer,
+                path => !path.Replace('\\', '/').Contains("/__pycache__/", StringComparison.Ordinal)
+                    && Path.GetExtension(path) == ".py");
+            string scope = string.Join(";", detection.IncludeNamespaces) + "\npython=" + python.Version;
+            return new TraceCacheKey(targetSha, "python", fingerprint, Pipeline.ScopeConfig(scope));
         }
 
         private void WarmRust(LanguageDetection detection, string baseTree, string targetSha)
@@ -835,6 +962,95 @@ namespace RealDiff.Cli
 
             throw new CliException(
                 "RealDiff Node tracer was not found. Set REALDIFF_NODE_TRACER or install it at " + packaged + ".");
+        }
+
+        private static PythonRuntimeInfo ResolvePythonRuntime(string workingDirectory)
+        {
+            string? configured = Environment.GetEnvironmentVariable("REALDIFF_PYTHON");
+            var candidates = new List<string>();
+            if (!string.IsNullOrWhiteSpace(configured)) candidates.Add(configured);
+            if (OperatingSystem.IsWindows())
+            {
+                candidates.Add(Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Programs", "Python", "Python312", "python.exe"));
+                candidates.Add("python.exe");
+            }
+            else
+            {
+                candidates.Add("python3.12");
+                candidates.Add("python3");
+                candidates.Add("python");
+            }
+
+            foreach (string candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (Path.IsPathRooted(candidate) && !File.Exists(candidate)) continue;
+                try
+                {
+                    ProcessResult result = Shell.Run(
+                        candidate,
+                        new[]
+                        {
+                            "-c",
+                            "import sys; print('.'.join(map(str, sys.version_info[:3]))); "
+                                + "raise SystemExit(0 if sys.version_info >= (3, 12) and hasattr(sys, 'monitoring') else 12)",
+                        },
+                        workingDirectory);
+                    if (result.ExitCode == 12)
+                    {
+                        throw new CliException(
+                            "RealDiff Python tracing requires Python 3.12+ with sys.monitoring; " + candidate + " is older.",
+                            ExitCodes.RunInvalid);
+                    }
+                    if (result.Ok)
+                    {
+                        return new PythonRuntimeInfo(candidate, result.Output.Trim());
+                    }
+                }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                }
+            }
+            throw new CliException(
+                "Python 3.12+ with sys.monitoring was not found. Set REALDIFF_PYTHON to the interpreter path; sys.settrace is not supported.",
+                ExitCodes.RunInvalid);
+        }
+
+        private static string ResolvePythonTracer()
+        {
+            string? configured = Environment.GetEnvironmentVariable("REALDIFF_PYTHON_TRACER");
+            if (!string.IsNullOrWhiteSpace(configured)) return ValidatePythonTracer(Path.GetFullPath(configured));
+            string packaged = Path.Combine(AppContext.BaseDirectory, "tracers", "python");
+            if (Directory.Exists(packaged)) return ValidatePythonTracer(packaged);
+            foreach (string root in CandidateSourceRoots())
+            {
+                string source = Path.Combine(root, "src", "RealDiff.Python");
+                if (Directory.Exists(source)) return ValidatePythonTracer(source);
+            }
+            throw new CliException(
+                "RealDiff Python tracer was not found. Set REALDIFF_PYTHON_TRACER or install it at " + packaged + ".",
+                ExitCodes.RunInvalid);
+        }
+
+        private static string ValidatePythonTracer(string directory)
+        {
+            string[] required =
+            {
+                "sitecustomize.py",
+                Path.Combine("realdiff_python", "monitor.py"),
+                Path.Combine("realdiff_python", "runtime.py"),
+                Path.Combine("realdiff_python", "canonical.py"),
+                Path.Combine("realdiff_python", "pytest_plugin.py"),
+            };
+            string[] missing = required.Where(path => !File.Exists(Path.Combine(directory, path))).ToArray();
+            if (missing.Length > 0)
+            {
+                throw new CliException(
+                    "RealDiff Python tracer is incomplete at " + directory + ". Missing: " + string.Join(", ", missing) + ".",
+                    ExitCodes.RunInvalid);
+            }
+            return directory;
         }
 
         private static string ResolveRustTracer()
