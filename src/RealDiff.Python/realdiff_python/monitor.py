@@ -56,14 +56,18 @@ class Scope:
         return any(_prefix_matches(parts, prefix) for prefix in self.includes)
 
     def repository_path(self, code: CodeType) -> str | None:
+        path, _, resolution = self.source_location(code)
+        return path if resolution == "debugInfo" else None
+
+    def source_location(self, code: CodeType) -> tuple[str | None, int, str]:
         filename = code.co_filename
         if not filename or filename.startswith("<"):
-            return None
+            return None, 0, "debugInfoMissing"
         try:
             relative = Path(filename).resolve().relative_to(self.root).as_posix()
         except (OSError, ValueError):
-            return None
-        return relative
+            return None, 0, "unresolved"
+        return relative, max(1, code.co_firstlineno), "debugInfo"
 
 
 def _read_list(value: str) -> tuple[tuple[str, ...], ...]:

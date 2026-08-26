@@ -109,7 +109,7 @@ Node worker threads are separate JavaScript isolates with separate globals and a
 
 For Rust rewritten into a content-addressed build cache, the stable parser position in the original ungenerated `.rs` file is `debugInfo`. Events and members MUST use the original repository-relative path and line, never the cache or staging path. A callable generated only by a macro expansion unavailable to stable source parsing is outside the transformer's callable inventory. The transformer MUST add a stable skipped boundary member for the original macro invocation with `skipReason:"UnsupportedShape"` and detail `Rust: MacroExpansionUnavailable`; it MUST NOT report unknown generated callables as patched or fabricate generated source positions.
 
-For Python monitored directly from repository source, `code.co_filename` and `code.co_firstlineno` establish `debugInfo` after the real path is normalized beneath the repository root. A code object whose filename is absent, synthetic, outside the repository, or cannot be normalized is `unresolved` with no path. Python does not infer a source path from `__module__`, a class name, an import name, or a traceback string.
+For Python monitored directly from repository source, `code.co_filename` and `code.co_firstlineno` establish `debugInfo` after the real path is normalized beneath the repository root. An absent or synthetic filename is `debugInfoMissing`; a real filename that cannot be normalized beneath the repository is `unresolved`. Python does not emit `generatedState` because coroutine, generator, and async-generator suspension retains the source callable's original code object. It does not emit `declaringType` because Python has no non-executing declaring-type source fallback. Python does not infer a source path from `__module__`, a class name, an import name, or a traceback string.
 
 Usable attribution requires `debugInfo`, `generatedState`, or `declaringType`. Exact source statistics count only `debugInfo` and `generatedState`. An unresolved state is evidence, not permission to infer a path. Guessing makes every changed path miss and can invert an unexpected change into a clean result.
 
@@ -152,6 +152,8 @@ For every module, this reconciliation MUST hold:
 discoveredMembers = patchedMembers + skippedMembers
 patchFailedMembers = 0
 ```
+
+A runtime-attached tracer with no build/transform phase still MUST inventory repository-owned source members before test execution. An executed-members-only manifest is non-conforming because an unexecuted member would be indistinguishable from failed discovery. Python uses a side-effect-free AST source inventory for member records and `sys.monitoring` only for runtime events; the inventory does not rewrite, import, compile, or execute target code. Runtime evidence may enrich an inventoried member with `isTestRoot`, but it must not create a second identity for the same callable.
 
 The member-record count for the module MUST equal `discoveredMembers`. The engine refuses a mismatch because an unaccounted member is an unknown call edge; treating it as absent would make frontier analysis unsound.
 

@@ -146,6 +146,28 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual("ExcludedByScope", member["skipReason"])
             self.assertEqual("src/config.py", member["filePath"])
 
+    def test_unexecuted_included_member_is_manifest_visible(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root_path = Path(temporary)
+            trace = root_path / "run.ndjson"
+            source = root_path / "src" / "subject.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("def never_called():\n    return 1\n", encoding="utf-8")
+            runtime = Runtime(trace, Scope(root_path, (("src",),), ()))
+            runtime.close()
+
+            manifest = [
+                json.loads(line)
+                for line in trace.with_name("run.manifest.ndjson").read_text(encoding="utf-8").splitlines()
+            ]
+            member = next(record for record in manifest if record.get("kind") == "member")
+            self.assertEqual("Patched", member["status"])
+            self.assertEqual("src/subject.py", member["filePath"])
+            module = next(record for record in manifest if record.get("kind") == "assembly")
+            self.assertEqual(1, module["discoveredMembers"])
+            self.assertEqual(1, module["patchedMembers"])
+            self.assertEqual(0, module["tracedCalls"])
+
     def test_generators_and_coroutines_emit_only_at_final_completion(self):
         with tempfile.TemporaryDirectory() as temporary:
             root_path = Path(temporary)

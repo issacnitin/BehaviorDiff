@@ -1,12 +1,15 @@
-# RealDiff 0.3.0
+# RealDiff 0.4.0
 
-RealDiff 0.3.0 completes the distribution and confidentiality work around the Rust architecture.
+RealDiff 0.4.0 is the breaking product rename and adds Python 3.12+ as the sixth traced language.
 
 ## Highlights
 
-- The retired C# diff engine is no longer shipped or selectable. Matching, noise filtering, frontier analysis, baseline policy, and findings generation run through the single-pass streaming Rust engine.
-- The public `realdiff` executable is now a thin Rust launcher. It owns argument routing, `.realdiff/config.yml` loading, language detection, and managed-process spawning; risky repository orchestration remains in the self-contained managed component.
-- Self-contained archives are published for `linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, and `win-x64`, each with a sidecar checksum and aggregate `SHA256SUMS`. A .NET runtime is not required to run the CLI.
-- The Rust tracer now applies the same rendering confidentiality contract as the other tracers: sensitive-name and credential-shape redaction plus configured type/path opt-outs. SHA-256 digests still cover the complete real value, so a secret rotation remains detectable while comments and traces show `<redacted>`.
+- The repository, projects, namespaces, package IDs, command, environment variables, schemas, action, container, and artifacts are now `RealDiff`/`realdiff`/`REALDIFF`. This release intentionally carries no BehaviorDiff compatibility aliases.
+- Python 3.12+ attaches through PEP 669 `sys.monitoring` at process start. There is no target build, bytecode weaving, AST rewriting, compiler coupling, or `sys.settrace` fallback.
+- pytest and unittest test extents derive from structural roots. Generators, coroutines, and async generators retain one logical call across suspension and emit only at final completion or escaping unwind.
+- The fields-only Python canonicalizer avoids properties, descriptors, user attribute hooks, iterators, formatting, equality, and hashing. Unsafe regions are counted partial markers; redaction occurs after real-value hashing.
+- Python source members are inventoried by a side-effect-free AST pass because a no-build tracer still must reconcile unexecuted coverage. Runtime events remain exclusively `sys.monitoring`-owned.
+- The maintained Python gate reports 378 matched keys across 73 subject methods and 384 events per run, with six pytest roots, six equivalent unittest roots, zero clean divergences, and a verified base-trace cache hit.
+- `RealDiff.Tool.0.4.0` packages all six tracers. The installed-package proof records four Python runs and 1,536 Python events in addition to the existing Java, Node, Go, and Rust proofs.
 
-The release workflow executes all five native archives and then downloads the Linux artifact into a clean Ubuntu image with no .NET runtime. Node and Go analyses must both reach rendered GitHub comments before the release is published.
+The all-language container includes Python 3.12 and pytest. The local six-language image proof verifies every staged Python tracer file and the `realdiff` executable.

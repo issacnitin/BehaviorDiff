@@ -29,9 +29,9 @@ flowchart LR
   F --> P[GitHub, Azure DevOps, MCP]
 ```
 
-[`TRACE-FORMAT.md`](TRACE-FORMAT.md) is the contract between tracers and the engine. The maintained .NET, Java, Node, Go, and Rust gates apply the same conformance rules: identical method sets, per-key event counts and entry ordinals, source tripwires, digest proofs, and zero engine divergences from non-empty runs.
+[`TRACE-FORMAT.md`](TRACE-FORMAT.md) is the contract between tracers and the engine. The maintained .NET, Java, Node, Go, Rust, and Python gates apply the same conformance rules: identical method sets, per-key event counts and entry ordinals, source tripwires, digest proofs, and zero engine divergences from non-empty runs.
 
-> Status: early preview. The unified CLI detects .NET, Maven Java, npm Node, Go modules, and Cargo Rust repositories from their root build entry points.
+> Status: early preview. The unified CLI detects .NET, Maven Java, npm Node, Go modules, Cargo Rust, and Python 3.12+ repositories from conventional root markers.
 
 ## Supported languages
 
@@ -42,8 +42,23 @@ flowchart LR
 | Node / TypeScript | CommonJS require hook and ESM loader with Babel | npm, direct JavaScript locations, TypeScript source maps, Jest/Vitest adapters | npm/package-lock only; workers are out of scope; generators and unsupported callables are skipped; source maps must resolve rather than be guessed. |
 | Go | Stable module-aware AST rewriting into a build cache | `go test`, original `.go` parser positions | Dynamic interface/function boundaries and unrewritten goroutine boundaries are explicit skips. |
 | Rust | Stable `syn`/`quote` rewriting into a SHA-256 build cache | `cargo test`, structural `#[test]` roots, original `.rs` parser positions | Macro expansions, extern/const callables, unions, trait objects, and dependency values are explicit partial/unsupported boundaries. |
+| Python 3.12+ | PEP 669 `sys.monitoring` attached at process start; no build, bytecode weaving, or AST rewriting | pytest and unittest structural roots; `co_filename`/`co_firstlineno`; source AST inventory | Native/C callables, synthetic code without repository source, and module/class setup bodies are explicit unsupported boundaries. Python 3.11 and older are refused; there is no `sys.settrace` fallback. |
 
 Every tracer emits the same process-scoped NDJSON contract and a reconciled coverage manifest. A member reported instrumented must be capable of emitting, and every module must satisfy `discovered = instrumented + skipped` with zero patch failures.
+
+Python differs from the compiled tracers because there is no build command to inject into. RealDiff prepends its staged `sitecustomize.py` to `PYTHONPATH`, attaches `sys.monitoring` before target imports, and runs the repository's tests unchanged. A side-effect-free AST pass inventories source members for the coverage manifest only; runtime events come exclusively from PEP 669. The base-trace cache remains sound: its key includes the staged Python tracer directory fingerprint, Python `major.minor.micro`, effective include/exclude scope, and redaction configuration.
+
+For source resolution, a real `co_filename` beneath the repository plus `co_firstlineno` is `debugInfo`; an absent/synthetic filename is `debugInfoMissing`; and an unnormalizable or external real path is `unresolved`. Python does not need `generatedState` because suspended callables retain their original code object, and it has no safe `declaringType` fallback.
+
+Python value support is explicit:
+
+| Confidence | Shapes |
+| --- | --- |
+| Exact | `None`, missing values, booleans, arbitrary integers, floats including canonical NaN and distinct `-0.0`, strings, bytes, and exact built-in `list`, `tuple`, `dict`, `set`, and `frozenset`; complete instance `__dict__` state when no other state channel exists. |
+| Partial | Properties, `__slots__`, `__getattr__`, overridden `__getattribute__`, container subclasses, unreadable fields, depth/breadth limits, and display truncation. Every unread region emits a counted `<skipped:Python:...>`, `<error:Python:...>`, `<depth:...>`, or `<truncated>` marker. |
+| UnsupportedShape | Native/C callables without Python code objects, dynamic/synthetic code without repository source, and executable module/class setup bodies. |
+
+The canonicalizer never invokes a property, descriptor, user iterator, `repr`, equality, hash, formatting callback, `__getattr__`, or overridden `__getattribute__`. Redaction is applied after the complete canonical value is hashed, matching the other language contracts.
 
 ## Why use it?
 
@@ -120,7 +135,7 @@ Two fresh packaged runs per language produced identical normalized behavioral ar
 
 ### Use the all-language container
 
-The published Linux image contains the RealDiff CLI, default Rust diff engine, .NET 8 SDK/tracer, Java 17 agent, Node 24 tracer, Go rewriter, and stable Rust toolchain/tracer. The host needs only Docker:
+The published Linux image contains the RealDiff CLI, default Rust diff engine, .NET 8 SDK/tracer, Java 17 agent, Node 24 tracer, Go rewriter, stable Rust toolchain/tracer, and Python 3.12 `sys.monitoring` tracer with pytest. The host needs only Docker:
 
 ```bash
 docker pull ghcr.io/issacnitin/realdiff:v0.3.0
@@ -131,7 +146,7 @@ docker run --rm \
   --findings /workspace/.realdiff/artifacts/findings.json
 ```
 
-The normal image entrypoint is `realdiff`; no PowerShell wrapper is involved. The unified CLI orchestrates .NET, Java, Node/TypeScript, Go, and Rust repositories.
+The normal image entrypoint is `realdiff`; no PowerShell wrapper is involved. The unified CLI orchestrates .NET, Java, Node/TypeScript, Go, Rust, and Python repositories.
 
 The current locally verified Linux/amd64 image is 898,678,469 bytes by Docker image inspection and includes stable Rust 1.98 plus a native linker. The container workflow reports the exact size for every published build.
 
@@ -266,6 +281,16 @@ Prerequisites: stable Rust/Cargo and standard `#[test]` tests. The CLI rewrites 
 realdiff C:\src\rust-service --base origin/main --pr HEAD
 ```
 
+### Python
+
+Prerequisites: Python 3.12 or newer with `sys.monitoring`, plus the repository's configured test runner. Automatic detection recognizes `pyproject.toml`, then `setup.py`, then `requirements.txt` when multiple markers share a directory. Python has no RealDiff build step: instrumentation attaches at interpreter process start and the original checkout executes unchanged. Older interpreters are refused rather than traced with `sys.settrace`.
+
+```powershell
+realdiff C:\src\python-service --base origin/main --pr HEAD
+```
+
+The maintained reference gate runs both pytest and unittest with six tests each, then compares four pytest traces through the normal Rust engine. It currently reports 378 matched keys across 73 subject methods and 384 events per run, with zero divergences, tooling gaps, subject roots, or uncorrelated subject events. A second run proves the base-trace cache hits with the same Python version, tracer fingerprint, scope, and redaction settings.
+
 The command is intentionally the same for every language. `realdiff detect <repo>` prints the effective language, work directory, entry point, commands, test projects, and scope. The legacy `detect-language` spelling remains an alias.
 
 ### Repository configuration
@@ -301,7 +326,7 @@ Configuration overrides inference field by field; detection fills fields left un
 
 The effective build and test commands run unchanged for both base and PR revisions. Custom tests do not replace instrumentation: .NET receives the woven/injected environment, Java receives the javaagent through `JAVA_TOOL_OPTIONS`, Node receives the loader/hooks through `NODE_OPTIONS`, and Go/Rust tests execute in their rewritten caches. A command that exits successfully but produces zero trace events is refused with exit `3` and reports the command and trace/manifest counts.
 
-Automatic detection recognizes conventional root or unambiguous nested `.sln`/`.csproj`, Maven `pom.xml`, npm `package.json`, Go `go.mod`, and Cargo `Cargo.toml` entry points. Java detection is Maven-only, Node detection requires npm and `package-lock.json` for execution, and source/test roots remain conventional. Mixed-language repositories, monorepos, and multiple entry points are refused rather than guessed; set `language` and `workdir` (plus both commands when no conventional entry point exists) to resolve them.
+Automatic detection recognizes conventional root or unambiguous nested `.sln`/`.csproj`, Maven `pom.xml`, npm `package.json`, Go `go.mod`, Cargo `Cargo.toml`, and Python `pyproject.toml`/`setup.py`/`requirements.txt` entry points. Java detection is Maven-only, Node detection requires npm and `package-lock.json` for execution, and source/test roots remain conventional. Mixed-language repositories, monorepos, and multiple entry points are refused rather than guessed; set `language` and `workdir` (plus both commands when the language normally has a build step and no conventional entry point exists) to resolve them.
 
 ### Base trace cache
 

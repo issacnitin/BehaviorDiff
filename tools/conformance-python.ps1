@@ -59,7 +59,7 @@ try {
     if (($unittestOutput -join "`n") -notmatch 'Ran 6 tests') { throw 'Python unittest runner count was not 6.' }
     $env:PYTHONPATH = Join-Path $repo 'src/RealDiff.Python'
     $unitOutput = Invoke-Checked 'Python tracer tests' { & $python -m unittest discover -s (Join-Path $repo 'src/RealDiff.Python/tests') -v }
-    if (($unitOutput -join "`n") -notmatch 'Ran 15 tests') { throw 'Python tracer test count was not 15.' }
+    if (($unitOutput -join "`n") -notmatch 'Ran 17 tests') { throw 'Python tracer test count was not 17.' }
 
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
     $target = Join-Path $work 'repository'

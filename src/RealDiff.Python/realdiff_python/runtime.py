@@ -67,7 +67,7 @@ class Runtime:
         self._closed = False
         trace_path.parent.mkdir(parents=True, exist_ok=True)
         self._stream = trace_path.open("w", encoding="utf-8", newline="\n")
-        self._discover_excluded_members()
+        self._discover_source_members()
         atexit.register(self.close)
 
     @classmethod
@@ -92,15 +92,14 @@ class Runtime:
             elif event == "unwind":
                 self._complete(frame, exception=value)
 
-    def _discover_excluded_members(self) -> None:
-        if not self.scope.excludes:
-            return
+    def _discover_source_members(self) -> None:
         for source in sorted(self.scope.root.rglob("*.py")):
             try:
                 relative = source.relative_to(self.scope.root).as_posix()
             except ValueError:
                 continue
-            if not self.scope.is_excluded(relative):
+            excluded = self.scope.is_excluded(relative)
+            if not excluded and not self.scope.is_included(relative):
                 continue
             try:
                 tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
@@ -109,9 +108,8 @@ class Runtime:
             module = _module_name(relative)
             for qualified, node in _source_callables(tree):
                 method = f"{module}::{qualified}"
-                return_kind = "Coroutine" if isinstance(node, ast.AsyncFunctionDef) else "Sync"
-                self._members.setdefault(
-                    method,
+                return_kind = _source_return_kind(node)
+                member = (
                     Member(
                         module,
                         method,
@@ -121,8 +119,11 @@ class Runtime:
                         return_kind,
                         "ExcludedByScope",
                         "Python: ExcludedPath",
-                    ),
+                    )
+                    if excluded
+                    else Member(module, method, relative, node.lineno, "Patched", return_kind)
                 )
+                self._members.setdefault(method, member)
 
     def register_test_root(self, code: CodeType, test_id: str) -> None:
         with self._lock:
@@ -187,10 +188,17 @@ class Runtime:
         self._states[id(frame)] = state
         self._calls[call_id] = state
         stack.append(call_id)
-        self._members.setdefault(
-            method,
-            Member(module, method, file_path, state.line, "Patched", _return_kind(code), is_test_root=is_test_root),
-        )
+        existing = self._members.get(method)
+        if existing is None or (is_test_root and not existing.is_test_root):
+            self._members[method] = Member(
+                module,
+                method,
+                file_path,
+                state.line,
+                "Patched",
+                _return_kind(code),
+                is_test_root=is_test_root,
+            )
 
     def _resume(self, frame: FrameType) -> None:
         state = self._states.get(id(frame))
@@ -389,6 +397,13 @@ def _source_callables(tree: ast.AST):
                 yield from visit(node.body, parents + [(qualified, "class")])
 
     yield from visit(getattr(tree, "body", ()), [])
+
+
+def _source_return_kind(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    yields = any(isinstance(child, (ast.Yield, ast.YieldFrom)) for child in ast.walk(node))
+    if isinstance(node, ast.AsyncFunctionDef):
+        return "AsyncGenerator" if yields else "Coroutine"
+    return "Generator" if yields else "Sync"
 
 
 def _unittest_test_id(code: CodeType, frame: FrameType) -> str | None:

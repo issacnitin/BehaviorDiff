@@ -2,6 +2,19 @@
 
 All notable changes to RealDiff are documented here.
 
+## 0.4.0 - 2026-08-26
+
+### Added
+
+- Python 3.12+ tracing through PEP 669 `sys.monitoring`, with pytest/unittest structural correlation, generator/coroutine suspension handling, safe fields-only canonicalization, redaction, source inventory, and cache fingerprinting.
+- Python reference conformance at 378 matched keys, 73 methods, and 384 events per run.
+- Python tracer staging in NuGet, self-contained archives, CI, release workflows, and the all-language container.
+
+### Changed
+
+- Breaking product migration from BehaviorDiff to RealDiff across repository/project names, namespaces, package IDs, command names, environment variables, schemas, action/container names, and artifacts.
+- Clarified the trace contract: runtime-attached languages without a build step must still inventory unexecuted source members before tests.
+
 ## 0.3.0 - 2026-08-26
 
 ### Added

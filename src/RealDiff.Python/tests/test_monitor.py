@@ -19,6 +19,17 @@ class ScopeTests(unittest.TestCase):
             self.assertIsNone(scope.relative_path(excluded))
             self.assertIsNone(scope.relative_path(sibling))
 
+    def test_code_object_source_resolution_states(self):
+        with tempfile.TemporaryDirectory() as root:
+            scope = Scope(Path(root), (), ())
+            exact = compile("pass", str(Path(root, "src", "app.py")), "exec")
+            synthetic = compile("pass", "<generated>", "exec")
+            external = compile("pass", str(Path(root).parent / "external.py"), "exec")
+
+            self.assertEqual(("src/app.py", 1, "debugInfo"), scope.source_location(exact))
+            self.assertEqual((None, 0, "debugInfoMissing"), scope.source_location(synthetic))
+            self.assertEqual((None, 0, "unresolved"), scope.source_location(external))
+
 
 @unittest.skipUnless(sys.version_info >= (3, 12), "requires sys.monitoring")
 class MonitoringTests(unittest.TestCase):
