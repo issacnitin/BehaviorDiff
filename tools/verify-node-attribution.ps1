@@ -208,13 +208,12 @@ try {
     Write-Host '=== Node mutated PR run ===' -ForegroundColor Cyan
     $pr = Run-Reference $prTree $prRun $false 'PR run'
 
-    $engineProject = Join-Path $repo 'src/BehaviorDiff.Engine/BehaviorDiff.Engine.csproj'
-    & $dotnet build $engineProject -c Release --nologo -v quiet
-    if ($LASTEXITCODE -ne 0) { throw 'Engine build failed' }
+    Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Engine.psm1') -Force
+    $engine = Get-BehaviorDiffEngine
 
     $divergencesPath = Join-Path $work 'divergence-set.json'
-    & $dotnet run --project $engineProject -c Release --no-build -- diff `
-        --base1 $baseRun1 --base2 $baseRun2 --pr $prRun --out $divergencesPath `
+    & $engine stream-diff --base1 $baseRun1 --base2 $baseRun2 --base3 $baseRun1 `
+        --pr $prRun --out $divergencesPath `
         --base-root $baseTree --pr-root $prTree
     if ($LASTEXITCODE -ne 0) { throw "Node attribution diff failed: $LASTEXITCODE" }
     $divergences = Get-Content $divergencesPath -Raw | ConvertFrom-Json
@@ -225,8 +224,7 @@ try {
     $changedFilesPath = Join-Path $work 'changed-files.txt'
     $changedFile | Set-Content $changedFilesPath
     $frontierPath = Join-Path $work 'frontier.json'
-    & $dotnet run --project $engineProject -c Release --no-build -- frontier `
-        --in $divergencesPath --changed-files $changedFilesPath --out $frontierPath
+    & $engine frontier --in $divergencesPath --changed-files $changedFilesPath --out $frontierPath
     if ($LASTEXITCODE -ne 0) { throw "Node attribution frontier failed (path-attribution refusal): $LASTEXITCODE" }
 
     $frontier = Get-Content $frontierPath -Raw | ConvertFrom-Json
@@ -245,8 +243,7 @@ try {
     }
 
     $findingsPath = Join-Path $work 'findings.json'
-    & $dotnet run --project $engineProject -c Release --no-build -- findings `
-        --divergences $divergencesPath --frontier $frontierPath --out $findingsPath --exit-code 0 `
+    & $engine findings --divergences $divergencesPath --frontier $frontierPath --out $findingsPath --exit-code 0 `
         --base-sha node-proof-base --pr-sha node-proof-pr --merge-base node-proof-base
     if ($LASTEXITCODE -ne 0) { throw "Node attribution findings failed: $LASTEXITCODE" }
     $findings = Get-Content $findingsPath -Raw | ConvertFrom-Json

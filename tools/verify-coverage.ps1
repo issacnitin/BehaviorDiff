@@ -12,6 +12,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Engine.psm1') -Force
+$engine = Get-BehaviorDiffEngine
 $runId = [Guid]::NewGuid().ToString('N')
 $ownsWork = -not $WorkDirectory
 $ownsPrTree = -not $PrTreeDirectory
@@ -32,15 +34,13 @@ $changed = Join-Path $work 'coverage-changed-files.txt'
 ) | Set-Content $changed
 
 $frontier = Join-Path $work 'coverage-frontier-report.json'
-$output = & dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
-    frontier --in $divergences --changed-files $changed --out $frontier 2>&1
+$output = & $engine frontier --in $divergences --changed-files $changed --out $frontier 2>&1
 $frontierExit = $LASTEXITCODE
 $output | ForEach-Object { Write-Host $_ }
 if ($frontierExit -ne 0) { throw "coverage frontier failed: $frontierExit" }
 
 $findings = Join-Path $work 'coverage-findings.json'
-& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
-    findings --divergences $divergences --frontier $frontier --out $findings --exit-code 1 `
+& $engine findings --divergences $divergences --frontier $frontier --out $findings --exit-code 1 `
     --base-sha proof-base --pr-sha proof-pr --merge-base proof-merge-base | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "coverage findings projection failed: $LASTEXITCODE" }
 

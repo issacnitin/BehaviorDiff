@@ -216,6 +216,23 @@ function Assert-BehaviorDiffConformanceRuns {
     }
 }
 
+function Resolve-CargoExecutable {
+    $command = Get-Command 'cargo' -ErrorAction SilentlyContinue
+    if ($null -ne $command) { return $command.Source }
+    $exeName = if ($IsWindows) { 'cargo.exe' } else { 'cargo' }
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    if ($env:CARGO_HOME) {
+        $candidates.Add((Join-Path $env:CARGO_HOME "bin/$exeName"))
+    }
+    if ($env:USERPROFILE) {
+        $candidates.Add((Join-Path $env:USERPROFILE ".cargo/bin/$exeName"))
+    }
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate -PathType Leaf)) { return $candidate }
+    }
+    return 'cargo'
+}
+
 function Invoke-BehaviorDiffEngineConformance {
     [CmdletBinding()]
     param(
@@ -229,7 +246,8 @@ function Invoke-BehaviorDiffEngineConformance {
     try {
         $repo = Split-Path -Parent $PSScriptRoot
         $manifest = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml'
-        & cargo build --release --locked --manifest-path $manifest
+        $cargo = Resolve-CargoExecutable
+        & $cargo build --release --locked --manifest-path $manifest
         if ($LASTEXITCODE -ne 0) { throw "Rust engine build failed with exit code $LASTEXITCODE" }
         $fileName = if ($IsWindows) { 'behaviordiff-engine.exe' } else { 'behaviordiff-engine' }
         $engine = Join-Path $repo "src/BehaviorDiff.Engine.Rust/target/release/$fileName"

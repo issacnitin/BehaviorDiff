@@ -90,7 +90,8 @@ $env:BEHAVIORDIFF_TRACE = ''
 Write-Host ''
 Write-Host '=== engine ===' -ForegroundColor Cyan
 $divergence = Join-Path $work 'divergence-set.json'
-$engine = Join-Path $repo 'src/BehaviorDiff.Engine'
+Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Engine.psm1') -Force
+$engine = Get-BehaviorDiffEngine
 
 # diff needs this too now: an added member only counts as behavior if its file is one the PR edited.
 $changedList = Join-Path $work 'changed-files.txt'
@@ -100,8 +101,7 @@ Pop-Location
 Write-Host ("  changed files from git : {0}" -f (Get-Content $changedList).Count)
 
 $sw = [Diagnostics.Stopwatch]::StartNew()
-& dotnet run --project $engine -c Release --no-build -- `
-    diff --base1 $runs.base1.Dir --base2 $runs.base2.Dir --base3 $runs.base3.Dir --pr $runs.pr.Dir --changed-files $changedList `
+& $engine stream-diff --base1 $runs.base1.Dir --base2 $runs.base2.Dir --base3 $runs.base3.Dir --pr $runs.pr.Dir --changed-files $changedList `
     --base-root $baseTree --pr-root $prTree --out $divergence
 $diffExit = $LASTEXITCODE
 $sw.Stop()
@@ -110,8 +110,7 @@ if ($diffExit -ne 0) { exit $diffExit }
 
 $report = Join-Path $work 'frontier.json'
 $sw = [Diagnostics.Stopwatch]::StartNew()
-& dotnet run --project $engine -c Release --no-build -- `
-    frontier --in $divergence --changed-files $changedList --out $report
+& $engine frontier --in $divergence --changed-files $changedList --out $report
 $frontierExit = $LASTEXITCODE
 $sw.Stop()
 Write-Host ("  frontier : exit={0}  {1:N0} ms" -f $frontierExit, $sw.ElapsedMilliseconds)

@@ -255,7 +255,11 @@ pub(crate) fn run(options: &FrontierOptions) -> Result<i32, String> {
         "  divergences (part 1)     : {}",
         set.counts.remaining_divergences
     );
+    println!("  tooling gaps (real)      : {}", set.tooling_gaps.len());
+    println!("  ManifestNoise cancelled  : {}", set.manifest_noise.len());
     let index = CallTreeIndex::build(&set.call_tree);
+    println!();
+    println!("=== call tree ===");
     println!("  call-tree nodes          : {}", set.call_tree.len());
     println!("  roots                    : {}", index.roots);
     println!("  orphans                  : {}", index.orphans.len());
@@ -438,8 +442,40 @@ pub(crate) fn run(options: &FrontierOptions) -> Result<i32, String> {
         nodes.push(node);
     }
 
+    let verified_count = nodes
+        .iter()
+        .filter(|node| node.classification == "frontier")
+        .count();
+    let unverified_count = nodes.len() - verified_count;
+    let collapse = if nodes.is_empty() {
+        0.0
+    } else {
+        diverged_keys.len() as f64 / nodes.len() as f64
+    };
+    println!("  frontier nodes           : {}", nodes.len());
+    println!("    verified               : {verified_count}");
+    println!("    frontier_unverified    : {unverified_count}");
+    println!("  collateral (suppressed)  : {}", collateral.len());
+    println!(
+        "  collapse                 : {} diverged keys -> {} frontier node(s){}",
+        diverged_keys.len(),
+        nodes.len(),
+        if nodes.is_empty() {
+            String::new()
+        } else {
+            format!(" ({collapse:.1}x)")
+        }
+    );
+
+    println!();
+    println!("=== attribution ===");
     let changed = load_changed_files(&options.changed_files)?;
+    println!("  changed files            : {}", changed.len());
+    for file in changed.iter().take(10) {
+        println!("    {file}");
+    }
     let coverage = changed_file_coverage(&changed, &set.call_tree, &set.pr_call_tree);
+    print_changed_file_coverage(&coverage.files);
     if changed.is_empty() && !nodes.is_empty() {
         refusals.push(format!(
             "ATTRIBUTION: the changed-file set is empty but there are {} frontier node(s). All of them would be classified UNEXPECTED, which reads as a large finding rather than as a missing input.",
@@ -654,6 +690,55 @@ fn changed_file_coverage(
             total_call_count: files.iter().map(|file| file.total_call_count).sum(),
         },
         files,
+    }
+}
+
+fn print_changed_file_coverage(coverage: &[ChangedFileCoverage]) {
+    println!();
+    println!("=== changed-file coverage ===");
+    println!(
+        "  exercised edited files  : {} of {}",
+        coverage.iter().filter(|file| file.exercised).count(),
+        coverage.len()
+    );
+    println!(
+        "  traced members          : {}",
+        coverage
+            .iter()
+            .map(|file| file.traced_members)
+            .sum::<usize>()
+    );
+    println!(
+        "  observed call sites     : {}",
+        coverage
+            .iter()
+            .map(|file| file.observed_call_sites)
+            .sum::<usize>()
+    );
+    let total_calls: usize = coverage.iter().map(|file| file.total_call_count).sum();
+    let base_calls: usize = coverage.iter().map(|file| file.base_call_count).sum();
+    let pr_calls: usize = coverage.iter().map(|file| file.pr_call_count).sum();
+    println!("  total calls             : {total_calls} (base={base_calls} pr={pr_calls})");
+    for file in coverage {
+        println!(
+            "    {}  {}  members={} callSites={} calls={} (base={} pr={}){}",
+            if file.exercised {
+                "EXERCISED    "
+            } else {
+                "NOT EXERCISED"
+            },
+            file.file_path,
+            file.traced_members,
+            file.observed_call_sites,
+            file.total_call_count,
+            file.base_call_count,
+            file.pr_call_count,
+            if file.exercised {
+                ""
+            } else {
+                "  [no behavioral claim]"
+            }
+        );
     }
 }
 

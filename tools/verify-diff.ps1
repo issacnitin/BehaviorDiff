@@ -22,6 +22,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repo = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Engine.psm1') -Force
+$engine = Get-BehaviorDiffEngine
 $providedPrTree = $PrTreeDirectory
 $runId = [Guid]::NewGuid().ToString('N')
 $ownsPrTree = -not $PrTreeDirectory
@@ -65,12 +67,15 @@ if (-not $SkipPrRebuild) {
     New-Item -ItemType Directory -Path $prTree | Out-Null
 
     # Copy sources only. bin/obj carry PDBs pointing at the base path, which would mask a normalization bug.
-    Get-ChildItem $repo -Force | Where-Object { $_.Name -notin @('.git', '.vs') } | ForEach-Object {
-        Copy-Item $_.FullName -Destination $prTree -Recurse -Force -Exclude @()
+    Get-ChildItem $repo -Recurse -File | Where-Object {
+        $_.FullName -notmatch '[\\/](\.git|\.vs|target|bin|obj|artifacts)[\\/]'
+    } | ForEach-Object {
+        $rel = $_.FullName.Substring($repo.Length).TrimStart('\', '/')
+        $dest = Join-Path $prTree $rel
+        $destDir = Split-Path $dest -Parent
+        if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+        Copy-Item $_.FullName -Destination $dest -Force
     }
-    Get-ChildItem $prTree -Include bin, obj -Recurse -Directory -Force |
-        Sort-Object { $_.FullName.Length } -Descending |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
     if ($Mutate) {
         if ($Change -eq 'sort') {
@@ -159,8 +164,8 @@ Write-Host '  pr_run done'
 
 Write-Host ''
 $out = Join-Path $work 'divergence-set.json'
-& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
-    diff --base1 (Join-Path $work 'base_run1') --base2 (Join-Path $work 'base_run2') --pr (Join-Path $work 'pr_run') `
+& $engine stream-diff --base1 (Join-Path $work 'base_run1') --base2 (Join-Path $work 'base_run2') `
+    --base3 (Join-Path $work 'base_run1') --pr (Join-Path $work 'pr_run') `
     --base-root $repo --pr-root $prTree --out $out
 
 $engineExit = $LASTEXITCODE
@@ -190,8 +195,7 @@ if ($changed.Count -eq 0) { Write-Host '  (none)' }
 
 Write-Host ''
 $report = Join-Path $work 'frontier-report.json'
-& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
-    frontier --in $out --changed-files $changedList --out $report
+& $engine frontier --in $out --changed-files $changedList --out $report
 
 $frontierExit = $LASTEXITCODE
 if ($frontierExit -ne 0) { return $frontierExit }
@@ -201,8 +205,7 @@ Write-Host '=== canonical findings ===' -ForegroundColor Cyan
 $findings = Join-Path $work 'findings.json'
 $frontierDocument = Get-Content $report -Raw | ConvertFrom-Json
 $findingsExit = if ($frontierDocument.counts.unexpected -gt 0) { 1 } else { 0 }
-& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
-    findings --divergences $out --frontier $report --out $findings --exit-code $findingsExit `
+& $engine findings --divergences $out --frontier $report --out $findings --exit-code $findingsExit `
     --base-sha proof-base --pr-sha proof-pr --merge-base proof-merge-base
 
 if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE }
@@ -229,8 +232,7 @@ if ($Mutate -and $Change -eq 'sort') {
     }
 
     $strictFindings = Join-Path $work 'findings-strict.json'
-    & dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
-        findings --divergences $out --frontier $report --out $strictFindings --exit-code $findingsExit `
+    & $engine findings --divergences $out --frontier $report --out $strictFindings --exit-code $findingsExit `
         --base-sha proof-base --pr-sha proof-pr --merge-base proof-merge-base --strict
     if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE }
     $strict = Get-Content $strictFindings -Raw | ConvertFrom-Json
@@ -267,8 +269,7 @@ if ($Mutate -and $Change -eq 'sort') {
     $divergenceDocument = Get-Content $out -Raw | ConvertFrom-Json
     $divergenceDocument.divergences = @($divergenceDocument.divergences | Where-Object methodFullName -eq $member.memberName)
     $divergenceDocument | ConvertTo-Json -Depth 100 | Set-Content $isolatedDivergenceSet
-    & dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
-        findings --divergences $isolatedDivergenceSet --frontier $report --out $isolatedFindings --exit-code $findingsExit `
+    & $engine findings --divergences $isolatedDivergenceSet --frontier $report --out $isolatedFindings --exit-code $findingsExit `
         --base-sha proof-base --pr-sha proof-pr --merge-base proof-merge-base
     if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE }
     $isolated = Get-Content $isolatedFindings -Raw | ConvertFrom-Json
@@ -287,8 +288,7 @@ if ($Mutate -and $Change -eq 'sort') {
         differences = 1
     })
     $divergenceDocument | ConvertTo-Json -Depth 100 | Set-Content $noisyDivergenceSet
-    & dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Engine') -c Release --no-build -- `
-        findings --divergences $noisyDivergenceSet --frontier $report --out $noisyFindings --exit-code $findingsExit `
+    & $engine findings --divergences $noisyDivergenceSet --frontier $report --out $noisyFindings --exit-code $findingsExit `
         --base-sha proof-base --pr-sha proof-pr --merge-base proof-merge-base
     if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE }
     $noisy = Get-Content $noisyFindings -Raw | ConvertFrom-Json
