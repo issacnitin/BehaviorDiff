@@ -5,8 +5,9 @@ import (
 	"go/format"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
+
+	"github.com/behaviordiff/behaviordiff-go/internal/runtime/canonical"
 )
 
 const runtimeSource = `package behaviordiffrt
@@ -473,22 +474,13 @@ func writeRuntime(out string) error {
 	if err := os.WriteFile(filepath.Join(directory, "runtime.go"), formattedRuntime, 0o644); err != nil {
 		return fmt.Errorf("write runtime package: %w", err)
 	}
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		return fmt.Errorf("locate canonicalizer source")
-	}
-	canonicalPath := filepath.Join(filepath.Dir(sourceFile), "..", "runtime", "canonical", "canonical.go")
-	canonical, err := os.ReadFile(canonicalPath)
-	if err != nil {
-		return fmt.Errorf("read canonicalizer source: %w", err)
-	}
 	generated := strings.NewReplacer(
 		"package canonical", "package behaviordiffrt",
 		"newState", "newCanonicalState",
 		"type state struct", "type canonicalState struct",
 		"*state", "*canonicalState",
 		"&state{", "&canonicalState{",
-	).Replace(string(canonical))
+	).Replace(canonical.Source)
 	formattedCanonical, err := format.Source([]byte(generated))
 	if err != nil {
 		return fmt.Errorf("format canonicalizer source: %w", err)

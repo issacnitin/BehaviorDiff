@@ -16,6 +16,7 @@ $toolPath = Join-Path $work 'tool'
 $cliProject = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
 $previousJavaAgent = $env:BEHAVIORDIFF_JAVA_AGENT
 $previousNodeTracer = $env:BEHAVIORDIFF_NODE_TRACER
+$previousGoRewriter = $env:BEHAVIORDIFF_GO_REWRITER
 $previousRustTracer = $env:BEHAVIORDIFF_RUST_TRACER
 
 function Invoke-Checked([string]$label, [scriptblock]$command) {
@@ -63,6 +64,7 @@ function Assert-RunArtifacts(
     $label = switch ($language) {
         'java' { 'java agent' }
         'node' { 'node tracer' }
+        'go' { 'go rewriter' }
         'rust' { 'rust tracer' }
     }
     $pathMatch = [regex]::Match($text, "(?m)^\s*$label\s*:\s*(.+)$")
@@ -146,6 +148,8 @@ try {
     $rustPackageEntry = "tools/net8.0/any/engines/rust/$rustOs-$rustArchitecture/$rustFile"
     $rustTracerFile = if ($IsWindows) { 'behaviordiff-rust-rewrite.exe' } else { 'behaviordiff-rust-rewrite' }
     $rustTracerPackageEntry = "tools/net8.0/any/tracers/rust/$rustOs-$rustArchitecture/$rustTracerFile"
+    $goTracerFile = if ($IsWindows) { 'behaviordiff-go-rewrite.exe' } else { 'behaviordiff-go-rewrite' }
+    $goTracerPackageEntry = "tools/net8.0/any/tracers/go/$rustOs-$rustArchitecture/$goTracerFile"
     $requiredEntries = @(
         'tools/net8.0/any/tracers/java/behaviordiff-java-agent.jar',
         'tools/net8.0/any/tracers/node/register.cjs',
@@ -159,6 +163,7 @@ try {
         'tools/net8.0/any/tracers/node/adapters/vitest.mjs',
         'tools/net8.0/any/tracers/node/node_modules/@babel/parser/package.json',
         'tools/net8.0/any/Mono.Cecil.dll',
+        $goTracerPackageEntry,
         $rustPackageEntry,
         $rustTracerPackageEntry
     )
@@ -181,15 +186,19 @@ try {
 
     $env:BEHAVIORDIFF_JAVA_AGENT = $null
     $env:BEHAVIORDIFF_NODE_TRACER = $null
+    $env:BEHAVIORDIFF_GO_REWRITER = $null
     $env:BEHAVIORDIFF_RUST_TRACER = $null
     $java = New-ReferenceRepository 'java' (Join-Path $repo 'samples/JavaReference')
     $node = New-ReferenceRepository 'node' (Join-Path $repo 'samples/NodeReference')
+    $go = New-ReferenceRepository 'go' (Join-Path $repo 'samples/GoReference')
     $rust = New-ReferenceRepository 'rust' (Join-Path $repo 'samples/RustReference')
 
     Write-Host '=== Installed Java CLI invocation ===' -ForegroundColor Cyan
     $javaResult = Invoke-LanguageProof 'java' $java $cli
     Write-Host '=== Installed Node CLI invocation ===' -ForegroundColor Cyan
     $nodeResult = Invoke-LanguageProof 'node' $node $cli
+    Write-Host '=== Installed Go CLI invocation ===' -ForegroundColor Cyan
+    $goResult = Invoke-LanguageProof 'go' $go $cli
     Write-Host '=== Installed Rust CLI invocation ===' -ForegroundColor Cyan
     $rustResult = Invoke-LanguageProof 'rust' $rust $cli
 
@@ -198,11 +207,13 @@ try {
     Write-Host ("  package: {0} ({1} MiB, {2} entries)" -f $package.Name, $size, $entries.Count)
     Write-Host ("  Java: runs={0} events={1}" -f $javaResult.Runs, $javaResult.Events)
     Write-Host ("  Node : runs={0} events={1}" -f $nodeResult.Runs, $nodeResult.Events)
+    Write-Host ("  Go   : runs={0} events={1}" -f $goResult.Runs, $goResult.Events)
     Write-Host ("  Rust : runs={0} events={1}" -f $rustResult.Runs, $rustResult.Events)
 }
 finally {
     $env:BEHAVIORDIFF_JAVA_AGENT = $previousJavaAgent
     $env:BEHAVIORDIFF_NODE_TRACER = $previousNodeTracer
+    $env:BEHAVIORDIFF_GO_REWRITER = $previousGoRewriter
     $env:BEHAVIORDIFF_RUST_TRACER = $previousRustTracer
     if ($ownsWork -and -not $KeepWork) {
         Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue

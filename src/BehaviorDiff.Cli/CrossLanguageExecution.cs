@@ -71,6 +71,7 @@ namespace BehaviorDiff.Cli
             {
                 RepositoryLanguage.Java => RunJava(baseDetection, prDetection, baseTree, prTree, targetSha),
                 RepositoryLanguage.Node => RunNode(baseDetection, prDetection, baseTree, prTree, targetSha),
+                RepositoryLanguage.Go => RunGo(baseDetection, prDetection, baseTree, prTree, targetSha),
                 RepositoryLanguage.Rust => RunRust(baseDetection, prDetection, baseTree, prTree, targetSha),
                 _ => throw new CliException("Cross-language execution was requested for " + baseDetection.Language + "."),
             };
@@ -86,6 +87,9 @@ namespace BehaviorDiff.Cli
                 case RepositoryLanguage.Node:
                     WarmNode(detection, baseTree, targetSha);
                     break;
+                case RepositoryLanguage.Go:
+                    WarmGo(detection, baseTree, targetSha);
+                    break;
                 case RepositoryLanguage.Rust:
                     WarmRust(detection, baseTree, targetSha);
                     break;
@@ -99,9 +103,10 @@ namespace BehaviorDiff.Cli
             Console.WriteLine();
             Console.WriteLine("=== 2. Java clean build ===");
             MavenCommand maven = ResolveMaven(detection.EntryPoint, baseTree);
-            BuildJava("base", detection.EntryPoint, maven);
+            if (detection.HasCustomBuild) RunConfiguredBuild("base", detection);
+            else BuildJava("base", detection.EntryPoint, maven);
 
-            string scope = string.Join(",", DeriveJavaScopes(detection.EntryPoint, detection.EntryPoint));
+            string scope = string.Join(",", detection.IncludeNamespaces);
             string agent = ResolveJavaAgent();
             var key = new TraceCacheKey(
                 targetSha,
@@ -116,9 +121,9 @@ namespace BehaviorDiff.Cli
             Console.WriteLine();
             Console.WriteLine("=== 3. Java base trace runs ===");
             var stopwatch = Stopwatch.StartNew();
-            string base1 = RunJavaTests("base_run1", detection.EntryPoint, baseTree, maven, scope, agent);
-            RunJavaTests("base_run2", detection.EntryPoint, baseTree, maven, scope, agent);
-            RunJavaTests("base_run3", detection.EntryPoint, baseTree, maven, scope, agent);
+            string base1 = RunJavaTests("base_run1", detection, baseTree, maven, scope, agent);
+            RunJavaTests("base_run2", detection, baseTree, maven, scope, agent);
+            RunJavaTests("base_run3", detection, baseTree, maven, scope, agent);
             Pipeline.AssertTestIdsPresent(base1);
             stopwatch.Stop();
             _cache.Store(key, baseTree, stopwatch.ElapsedMilliseconds);
@@ -138,8 +143,9 @@ namespace BehaviorDiff.Cli
                     ExitCodes.RunInvalid);
             }
 
-            BuildNode("base", baseDirectory);
-            string scope = string.Join(";", DeriveNodeScopes(baseDirectory, baseDirectory));
+            if (detection.HasCustomBuild) RunConfiguredBuild("base", detection);
+            else BuildNode("base", baseDirectory);
+            string scope = string.Join(";", detection.IncludeNamespaces);
             string tracer = ResolveNodeTracer();
             var key = new TraceCacheKey(
                 targetSha,
@@ -154,9 +160,9 @@ namespace BehaviorDiff.Cli
             Console.WriteLine();
             Console.WriteLine("=== 3. Node base trace runs ===");
             var stopwatch = Stopwatch.StartNew();
-            string base1 = RunNodeTests("base_run1", baseDirectory, baseTree, scope, tracer);
-            RunNodeTests("base_run2", baseDirectory, baseTree, scope, tracer);
-            RunNodeTests("base_run3", baseDirectory, baseTree, scope, tracer);
+            string base1 = RunNodeTests("base_run1", detection, baseTree, scope, tracer);
+            RunNodeTests("base_run2", detection, baseTree, scope, tracer);
+            RunNodeTests("base_run3", detection, baseTree, scope, tracer);
             Pipeline.AssertTestIdsPresent(base1);
             stopwatch.Stop();
             _cache.Store(key, baseTree, stopwatch.ElapsedMilliseconds);
@@ -173,12 +179,14 @@ namespace BehaviorDiff.Cli
             Console.WriteLine("=== 2. Java clean builds ===");
             MavenCommand baseMaven = ResolveMaven(baseDetection.EntryPoint, baseTree);
             MavenCommand prMaven = ResolveMaven(prDetection.EntryPoint, prTree);
-            BuildJava("base", baseDetection.EntryPoint, baseMaven);
-            BuildJava("pr", prDetection.EntryPoint, prMaven);
+            if (baseDetection.HasCustomBuild) RunConfiguredBuild("base", baseDetection);
+            else BuildJava("base", baseDetection.EntryPoint, baseMaven);
+            if (prDetection.HasCustomBuild) RunConfiguredBuild("pr", prDetection);
+            else BuildJava("pr", prDetection.EntryPoint, prMaven);
 
             Console.WriteLine();
             Console.WriteLine("=== 3. Java trace scope and agent ===");
-            string scope = string.Join(",", DeriveJavaScopes(baseDetection.EntryPoint, prDetection.EntryPoint));
+            string scope = string.Join(",", baseDetection.IncludeNamespaces);
             string agent = ResolveJavaAgent();
             Console.WriteLine("  package scope: " + scope);
             Console.WriteLine("  java agent  : " + agent);
@@ -206,16 +214,16 @@ namespace BehaviorDiff.Cli
             else
             {
                 var stopwatch = Stopwatch.StartNew();
-                base1 = RunJavaTests("base_run1", baseDetection.EntryPoint, baseTree, baseMaven, scope, agent);
-                base2 = RunJavaTests("base_run2", baseDetection.EntryPoint, baseTree, baseMaven, scope, agent);
-                base3 = RunJavaTests("base_run3", baseDetection.EntryPoint, baseTree, baseMaven, scope, agent);
+                base1 = RunJavaTests("base_run1", baseDetection, baseTree, baseMaven, scope, agent);
+                base2 = RunJavaTests("base_run2", baseDetection, baseTree, baseMaven, scope, agent);
+                base3 = RunJavaTests("base_run3", baseDetection, baseTree, baseMaven, scope, agent);
                 stopwatch.Stop();
                 baseRoot = baseTree;
                 _cache.Store(key, baseRoot, stopwatch.ElapsedMilliseconds);
             }
 
             Pipeline.AssertTestIdsPresent(base1);
-            string pr = RunJavaTests("pr_run", prDetection.EntryPoint, prTree, prMaven, scope, agent);
+            string pr = RunJavaTests("pr_run", prDetection, prTree, prMaven, scope, agent);
             return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
         }
 
@@ -249,14 +257,16 @@ namespace BehaviorDiff.Cli
                     ExitCodes.RunInvalid);
             }
 
-            BuildNode("base", baseDirectory);
-            BuildNode("pr", prDirectory);
+            if (baseDetection.HasCustomBuild) RunConfiguredBuild("base", baseDetection);
+            else BuildNode("base", baseDirectory);
+            if (prDetection.HasCustomBuild) RunConfiguredBuild("pr", prDetection);
+            else BuildNode("pr", prDirectory);
             buildStopwatch.Stop();
             _timings.BuildMilliseconds += buildStopwatch.ElapsedMilliseconds;
 
             Console.WriteLine();
             Console.WriteLine("=== 3. Node trace scope and tracer ===");
-            string scope = string.Join(";", DeriveNodeScopes(baseDirectory, prDirectory));
+            string scope = string.Join(";", baseDetection.IncludeNamespaces);
             string tracer = ResolveNodeTracer();
             Console.WriteLine("  path scope : " + scope);
             Console.WriteLine("  node tracer: " + tracer);
@@ -284,9 +294,9 @@ namespace BehaviorDiff.Cli
             else
             {
                 var stopwatch = Stopwatch.StartNew();
-                base1 = RunNodeTests("base_run1", baseDirectory, baseTree, scope, tracer);
-                base2 = RunNodeTests("base_run2", baseDirectory, baseTree, scope, tracer);
-                base3 = RunNodeTests("base_run3", baseDirectory, baseTree, scope, tracer);
+                base1 = RunNodeTests("base_run1", baseDetection, baseTree, scope, tracer);
+                base2 = RunNodeTests("base_run2", baseDetection, baseTree, scope, tracer);
+                base3 = RunNodeTests("base_run3", baseDetection, baseTree, scope, tracer);
                 stopwatch.Stop();
                 _timings.InstrumentedRunMilliseconds += stopwatch.ElapsedMilliseconds;
                 baseRoot = baseTree;
@@ -295,15 +305,104 @@ namespace BehaviorDiff.Cli
 
             Pipeline.AssertTestIdsPresent(base1);
             var prStopwatch = Stopwatch.StartNew();
-            string pr = RunNodeTests("pr_run", prDirectory, prTree, scope, tracer);
+            string pr = RunNodeTests("pr_run", prDetection, prTree, scope, tracer);
             prStopwatch.Stop();
             _timings.InstrumentedRunMilliseconds += prStopwatch.ElapsedMilliseconds;
             return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
         }
 
+        private void WarmGo(LanguageDetection detection, string baseTree, string targetSha)
+        {
+            RunConfiguredBuild("base", detection);
+            string rewriter = ResolveGoRewriter();
+            var key = new TraceCacheKey(targetSha, "go", TracerFingerprint.ForFile(rewriter), Pipeline.ScopeConfig(string.Empty));
+            if (_cache.TryRestore(key, out _))
+            {
+                return;
+            }
+            var stopwatch = Stopwatch.StartNew();
+            RunGoTests("base_run1", detection, Path.Combine(_work, "go-base-cache"), rewriter);
+            RunGoTests("base_run2", detection, Path.Combine(_work, "go-base-cache"), rewriter);
+            string base3 = RunGoTests("base_run3", detection, Path.Combine(_work, "go-base-cache"), rewriter);
+            stopwatch.Stop();
+            Pipeline.AssertTestIdsPresent(base3);
+            _cache.Store(key, baseTree, stopwatch.ElapsedMilliseconds);
+        }
+
+        private CrossLanguageRunSet RunGo(
+            LanguageDetection baseDetection,
+            LanguageDetection prDetection,
+            string baseTree,
+            string prTree,
+            string targetSha)
+        {
+            Console.WriteLine();
+            Console.WriteLine("=== 2. Go stable source rewriting ===");
+            RunConfiguredBuild("base", baseDetection);
+            RunConfiguredBuild("pr", prDetection);
+            string rewriter = ResolveGoRewriter();
+            Console.WriteLine("  go rewriter: " + rewriter);
+            var key = new TraceCacheKey(targetSha, "go", TracerFingerprint.ForFile(rewriter), Pipeline.ScopeConfig(string.Empty));
+            bool cacheHit = _cache.TryRestore(key, out TraceCacheEntry? cacheEntry);
+            string base1;
+            string base2;
+            string base3;
+            string baseRoot;
+            if (cacheHit)
+            {
+                base1 = TraceCacheSession.RunPath(_work, 1);
+                base2 = TraceCacheSession.RunPath(_work, 2);
+                base3 = TraceCacheSession.RunPath(_work, 3);
+                baseRoot = cacheEntry!.BaseRoot;
+            }
+            else
+            {
+                var stopwatch = Stopwatch.StartNew();
+                string cache = Path.Combine(_work, "go-base-cache");
+                base1 = RunGoTests("base_run1", baseDetection, cache, rewriter);
+                base2 = RunGoTests("base_run2", baseDetection, cache, rewriter);
+                base3 = RunGoTests("base_run3", baseDetection, cache, rewriter);
+                stopwatch.Stop();
+                _timings.InstrumentedRunMilliseconds += stopwatch.ElapsedMilliseconds;
+                baseRoot = baseTree;
+                _cache.Store(key, baseRoot, stopwatch.ElapsedMilliseconds);
+            }
+            Pipeline.AssertTestIdsPresent(base1);
+            string pr = RunGoTests("pr_run", prDetection, Path.Combine(_work, "go-pr-cache"), rewriter);
+            return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
+        }
+
+        private string RunGoTests(string label, LanguageDetection detection, string cache, string rewriter)
+        {
+            string directory = PrepareRunDirectory(label);
+            string rewritten = Path.Combine(cache, label);
+            if (Directory.Exists(rewritten)) Directory.Delete(rewritten, recursive: true);
+            Directory.CreateDirectory(cache);
+            ProcessResult rewrite = Shell.Run(
+                rewriter,
+                new[] { "--source", detection.WorkDirectory, "--out", rewritten },
+                detection.WorkDirectory);
+            if (!rewrite.Ok)
+            {
+                throw new CliException("Go source rewriting failed." + Environment.NewLine + Shell.Tail(rewrite.Output, 25), ExitCodes.RepoDoesNotBuild);
+            }
+
+            var environment = new Dictionary<string, string>
+            {
+                ["BEHAVIORDIFF_TRACE"] = Path.Combine(directory, "run.ndjson"),
+                ["BEHAVIORDIFF_REPOSITORY_ROOT"] = detection.Config.RepositoryRoot,
+            };
+            string command = detection.HasCustomTest ? detection.TestCommand : "go test ./...";
+            Console.WriteLine("  " + label.PadRight(10) + " command: " + command);
+            ProcessResult test = Shell.RunCommand(command, rewritten, environment);
+            TraceSummary summary = ValidateTrace(directory, label, test.Output);
+            ReportTrace(label, summary, test.ExitCode);
+            return directory;
+        }
+
         private void WarmRust(LanguageDetection detection, string baseTree, string targetSha)
         {
-            string source = Path.GetDirectoryName(detection.EntryPoint)!;
+            if (detection.HasCustomBuild) RunConfiguredBuild("base", detection);
             string tracer = ResolveRustTracer();
             var key = new TraceCacheKey(targetSha, "rust", TracerFingerprint.ForFile(tracer), Pipeline.ScopeConfig(string.Empty));
             if (_cache.TryRestore(key, out _))
@@ -311,9 +410,9 @@ namespace BehaviorDiff.Cli
                 return;
             }
             var stopwatch = Stopwatch.StartNew();
-            RunRustTests("base_run1", source, Path.Combine(_work, "rust-base-cache"), tracer);
-            RunRustTests("base_run2", source, Path.Combine(_work, "rust-base-cache"), tracer);
-            RunRustTests("base_run3", source, Path.Combine(_work, "rust-base-cache"), tracer);
+            RunRustTests("base_run1", detection, Path.Combine(_work, "rust-base-cache"), tracer);
+            RunRustTests("base_run2", detection, Path.Combine(_work, "rust-base-cache"), tracer);
+            RunRustTests("base_run3", detection, Path.Combine(_work, "rust-base-cache"), tracer);
             stopwatch.Stop();
             _cache.Store(key, baseTree, stopwatch.ElapsedMilliseconds);
         }
@@ -327,8 +426,8 @@ namespace BehaviorDiff.Cli
         {
             Console.WriteLine();
             Console.WriteLine("=== 2. Rust stable cached source rewriting ===");
-            string baseSource = Path.GetDirectoryName(baseDetection.EntryPoint)!;
-            string prSource = Path.GetDirectoryName(prDetection.EntryPoint)!;
+            if (baseDetection.HasCustomBuild) RunConfiguredBuild("base", baseDetection);
+            if (prDetection.HasCustomBuild) RunConfiguredBuild("pr", prDetection);
             string tracer = ResolveRustTracer();
             Console.WriteLine("  rust tracer: " + tracer);
             var key = new TraceCacheKey(targetSha, "rust", TracerFingerprint.ForFile(tracer), Pipeline.ScopeConfig(string.Empty));
@@ -348,21 +447,22 @@ namespace BehaviorDiff.Cli
             {
                 var stopwatch = Stopwatch.StartNew();
                 string cache = Path.Combine(_work, "rust-base-cache");
-                base1 = RunRustTests("base_run1", baseSource, cache, tracer);
-                base2 = RunRustTests("base_run2", baseSource, cache, tracer);
-                base3 = RunRustTests("base_run3", baseSource, cache, tracer);
+                base1 = RunRustTests("base_run1", baseDetection, cache, tracer);
+                base2 = RunRustTests("base_run2", baseDetection, cache, tracer);
+                base3 = RunRustTests("base_run3", baseDetection, cache, tracer);
                 stopwatch.Stop();
                 _timings.InstrumentedRunMilliseconds += stopwatch.ElapsedMilliseconds;
                 baseRoot = baseTree;
                 _cache.Store(key, baseRoot, stopwatch.ElapsedMilliseconds);
             }
             Pipeline.AssertTestIdsPresent(base1);
-            string pr = RunRustTests("pr_run", prSource, Path.Combine(_work, "rust-pr-cache"), tracer);
+            string pr = RunRustTests("pr_run", prDetection, Path.Combine(_work, "rust-pr-cache"), tracer);
             return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
         }
 
-        private string RunRustTests(string label, string source, string cache, string tracer)
+        private string RunRustTests(string label, LanguageDetection detection, string cache, string tracer)
         {
+            string source = detection.WorkDirectory;
             string directory = PrepareRunDirectory(label);
             ProcessResult rewrite = Shell.Run(
                 tracer,
@@ -376,12 +476,21 @@ namespace BehaviorDiff.Cli
             string rewritten = report.RootElement.GetProperty("output").GetString()!;
             string trace = Path.Combine(directory, "run.rust.ndjson");
             var environment = new Dictionary<string, string> { ["BEHAVIORDIFF_RUST_EXIT_TRACE"] = trace };
-            Console.WriteLine("  " + label.PadRight(10) + " command: cargo test -- --test-threads=1");
-            ProcessResult test = RunScriptCommand(
-                "cargo",
-                new[] { "test", "--quiet", "--manifest-path", Path.Combine(rewritten, "Cargo.toml"), "--", "--test-threads=1" },
-                rewritten,
-                environment);
+            ProcessResult test;
+            if (detection.HasCustomTest)
+            {
+                Console.WriteLine("  " + label.PadRight(10) + " configured command: " + detection.TestCommand);
+                test = Shell.RunCommand(detection.TestCommand, rewritten, environment);
+            }
+            else
+            {
+                Console.WriteLine("  " + label.PadRight(10) + " command: cargo test -- --test-threads=1");
+                test = RunScriptCommand(
+                    "cargo",
+                    new[] { "test", "--quiet", "--manifest-path", Path.Combine(rewritten, "Cargo.toml"), "--", "--test-threads=1" },
+                    rewritten,
+                    environment);
+            }
             if (!test.Ok)
             {
                 throw new CliException("Rewritten Rust tests failed." + Environment.NewLine + Shell.Tail(test.Output, 25), ExitCodes.BuildOrTestFailure);
@@ -399,6 +508,21 @@ namespace BehaviorDiff.Cli
             TraceSummary summary = ValidateTrace(directory, label, test.Output);
             ReportTrace(label, summary, test.ExitCode);
             return directory;
+        }
+
+        private static void RunConfiguredBuild(string label, LanguageDetection detection)
+        {
+            Console.WriteLine("  " + label + " configured command: " + detection.BuildCommand);
+            ProcessResult result = Shell.RunCommand(detection.BuildCommand, detection.WorkDirectory);
+            if (!result.Ok)
+            {
+                throw new CliException(
+                    "The configured build command failed before instrumentation."
+                    + Environment.NewLine + "    Worktree: " + label
+                    + Environment.NewLine + "    Workdir: " + detection.Workdir
+                    + Environment.NewLine + Shell.Tail(result.Output, 25),
+                    ExitCodes.RepoDoesNotBuild);
+            }
         }
 
         private static void BuildJava(string label, string entryPoint, MavenCommand maven)
@@ -451,7 +575,7 @@ namespace BehaviorDiff.Cli
 
         private string RunJavaTests(
             string label,
-            string entryPoint,
+            LanguageDetection detection,
             string repositoryRoot,
             MavenCommand maven,
             string scope,
@@ -466,17 +590,28 @@ namespace BehaviorDiff.Cli
                 ["BEHAVIORDIFF_NAMESPACES"] = scope,
                 ["BEHAVIORDIFF_REPOSITORY_ROOT"] = repositoryRoot,
             };
-            var arguments = new[]
+            ProcessResult result;
+            if (detection.HasCustomTest)
             {
-                "--batch-mode",
-                "--no-transfer-progress",
-                "-f",
-                entryPoint,
-                "test",
-                "-DargLine=" + argLine,
-            };
-            Console.WriteLine("  " + label.PadRight(10) + " command: " + maven.DisplayName + " test -DargLine=<add-opens + javaagent>");
-            ProcessResult result = maven.Run(arguments, Path.GetDirectoryName(entryPoint)!, environment);
+                string existing = Environment.GetEnvironmentVariable("JAVA_TOOL_OPTIONS") ?? string.Empty;
+                environment["JAVA_TOOL_OPTIONS"] = (existing + " " + argLine).Trim();
+                Console.WriteLine("  " + label.PadRight(10) + " configured command: " + detection.TestCommand);
+                result = Shell.RunCommand(detection.TestCommand, detection.WorkDirectory, environment);
+            }
+            else
+            {
+                var arguments = new[]
+                {
+                    "--batch-mode",
+                    "--no-transfer-progress",
+                    "-f",
+                    detection.EntryPoint,
+                    "test",
+                    "-DargLine=" + argLine,
+                };
+                Console.WriteLine("  " + label.PadRight(10) + " command: " + maven.DisplayName + " test -DargLine=<add-opens + javaagent>");
+                result = maven.Run(arguments, detection.WorkDirectory, environment);
+            }
             TraceSummary summary = ValidateTrace(directory, label, result.Output);
             ReportTrace(label, summary, result.ExitCode);
             return directory;
@@ -484,7 +619,7 @@ namespace BehaviorDiff.Cli
 
         private string RunNodeTests(
             string label,
-            string packageDirectory,
+            LanguageDetection detection,
             string repositoryRoot,
             string scope,
             string tracer)
@@ -505,8 +640,17 @@ namespace BehaviorDiff.Cli
                     ? additions
                     : existingOptions.Trim() + " " + additions,
             };
-            Console.WriteLine("  " + label.PadRight(10) + " command: npm test (NODE_OPTIONS += --require register.cjs --loader loader.mjs)");
-            ProcessResult result = RunScriptCommand("npm", new[] { "test" }, packageDirectory, environment);
+            ProcessResult result;
+            if (detection.HasCustomTest)
+            {
+                Console.WriteLine("  " + label.PadRight(10) + " configured command: " + detection.TestCommand);
+                result = Shell.RunCommand(detection.TestCommand, detection.WorkDirectory, environment);
+            }
+            else
+            {
+                Console.WriteLine("  " + label.PadRight(10) + " command: npm test (NODE_OPTIONS += --require register.cjs --loader loader.mjs)");
+                result = RunScriptCommand("npm", new[] { "test" }, detection.WorkDirectory, environment);
+            }
             TraceSummary summary = ValidateTrace(directory, label, result.Output);
             ReportTrace(label, summary, result.ExitCode);
             return directory;
@@ -721,6 +865,31 @@ namespace BehaviorDiff.Cli
                 }
             }
             throw new CliException("BehaviorDiff Rust tracer was not found. Set BEHAVIORDIFF_RUST_TRACER or build src/BehaviorDiff.Rust.Tracer.");
+        }
+
+        private static string ResolveGoRewriter()
+        {
+            string? configured = Environment.GetEnvironmentVariable("BEHAVIORDIFF_GO_REWRITER");
+            if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+            {
+                return Path.GetFullPath(configured);
+            }
+            string fileName = OperatingSystem.IsWindows() ? "behaviordiff-go-rewrite.exe" : "behaviordiff-go-rewrite";
+            string os = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsLinux() ? "linux" : "osx";
+            string architecture = RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "arm64" : "x64";
+            string packaged = Path.Combine(AppContext.BaseDirectory, "tracers", "go", os + "-" + architecture, fileName);
+            if (File.Exists(packaged))
+            {
+                return packaged;
+            }
+            foreach (string root in CandidateSourceRoots())
+            {
+                string candidate = Path.Combine(root, "artifacts", "go", fileName);
+                if (File.Exists(candidate)) return candidate;
+            }
+            throw new CliException(
+                "BehaviorDiff Go rewriter was not found. Set BEHAVIORDIFF_GO_REWRITER or install it at " + packaged + ".",
+                ExitCodes.RunInvalid);
         }
 
         private static string ValidateNodeTracer(string directory)

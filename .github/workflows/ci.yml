@@ -184,6 +184,13 @@ jobs:
           cache-dependency-path: src/BehaviorDiff.Node/package-lock.json
       - name: Use Rust 1.98
         uses: dtolnay/rust-toolchain@1.98.0
+      - name: Use Go 1.27
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: |
+            src/BehaviorDiff.Go/go.mod
+            samples/GoReference/go.mod
       - name: Assert removed engine surfaces stay absent
         shell: pwsh
         run: |

@@ -13,40 +13,55 @@ namespace BehaviorDiff.Cli
 {
     internal sealed class BaselineDocument
     {
+        [YamlMember(Alias = "schema")]
         public string Schema { get; set; } = "behaviordiff.baseline/2";
 
+        [YamlMember(Alias = "acknowledgements")]
         public List<BaselineAcknowledgement> Acknowledgements { get; set; } = new();
 
+        [YamlMember(Alias = "ignorePaths")]
         public List<BaselineIgnore> IgnorePaths { get; set; } = new();
 
+        [YamlMember(Alias = "ignoreMembers")]
         public List<BaselineIgnore> IgnoreMembers { get; set; } = new();
     }
 
     internal sealed class BaselineAcknowledgement
     {
+        [YamlMember(Alias = "id")]
         public string Id { get; set; } = string.Empty;
 
+        [YamlMember(Alias = "member")]
         public string Member { get; set; } = string.Empty;
 
+        [YamlMember(Alias = "path")]
         public string? Path { get; set; }
 
+        [YamlMember(Alias = "baseDigest")]
         public string BaseDigest { get; set; } = string.Empty;
 
+        [YamlMember(Alias = "prDigest")]
         public string PrDigest { get; set; } = string.Empty;
 
+        [YamlMember(Alias = "reason")]
         public string Reason { get; set; } = string.Empty;
 
+        [YamlMember(Alias = "expires")]
         public string? Expires { get; set; }
     }
 
     internal sealed class BaselineIgnore
     {
+        [YamlMember(Alias = "id")]
         public string Id { get; set; } = string.Empty;
 
+        [YamlMember(Alias = "pattern")]
         public string Pattern { get; set; } = string.Empty;
 
+        [YamlMember(Alias = "reason")]
         public string Reason { get; set; } = string.Empty;
 
+        [YamlMember(Alias = "expires")]
         public string? Expires { get; set; }
     }
 

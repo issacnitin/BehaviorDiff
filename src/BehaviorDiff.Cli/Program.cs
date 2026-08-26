@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace BehaviorDiff.Cli
 {
@@ -141,10 +142,19 @@ namespace BehaviorDiff.Cli
             try
             {
                 string resolvedRepository = RefResolution.ResolveRepository(repo, ciProvider);
+                LoadedRepositoryConfig repositoryConfig = RepositoryConfigLoader.Load(resolvedRepository);
+                RepositoryConfigLoader.ApplyEnvironment(repositoryConfig);
+                string? configuredBaseline = baseline is null
+                    ? RepositoryConfigLoader.MaterializeBaseline(
+                        repositoryConfig,
+                        Path.Combine(workDirectory, "config-baseline.yml"))
+                    : null;
                 string? baselinePath = noBaseline
                     ? null
-                    : Path.GetFullPath(baseline ?? Path.Combine(resolvedRepository, ".behaviordiff", "baseline.yml"));
-                if (baseline is null && baselinePath is not null && !File.Exists(baselinePath))
+                    : Path.GetFullPath(baseline
+                        ?? configuredBaseline
+                        ?? Path.Combine(resolvedRepository, ".behaviordiff", "baseline.yml"));
+                if (baseline is null && configuredBaseline is null && baselinePath is not null && !File.Exists(baselinePath))
                 {
                     baselinePath = null;
                 }
@@ -357,8 +367,12 @@ namespace BehaviorDiff.Cli
                 {
                     AssertLanguageSymmetry(baseDetection, prDetection);
                 }
+                ApplyDetectionEnvironment(baseDetection);
                 Console.WriteLine("  language   : " + baseDetection.Language.ToString().ToLowerInvariant());
                 Console.WriteLine("  entry point: " + baseDetection.Evidence);
+                Console.WriteLine("  workdir    : " + baseDetection.Workdir);
+                Console.WriteLine("  build      : " + baseDetection.BuildCommand);
+                Console.WriteLine("  test       : " + baseDetection.TestCommand);
 
                 if (baseDetection.Language != RepositoryLanguage.DotNet)
                 {
@@ -387,16 +401,16 @@ namespace BehaviorDiff.Cli
 
                 Console.WriteLine();
                 Console.WriteLine("=== 2. scan ===");
-                RepoScanResult scan = RepoScan.Scan(baseTree);
+                RepoScanResult scan = RepoScan.Scan(baseDetection.WorkDirectory);
                 ReportScan(scan);
 
                 Console.WriteLine();
                 Console.WriteLine("=== 3. repo builds unmodified ===");
                 var buildStopwatch = Stopwatch.StartNew();
-                BuildUnmodified("base", baseTree);
+                BuildUnmodified("base", baseDetection);
                 if (!_warmOnly)
                 {
-                    BuildUnmodified("pr", prTree);
+                    BuildUnmodified("pr", prDetection);
                     Console.WriteLine("  both worktrees build without instrumentation");
                 }
                 buildStopwatch.Stop();
@@ -404,7 +418,8 @@ namespace BehaviorDiff.Cli
 
                 Console.WriteLine();
                 Console.WriteLine("=== 4. resolve xunit versions and TFMs ===");
-                var baseProjects = scan.XunitProjects.Select(p => Assets.Read(p.Path)).ToList();
+                List<TestProject> selectedProjects = SelectTestProjects(scan.XunitProjects, baseDetection, baseTree);
+                var baseProjects = selectedProjects.Select(p => Assets.Read(p.Path)).ToList();
                 var prProjects = _warmOnly ? new List<ResolvedTestProject>() : baseProjects
                     .Select(p => Path.Combine(prTree, Path.GetRelativePath(baseTree, p.Path)))
                     .Where(File.Exists)
@@ -418,7 +433,8 @@ namespace BehaviorDiff.Cli
                 }
 
                 string kit = InjectionKit.Build(_work);
-                string scope = string.Join(";", scan.NamespacePrefixes);
+                string[] scopePrefixes = baseDetection.IncludeNamespaces;
+                string scope = string.Join(";", scopePrefixes);
                 Console.WriteLine("  tracer namespace scope: " + (scope.Length == 0 ? "<empty>" : scope));
                 if (scope.Length == 0)
                 {
@@ -440,7 +456,7 @@ namespace BehaviorDiff.Cli
                 {
                     if (!cacheHit)
                     {
-                        WarmDotNet(cacheKey, baseTree, baseProjects, scan.NamespacePrefixes, kit, scope);
+                        WarmDotNet(cacheKey, baseTree, baseProjects, scopePrefixes, kit, scope, baseDetection);
                     }
 
                     _cache.Print();
@@ -495,14 +511,14 @@ namespace BehaviorDiff.Cli
                 {
                     baseTraceStopwatch.Start();
                     var weaveStopwatch = Stopwatch.StartNew();
-                    WeaveOutputs("base", baseProjects, scan.NamespacePrefixes);
+                    WeaveOutputs("base", baseProjects, scopePrefixes);
                     weaveStopwatch.Stop();
                     _timings.WeaveMilliseconds += weaveStopwatch.ElapsedMilliseconds;
                     baseTraceStopwatch.Stop();
                 }
 
                 var prWeaveStopwatch = Stopwatch.StartNew();
-                WeaveOutputs("pr", prProjects, scan.NamespacePrefixes);
+                WeaveOutputs("pr", prProjects, scopePrefixes);
                 prWeaveStopwatch.Stop();
                 _timings.WeaveMilliseconds += prWeaveStopwatch.ElapsedMilliseconds;
 
@@ -524,9 +540,9 @@ namespace BehaviorDiff.Cli
                 {
                     baseTraceStopwatch.Start();
                     var runStopwatch = Stopwatch.StartNew();
-                    base1 = RunTests("base_run1", baseTree, baseProjects, scope);
-                    base2 = RunTests("base_run2", baseTree, baseProjects, scope);
-                    base3 = RunTests("base_run3", baseTree, baseProjects, scope);
+                    base1 = RunTests("base_run1", baseDetection, baseProjects, scope);
+                    base2 = RunTests("base_run2", baseDetection, baseProjects, scope);
+                    base3 = RunTests("base_run3", baseDetection, baseProjects, scope);
                     runStopwatch.Stop();
                     _timings.InstrumentedRunMilliseconds += runStopwatch.ElapsedMilliseconds;
                     baseRoot = baseTree;
@@ -535,7 +551,7 @@ namespace BehaviorDiff.Cli
                 }
 
                 var prRunStopwatch = Stopwatch.StartNew();
-                string pr = RunTests("pr_run", prTree, prProjects, scope);
+                string pr = RunTests("pr_run", prDetection, prProjects, scope);
                 prRunStopwatch.Stop();
                 _timings.InstrumentedRunMilliseconds += prRunStopwatch.ElapsedMilliseconds;
 
@@ -565,15 +581,16 @@ namespace BehaviorDiff.Cli
             List<ResolvedTestProject> baseProjects,
             IEnumerable<string> namespacePrefixes,
             string kit,
-            string scope)
+            string scope,
+            LanguageDetection detection)
         {
             var stopwatch = Stopwatch.StartNew();
             AdapterBuilder.BuildAll(Path.Combine(_work, "base-adapters"), kit, baseProjects);
             BuildInstrumented("base", baseTree, kit, baseProjects);
             WeaveOutputs("base", baseProjects, namespacePrefixes);
-            string base1 = RunTests("base_run1", baseTree, baseProjects, scope);
-            RunTests("base_run2", baseTree, baseProjects, scope);
-            RunTests("base_run3", baseTree, baseProjects, scope);
+            string base1 = RunTests("base_run1", detection, baseProjects, scope);
+            RunTests("base_run2", detection, baseProjects, scope);
+            RunTests("base_run3", detection, baseProjects, scope);
             AssertTestIdsPresent(base1);
             stopwatch.Stop();
             _cache.Store(cacheKey, baseTree, stopwatch.ElapsedMilliseconds);
@@ -684,6 +701,70 @@ namespace BehaviorDiff.Cli
                     + prDetection.Evidence + ". The same relative entry point is required on both sides.",
                     ExitCodes.RunInvalid);
             }
+
+            foreach ((string Name, string Base, string Pr) value in new[]
+            {
+                ("workdir", baseDetection.Workdir, prDetection.Workdir),
+                ("build command", baseDetection.BuildCommand, prDetection.BuildCommand),
+                ("test command", baseDetection.TestCommand, prDetection.TestCommand),
+                ("test projects", string.Join("\n", baseDetection.TestProjects), string.Join("\n", prDetection.TestProjects)),
+                ("include namespaces", string.Join("\n", baseDetection.IncludeNamespaces), string.Join("\n", prDetection.IncludeNamespaces)),
+                ("exclude namespaces", string.Join("\n", baseDetection.ExcludeNamespaces), string.Join("\n", prDetection.ExcludeNamespaces)),
+            })
+            {
+                if (!string.Equals(value.Base, value.Pr, StringComparison.Ordinal))
+                {
+                    throw new CliException(
+                        "Base and PR resolved different " + value.Name + " values. The same build, test, and instrumentation configuration must run on both sides."
+                        + Environment.NewLine + "    base: " + value.Base
+                        + Environment.NewLine + "    pr  : " + value.Pr,
+                        ExitCodes.RunInvalid);
+                }
+            }
+        }
+
+        private static void ApplyDetectionEnvironment(LanguageDetection detection)
+        {
+            if (detection.ExcludeNamespaces.Length > 0)
+            {
+                Environment.SetEnvironmentVariable(
+                    "BEHAVIORDIFF_EXCLUDE_NAMESPACES",
+                    string.Join(";", detection.ExcludeNamespaces));
+            }
+        }
+
+        private static List<TestProject> SelectTestProjects(
+            IEnumerable<TestProject> projects,
+            LanguageDetection detection,
+            string repositoryRoot)
+        {
+            if (detection.TestProjects.Length == 0)
+            {
+                return projects.ToList();
+            }
+
+            List<TestProject> selected = projects.Where(project => detection.TestProjects.Any(pattern =>
+            {
+                string repositoryRelative = Path.GetRelativePath(repositoryRoot, project.Path).Replace('\\', '/');
+                string workdirRelative = Path.GetRelativePath(detection.WorkDirectory, project.Path).Replace('\\', '/');
+                return GlobMatches(pattern, repositoryRelative) || GlobMatches(pattern, workdirRelative);
+            })).ToList();
+            if (selected.Count == 0)
+            {
+                throw new CliException(
+                    "Configured test_projects matched no xUnit test projects: " + string.Join(", ", detection.TestProjects),
+                    ExitCodes.RunInvalid);
+            }
+            return selected;
+        }
+
+        private static bool GlobMatches(string pattern, string value)
+        {
+            string expression = "^" + Regex.Escape(pattern.Replace('\\', '/'))
+                .Replace("\\*\\*", ".*", StringComparison.Ordinal)
+                .Replace("\\*", "[^/]*", StringComparison.Ordinal)
+                .Replace("\\?", "[^/]", StringComparison.Ordinal) + "$";
+            return Regex.IsMatch(value, expression, RegexOptions.CultureInvariant);
         }
 
         private int Analyze(
@@ -938,17 +1019,19 @@ namespace BehaviorDiff.Cli
         /// The repo must build before anything is injected, so a failure can be attributed. A break that
         /// appears only after injection is ours; a break in both is the repository's.
         /// </summary>
-        private static void BuildUnmodified(string label, string tree)
+        private static void BuildUnmodified(string label, LanguageDetection detection)
         {
-            ProcessResult result = Shell.Run(
-                "dotnet",
-                new[]
-                {
-                    "build", tree, "-c", "Release", "--nologo", "-v", "quiet",
-                    "-p:DebugType=portable",
-                    "-p:EnableSourceControlManagerQueries=false",
-                },
-                tree);
+            ProcessResult result = detection.HasCustomBuild
+                ? Shell.RunCommand(detection.BuildCommand, detection.WorkDirectory)
+                : Shell.Run(
+                    "dotnet",
+                    new[]
+                    {
+                        "build", detection.EntryPoint, "-c", "Release", "--nologo", "-v", "quiet",
+                        "-p:DebugType=portable",
+                        "-p:EnableSourceControlManagerQueries=false",
+                    },
+                    detection.WorkDirectory);
 
             if (!result.Ok)
             {
@@ -1125,7 +1208,7 @@ namespace BehaviorDiff.Cli
             Console.WriteLine("  " + label + " woven project assemblies: " + wovenAssemblies);
         }
 
-        private string RunTests(string label, string tree, List<ResolvedTestProject> projects, string scope)
+        private string RunTests(string label, LanguageDetection detection, List<ResolvedTestProject> projects, string scope)
         {
             string directory = Path.Combine(_work, label);
             Directory.CreateDirectory(directory);
@@ -1137,22 +1220,33 @@ namespace BehaviorDiff.Cli
                 ["BEHAVIORDIFF_NAMESPACES"] = scope,
             };
 
-            foreach (ResolvedTestProject project in projects)
+            if (detection.HasCustomTest)
             {
-                ProcessResult result = Shell.Run(
-                    "dotnet",
-                    new[] { "test", project.Path, "-c", "Release", "-f", project.TraceTfm, "--no-build", "--nologo" },
-                    tree,
+                ProcessResult result = Shell.RunCommand(
+                    detection.TestCommand,
+                    detection.WorkDirectory,
                     environment);
-                testOutput.Add(project.Name + ":" + Environment.NewLine + result.Output);
-
-                // A failing assertion is an observation, not a pipeline failure: the PR may have changed
-                // behavior a test asserts on. Only a host that never started is fatal.
-                if (!result.Ok && result.Output.Contains("MSB", StringComparison.Ordinal))
+                testOutput.Add("configured:" + Environment.NewLine + result.Output);
+            }
+            else
+            {
+                foreach (ResolvedTestProject project in projects)
                 {
-                    throw new CliException(
-                        "Test host failed to start for " + project.Name + " in " + label + "."
-                        + Environment.NewLine + Shell.Tail(result.Output, 20));
+                    ProcessResult result = Shell.Run(
+                        "dotnet",
+                        new[] { "test", project.Path, "-c", "Release", "-f", project.TraceTfm, "--no-build", "--nologo" },
+                        detection.WorkDirectory,
+                        environment);
+                    testOutput.Add(project.Name + ":" + Environment.NewLine + result.Output);
+
+                    // A failing assertion is an observation, not a pipeline failure: the PR may have changed
+                    // behavior a test asserts on. Only a host that never started is fatal.
+                    if (!result.Ok && result.Output.Contains("MSB", StringComparison.Ordinal))
+                    {
+                        throw new CliException(
+                            "Test host failed to start for " + project.Name + " in " + label + "."
+                            + Environment.NewLine + Shell.Tail(result.Output, 20));
+                    }
                 }
             }
 
@@ -1178,8 +1272,9 @@ namespace BehaviorDiff.Cli
             {
                 throw new CliException(
                     "NO EVENTS: " + label + " produced " + traces.Count + " trace file(s) totalling " + bytes
-                    + " bytes. The tracer initialized but recorded nothing, so either no test executed or "
-                    + "no member was instrumented. This is not a question of test identity - see the tracer "
+                    + " bytes. The tracer initialized but recorded nothing, so either no test executed, "
+                    + "no member was instrumented, or the configured test command bypassed the injected test host. "
+                    + "This is not a question of test identity - see the tracer "
                     + "log and the coverage manifest in " + directory + "." + Environment.NewLine
                     + "    Test host output:" + Environment.NewLine
                     + Shell.Tail(string.Join(Environment.NewLine, testOutput), 30),

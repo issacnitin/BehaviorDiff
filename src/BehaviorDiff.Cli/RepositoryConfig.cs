@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace BehaviorDiff.Cli
 {
@@ -106,6 +108,46 @@ namespace BehaviorDiff.Cli
                 throw new CliException("BehaviorDiff config workdir does not exist: " + relative, ExitCodes.RunInvalid);
             }
             return full;
+        }
+
+        internal static void ApplyEnvironment(LoadedRepositoryConfig loaded)
+        {
+            SetList("BEHAVIORDIFF_REDACT_NAMES", loaded.Value.Redaction.Names);
+            SetList("BEHAVIORDIFF_REDACT_TYPES", loaded.Value.Redaction.Types);
+            SetList("BEHAVIORDIFF_REDACT_PATHS", loaded.Value.Redaction.Paths);
+            SetList("BEHAVIORDIFF_NAMESPACES", loaded.Value.IncludeNamespaces);
+            SetList("BEHAVIORDIFF_EXCLUDE_NAMESPACES", loaded.Value.ExcludeNamespaces);
+        }
+
+        internal static string? MaterializeBaseline(LoadedRepositoryConfig loaded, string output)
+        {
+            if (loaded.Value.Baseline is null)
+            {
+                return null;
+            }
+
+            var serializer = new SerializerBuilder()
+                .WithNamingConvention(CamelCaseNamingConvention.Instance)
+                .Build();
+            Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+            File.WriteAllText(output, serializer.Serialize(loaded.Value.Baseline));
+            return output;
+        }
+
+        private static void SetList(string name, IReadOnlyCollection<string> configured)
+        {
+            if (configured.Count == 0)
+            {
+                return;
+            }
+
+            string existing = Environment.GetEnvironmentVariable(name) ?? string.Empty;
+            string combined = string.Join(";", existing.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Concat(configured)
+                .Select(value => value.Trim())
+                .Where(value => value.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+            Environment.SetEnvironmentVariable(name, combined);
         }
 
         private static void Validate(RepositoryConfig config, string root, string path)

@@ -24,7 +24,7 @@ flowchart LR
 
 [`TRACE-FORMAT.md`](TRACE-FORMAT.md) is the contract between tracers and the engine. The maintained .NET, Java, Node, Go, and Rust gates apply the same conformance rules: identical method sets, per-key event counts and entry ordinals, source tripwires, digest proofs, and zero engine divergences from non-empty runs.
 
-> Status: early preview. The unified CLI detects .NET, Maven Java, npm Node, and Cargo Rust repositories from their root build entry points. Go remains available through its source rewriter and conformance tooling.
+> Status: early preview. The unified CLI detects .NET, Maven Java, npm Node, Go modules, and Cargo Rust repositories from their root build entry points.
 
 ## Supported languages
 
@@ -33,7 +33,7 @@ flowchart LR
 | .NET 8 | Mono.Cecil build-time IL weaving | xUnit and portable PDBs | Properties, events, operators, and type initializers are skipped by policy. |
 | Java | `java.lang.instrument` agent with ASM | Maven, JUnit/TestNG annotations, `src/main/java` and `src/test/java` | Conventional Maven roots are required; static initializers are skipped; collection shape rules require `java.util` module access. |
 | Node / TypeScript | CommonJS require hook and ESM loader with Babel | npm, direct JavaScript locations, TypeScript source maps, Jest/Vitest adapters | npm/package-lock only; workers are out of scope; generators and unsupported callables are skipped; source maps must resolve rather than be guessed. |
-| Go | Stable module-aware AST rewriting into a build cache | `go test`, original `.go` parser positions | Dynamic interface/function boundaries and unrewritten goroutine boundaries are explicit skips; unified CLI attachment remains pending. |
+| Go | Stable module-aware AST rewriting into a build cache | `go test`, original `.go` parser positions | Dynamic interface/function boundaries and unrewritten goroutine boundaries are explicit skips. |
 | Rust | Stable `syn`/`quote` rewriting into a SHA-256 build cache | `cargo test`, structural `#[test]` roots, original `.rs` parser positions | Macro expansions, extern/const callables, unions, trait objects, and dependency values are explicit partial/unsupported boundaries; rendered-value redaction is not yet implemented. |
 
 Every tracer emits the same process-scoped NDJSON contract and a reconciled coverage manifest. A member reported instrumented must be capable of emitting, and every module must satisfy `discovered = instrumented + skipped` with zero patch failures.
@@ -219,6 +219,14 @@ Prerequisites: Node.js, npm, `package-lock.json`, and a test script. TypeScript 
 behaviordiff C:\src\node-service --base origin/main --pr HEAD
 ```
 
+### Go
+
+Prerequisites: stable Go and standard `go test` tests. The CLI rewrites source only into an external cache, runs the configured tests there, and maps events back to the original `.go` files. The checkout is never mutated.
+
+```powershell
+behaviordiff C:\src\go-service --base origin/main --pr HEAD
+```
+
 ### Rust
 
 Prerequisites: stable Rust/Cargo and standard `#[test]` tests. The CLI rewrites only into an external content-addressed cache, runs tests there, and maps events back to original `.rs` files. The checkout is never mutated. Do not use the Rust tracer for sensitive values yet: digest capture is qualified, but rendering-only secret redaction remains incomplete.
@@ -227,7 +235,42 @@ Prerequisites: stable Rust/Cargo and standard `#[test]` tests. The CLI rewrites 
 behaviordiff C:\src\rust-service --base origin/main --pr HEAD
 ```
 
-The command is intentionally the same for every language. `behaviordiff detect-language <repo>` shows the selected language and build entry point.
+The command is intentionally the same for every language. `behaviordiff detect <repo>` prints the effective language, work directory, entry point, commands, test projects, and scope. The legacy `detect-language` spelling remains an alias.
+
+### Repository configuration
+
+Add `.behaviordiff/config.yml` when inference is incomplete or the repository uses custom commands:
+
+```yaml
+language: node
+workdir: services/api
+build: npm ci && npm run build
+test: npm test
+test_projects:
+  - tests/Api.Tests/Api.Tests.csproj
+include_namespaces:
+  - src
+exclude_namespaces:
+  - src/generated
+redaction:
+  names:
+    - customer_password
+  types:
+    - SecretEnvelope
+  paths:
+    - generated
+baseline:
+  schema: behaviordiff.baseline/2
+  acknowledgements: []
+  ignorePaths: []
+  ignoreMembers: []
+```
+
+Configuration overrides inference field by field; detection fills fields left unset. `workdir` must remain inside the repository. `test_projects` selects .NET test projects by repository-relative glob. Include/exclude values augment tracing scope, redaction values augment the corresponding environment rules, and the nested baseline uses the same schema as `.behaviordiff/baseline.yml`.
+
+The effective build and test commands run unchanged for both base and PR revisions. Custom tests do not replace instrumentation: .NET receives the woven/injected environment, Java receives the javaagent through `JAVA_TOOL_OPTIONS`, Node receives the loader/hooks through `NODE_OPTIONS`, and Go/Rust tests execute in their rewritten caches. A command that exits successfully but produces zero trace events is refused with exit `3` and reports the command and trace/manifest counts.
+
+Automatic detection recognizes conventional root or unambiguous nested `.sln`/`.csproj`, Maven `pom.xml`, npm `package.json`, Go `go.mod`, and Cargo `Cargo.toml` entry points. Java detection is Maven-only, Node detection requires npm and `package-lock.json` for execution, and source/test roots remain conventional. Mixed-language repositories, monorepos, and multiple entry points are refused rather than guessed; set `language` and `workdir` (plus both commands when no conventional entry point exists) to resolve them.
 
 ### Base trace cache
 

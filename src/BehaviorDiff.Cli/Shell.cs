@@ -59,6 +59,20 @@ namespace BehaviorDiff.Cli
             return new ProcessResult { ExitCode = process.ExitCode, Output = output.ToString() };
         }
 
+        internal static ProcessResult RunCommand(
+            string command,
+            string workingDirectory,
+            IDictionary<string, string>? environment = null,
+            bool echo = false)
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                return Run("cmd.exe", new[] { "/d", "/s", "/c", command }, workingDirectory, environment, echo);
+            }
+
+            return Run("/bin/sh", new[] { "-c", command }, workingDirectory, environment, echo);
+        }
+
         private static void Append(StringBuilder builder, string? line, bool echo)
         {
             if (line is null)
