@@ -5,10 +5,10 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
-$module = Join-Path $repo 'src/BehaviorDiff.Go.Prototype'
+$module = Join-Path $repo 'src/RealDiff.Go.Prototype'
 
 if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
-    $localGoBin = Join-Path $env:LOCALAPPDATA 'Programs/BehaviorDiffGo/go/bin'
+    $localGoBin = Join-Path $env:LOCALAPPDATA 'Programs/RealDiffGo/go/bin'
     if (-not (Test-Path (Join-Path $localGoBin 'go.exe') -PathType Leaf)) {
         throw "Go was not found on PATH or at $localGoBin"
     }

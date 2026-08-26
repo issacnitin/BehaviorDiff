@@ -5,7 +5,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <AssemblyName>token-probe</AssemblyName>
-    <RootNamespace>BehaviorDiff.Tools.TokenProbe</RootNamespace>
+    <RootNamespace>RealDiff.Tools.TokenProbe</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

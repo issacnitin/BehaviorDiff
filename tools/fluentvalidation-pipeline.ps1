@@ -27,7 +27,7 @@ function Initialize-Tree {
     New-Item -ItemType Directory -Path $staged -Force | Out-Null
     Copy-Item "$built\*" $staged -Recurse -Force
 
-    foreach ($lib in 'BehaviorDiff.Tracer', 'BehaviorDiff.Contracts') {
+    foreach ($lib in 'RealDiff.Tracer', 'RealDiff.Contracts') {
         Copy-Item (Join-Path $repo "src/$lib/bin/Release/netstandard2.0/$lib.dll") $staged -Force
     }
 
@@ -52,9 +52,9 @@ function Invoke-Suite {
     Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
 
-    $env:BEHAVIORDIFF_BACKEND = 'cecil'
-    $env:BEHAVIORDIFF_NAMESPACES = 'FluentValidation'
-    $env:BEHAVIORDIFF_TRACE = Join-Path $dir 'run.ndjson'
+    $env:REALDIFF_BACKEND = 'cecil'
+    $env:REALDIFF_NAMESPACES = 'FluentValidation'
+    $env:REALDIFF_TRACE = Join-Path $dir 'run.ndjson'
 
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $out = dotnet test (Join-Path $Staged 'FluentValidation.Tests.dll') --nologo 2>&1
@@ -84,14 +84,14 @@ $runs = @{
     base3 = Invoke-Suite -Staged $baseBin -RunName 'base_run3'
     pr    = Invoke-Suite -Staged $prBin -RunName 'pr_run'
 }
-$env:BEHAVIORDIFF_BACKEND = ''
-$env:BEHAVIORDIFF_TRACE = ''
+$env:REALDIFF_BACKEND = ''
+$env:REALDIFF_TRACE = ''
 
 Write-Host ''
 Write-Host '=== engine ===' -ForegroundColor Cyan
 $divergence = Join-Path $work 'divergence-set.json'
-Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Engine.psm1') -Force
-$engine = Get-BehaviorDiffEngine
+Import-Module (Join-Path $PSScriptRoot 'RealDiff.Engine.psm1') -Force
+$engine = Get-RealDiffEngine
 
 # diff needs this too now: an added member only counts as behavior if its file is one the PR edited.
 $changedList = Join-Path $work 'changed-files.txt'

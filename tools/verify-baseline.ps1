@@ -7,9 +7,9 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-baseline-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-baseline-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
-$cli = Join-Path $repo 'src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll'
+$cli = Join-Path $repo 'src/RealDiff.Cli/bin/Release/net8.0/realdiff.dll'
 
 function Assert-True([bool]$condition, [string]$message) {
     if (-not $condition) { throw $message }
@@ -28,7 +28,7 @@ function Invoke-Cli([string[]]$arguments, [int]$expectedExit) {
 try {
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $work -Force | Out-Null
-    & dotnet build (Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj') -c Release --nologo -v quiet `
+    & dotnet build (Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj') -c Release --nologo -v quiet `
         -p:RestoreSources=https://www.nuget.org/api/v2/ -p:NuGetAudit=false
     if ($LASTEXITCODE -ne 0) { throw "CLI build failed: $LASTEXITCODE" }
 
@@ -39,7 +39,7 @@ try {
         [ordered]@{ memberName = 'Acme.Active.Remains()'; attribution = 'unexpected'; filePath = 'src/active/remains.cs'; line = 40; callSiteCount = 5; untestedCallSiteCount = 0; distinctTestCount = 1; assertionReactionSummary = '1 test executed this; 1 test had an assertion react.'; evidence = @([ordered]@{ baseDigest = 'sha256:active-base'; prDigest = 'sha256:active-pr' }) }
     )
     $artifact = [ordered]@{
-        schema = 'behaviordiff.findings/1'
+        schema = 'realdiff.findings/1'
         status = 'analyzed'
         verdict = 'findings'
         isCleanResult = $false
@@ -67,10 +67,10 @@ try {
 
     $yesterday = [DateTime]::UtcNow.AddDays(-1).ToString('yyyy-MM-dd')
     $future = [DateTime]::UtcNow.AddDays(30).ToString('yyyy-MM-dd')
-    $baseline = Join-Path $work '.behaviordiff/baseline.yml'
+    $baseline = Join-Path $work '.realdiff/baseline.yml'
     New-Item -ItemType Directory -Path (Split-Path -Parent $baseline) -Force | Out-Null
     [IO.File]::WriteAllText($baseline, @"
-schema: behaviordiff.baseline/2
+schema: realdiff.baseline/2
 acknowledgements:
   - id: accepted-pricing
     member: Acme.Pricing.Accepted()
@@ -127,7 +127,7 @@ ignoreMembers:
     Copy-Item $findings $reapplyFindings
     $emptyBaseline = Join-Path $work 'empty-baseline.yml'
     [IO.File]::WriteAllText($emptyBaseline, @"
-schema: behaviordiff.baseline/2
+schema: realdiff.baseline/2
 acknowledgements: []
 ignorePaths: []
 ignoreMembers: []
@@ -140,7 +140,7 @@ ignoreMembers: []
         }).Count -eq 0) 'Reapplying a different baseline retained old suppression metadata'
 
     Write-Host '=== render provider summaries ===' -ForegroundColor Cyan
-    $preview = Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj'
+    $preview = Join-Path $repo 'tools/CommentPreview/RealDiff.CommentPreview.csproj'
     $github = @(& dotnet run --project $preview -c Release -- $findings 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "GitHub preview failed: $LASTEXITCODE" }
     $oldRepositoryUri = $env:BUILD_REPOSITORY_URI
@@ -160,9 +160,9 @@ ignoreMembers: []
         Assert-True ($rendered -match '1 stale, 0 changed, 1 expired') `
             'Rendered summary omitted stale/changed/expired counts'
         Assert-True ($rendered -match 'stale-missing') 'Rendered summary omitted the stale rule id'
-        Assert-True ($rendered -match '\.behaviordiff[/\\]baseline.yml') 'Rendered summary omitted baseline path'
+        Assert-True ($rendered -match '\.realdiff[/\\]baseline.yml') 'Rendered summary omitted baseline path'
     }
-    Assert-True (($github -join "`n") -match 'github.com/acme/repo/blob/proof-pr/.behaviordiff/baseline.yml') `
+    Assert-True (($github -join "`n") -match 'github.com/acme/repo/blob/proof-pr/.realdiff/baseline.yml') `
         'GitHub summary omitted the committed baseline link'
 
     Write-Host '=== changed behavior resurfaces ===' -ForegroundColor Cyan

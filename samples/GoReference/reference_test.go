@@ -94,7 +94,7 @@ func TestInterfacesAndDynamicBoundaries(t *testing.T) {
 	if ThroughCounter(counter, 5) != 15 || counter.Multiply(3) != 30 {
 		t.Fatal("concrete wrapper failed")
 	}
-	if os.Getenv("BEHAVIORDIFF_TRACE") == "" {
+	if os.Getenv("REALDIFF_TRACE") == "" {
 		if ApplyIncrementer(counter, 5) != 15 || ApplyFunction(func(value int) int { return value * 4 }, 3) != 12 {
 			t.Fatal("dynamic boundary behavior failed")
 		}

@@ -1,6 +1,6 @@
 #requires -Version 7.0
 <#
-  Local transport proof for `behaviordiff post`. A TCP listener implements the small Azure DevOps
+  Local transport proof for `realdiff post`. A TCP listener implements the small Azure DevOps
   REST surface the provider calls and records every request body. This validates HTTP method/route,
   idempotent update behavior, summary ordering, file thread position, refusals, and gate exits.
 
@@ -9,10 +9,10 @@
 #>
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$cli = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
+$cli = Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj'
 $runId = [Guid]::NewGuid().ToString('N')
-$proofWork = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-ado-$runId"
-$proofPrTree = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-ado-pr-$runId"
+$proofWork = Join-Path ([IO.Path]::GetTempPath()) "realdiff-ado-$runId"
+$proofPrTree = Join-Path ([IO.Path]::GetTempPath()) "realdiff-ado-pr-$runId"
 $findings = Join-Path $proofWork 'findings.json'
 $recording = Join-Path $proofWork 'ado-mock.ndjson'
 $refusal = Join-Path $proofWork 'ado-refusal.json'
@@ -36,7 +36,7 @@ catch {
 try {
 Remove-Item $recording, $refusal, $clean, $strict, $ready -Force -ErrorAction SilentlyContinue
 @{
-    schema = 'behaviordiff.findings/1'; status = 'refused'; verdict = 'could_not_analyze'
+    schema = 'realdiff.findings/1'; status = 'refused'; verdict = 'could_not_analyze'
     isCleanResult = $false; exitCode = 3; exitReason = 'analysis_refused'
     refs = @{ baseSha = 'base'; prSha = 'pr'; mergeBaseSha = 'merge-base' }
     refusal = @{ reason = 'CALL TREE: parent links were incomplete; no safety verdict was produced.' }
@@ -205,8 +205,8 @@ try {
     if ($patches.Count -ne 6) { throw "expected 6 updates across re-push/strict/refusal/gate/fallback/clean, got $($patches.Count)" }
     if ($gets.Count -ne 7) { throw "expected one list call per invocation, got $($gets.Count)" }
 
-    $summary = $posts | Where-Object { $_.body -match 'behaviordiff:pr:314:summary' } | Select-Object -First 1
-    $member = $posts | Where-Object { $_.body -match 'behaviordiff:pr:314:member:' } | Select-Object -First 1
+    $summary = $posts | Where-Object { $_.body -match 'realdiff:pr:314:summary' } | Select-Object -First 1
+    $member = $posts | Where-Object { $_.body -match 'realdiff:pr:314:member:' } | Select-Object -First 1
     if (-not $summary -or -not $member) { throw 'summary/member marker missing from create payloads' }
     if ($summary.body -notmatch 'No high-confidence findings to comment' `
         -or $summary.body -notmatch 'lower-confidence or nondeterministic finding') {

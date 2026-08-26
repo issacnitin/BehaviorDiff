@@ -3,14 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using BehaviorDiff.Tracer;
+using RealDiff.Tracer;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 using Mono.Cecil.Rocks;
 using MethodAttributes = Mono.Cecil.MethodAttributes;
 using MethodBody = Mono.Cecil.Cil.MethodBody;
 
-namespace BehaviorDiff.Weaver
+namespace RealDiff.Weaver
 {
     /// <summary>Imported references to the hook surface, resolved once per module.</summary>
     internal sealed class Refs
@@ -129,7 +129,7 @@ namespace BehaviorDiff.Weaver
             // base its own indices are relative to.
             // Assembly-visible, not private: every woven method in the module reads it, not just <Module>.
             var baseField = new FieldDefinition(
-                "<BehaviorDiffBase>",
+                "<RealDiffBase>",
                 Mono.Cecil.FieldAttributes.Assembly | Mono.Cecil.FieldAttributes.Static,
                 module.TypeSystem.Int32);
             moduleType.Fields.Add(baseField);

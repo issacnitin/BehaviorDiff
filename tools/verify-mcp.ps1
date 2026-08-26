@@ -1,16 +1,16 @@
 <#
-  Drives the BehaviorDiff MCP server over its real stdio transport with raw JSON-RPC.
+  Drives the RealDiff MCP server over its real stdio transport with raw JSON-RPC.
   No mocks: the run directory is populated with the artifacts a real engine run just produced
   (tools/verify-diff.ps1 -Mutate -Change config), and every response printed below came back
   through the same stdin/stdout pipe an MCP client would use.
 #>
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$mcp = Join-Path $repo 'src/BehaviorDiff.Mcp'
+$mcp = Join-Path $repo 'src/RealDiff.Mcp'
 $proofId = [Guid]::NewGuid().ToString('N')
-$runsRoot = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-mcp-runs-$proofId"
-$source = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-mcp-source-$proofId"
-$proofPrTree = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-mcp-pr-$proofId"
+$runsRoot = Join-Path ([IO.Path]::GetTempPath()) "realdiff-mcp-runs-$proofId"
+$source = Join-Path ([IO.Path]::GetTempPath()) "realdiff-mcp-source-$proofId"
+$proofPrTree = Join-Path ([IO.Path]::GetTempPath()) "realdiff-mcp-pr-$proofId"
 
 try {
     & (Join-Path $PSScriptRoot 'verify-diff.ps1') -Mutate -Change config `
@@ -41,7 +41,7 @@ Copy-Item (Join-Path $source 'divergence-set.json') $runDir
 Write-Host '=== building the server ===' -ForegroundColor Cyan
 dotnet build $mcp -c Release --nologo -v quiet | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'build failed' }
-$exe = Get-ChildItem (Join-Path $mcp 'bin/Release') -Recurse -Filter 'BehaviorDiff.Mcp.exe' | Select-Object -First 1
+$exe = Get-ChildItem (Join-Path $mcp 'bin/Release') -Recurse -Filter 'RealDiff.Mcp.exe' | Select-Object -First 1
 if (-not $exe) { throw 'server executable not found' }
 
 $requests = @(
@@ -56,7 +56,7 @@ $requests = @(
     '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get_run_status","arguments":{"runId":"no-such-run"}}}'
 )
 
-$env:BEHAVIORDIFF_RUNS = $runsRoot
+$env:REALDIFF_RUNS = $runsRoot
 $stdinFile = Join-Path $runsRoot 'stdin.jsonl'
 Set-Content -Path $stdinFile -Value ($requests -join "`n") -NoNewline -Encoding utf8
 
@@ -66,7 +66,7 @@ $psi.RedirectStandardInput = $true
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
 $psi.UseShellExecute = $false
-$psi.EnvironmentVariables['BEHAVIORDIFF_RUNS'] = $runsRoot
+$psi.EnvironmentVariables['REALDIFF_RUNS'] = $runsRoot
 $p = [System.Diagnostics.Process]::Start($psi)
 
 # stdin stays open: once the transport sees EOF it stops writing, so closing it up front
@@ -162,7 +162,7 @@ finally {
         $p.WaitForExit(10000) | Out-Null
     }
     if ($null -ne $p) { $p.Dispose() }
-    Remove-Item Env:BEHAVIORDIFF_RUNS -ErrorAction SilentlyContinue
+    Remove-Item Env:REALDIFF_RUNS -ErrorAction SilentlyContinue
     Remove-Item $runsRoot, $source, $proofPrTree -Recurse -Force -ErrorAction SilentlyContinue
 }
 

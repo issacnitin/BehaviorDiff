@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-node-sort-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-node-sort-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else {
     [IO.Path]::GetFullPath($WorkDirectory)
 }
@@ -49,7 +49,7 @@ function Get-ApiKey {
         return $env:ANTHROPIC_API_KEY
     }
 
-    $keyFile = Join-Path $HOME '.behaviordiff/anthropic.key'
+    $keyFile = Join-Path $HOME '.realdiff/anthropic.key'
     if (-not (Test-Path $keyFile)) { return $null }
     $protectedKey = (Get-Content $keyFile -Raw).Trim()
     try {
@@ -74,12 +74,12 @@ try {
     Write-Host '=== Standalone base fixture ===' -ForegroundColor Cyan
     Invoke-Npm $demoRepo @('ci', '--no-audit', '--no-fund') 'Standalone Node sort demo install failed'
     $baseReport = Join-Path $work 'base-runner-report.json'
-    $oldReport = [Environment]::GetEnvironmentVariable('BEHAVIORDIFF_RUNNER_REPORT', 'Process')
+    $oldReport = [Environment]::GetEnvironmentVariable('REALDIFF_RUNNER_REPORT', 'Process')
     try {
-        $env:BEHAVIORDIFF_RUNNER_REPORT = $baseReport
+        $env:REALDIFF_RUNNER_REPORT = $baseReport
         Invoke-Npm $demoRepo @('test') 'Standalone Node sort demo failed'
     } finally {
-        [Environment]::SetEnvironmentVariable('BEHAVIORDIFF_RUNNER_REPORT', $oldReport, 'Process')
+        [Environment]::SetEnvironmentVariable('REALDIFF_RUNNER_REPORT', $oldReport, 'Process')
     }
     Assert-True (Test-Path $baseReport -PathType Leaf) 'Standalone runner did not write its success report'
     $baseTests = [int](Get-Content $baseReport -Raw | ConvertFrom-Json).runnerTests
@@ -88,8 +88,8 @@ try {
     Write-Host '=== Temporary git history ===' -ForegroundColor Cyan
     & git -C $demoRepo init --quiet
     if ($LASTEXITCODE -ne 0) { throw 'Could not initialize temporary demo repository' }
-    & git -C $demoRepo config user.name 'BehaviorDiff Proof'
-    & git -C $demoRepo config user.email 'proof@behaviordiff.invalid'
+    & git -C $demoRepo config user.name 'RealDiff Proof'
+    & git -C $demoRepo config user.email 'proof@realdiff.invalid'
     & git -C $demoRepo add .
     & git -C $demoRepo commit --quiet -m 'base: stable priority ordering'
     if ($LASTEXITCODE -ne 0) { throw 'Could not commit Node sort demo base' }
@@ -119,27 +119,27 @@ try {
     @(& git -C $demoRepo diff --no-color $baseSha $prSha -- $changedFile) | Set-Content $patchPath
 
     Write-Host '=== Node tracer install and CLI build ===' -ForegroundColor Cyan
-    $tracer = Join-Path $repo 'src/BehaviorDiff.Node'
+    $tracer = Join-Path $repo 'src/RealDiff.Node'
     Invoke-Npm $tracer @('ci', '--no-audit', '--no-fund') 'Node tracer install failed'
-    $cliProject = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
+    $cliProject = Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj'
     & dotnet build $cliProject -c Release --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "CLI build failed: $LASTEXITCODE" }
-    $cli = Join-Path $repo 'src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll'
+    $cli = Join-Path $repo 'src/RealDiff.Cli/bin/Release/net8.0/realdiff.dll'
     Assert-True (Test-Path $cli) "Built CLI not found at $cli"
 
     Write-Host '=== Real CLI base/PR analysis ===' -ForegroundColor Cyan
-    $oldTracer = [Environment]::GetEnvironmentVariable('BEHAVIORDIFF_NODE_TRACER', 'Process')
-    $oldExcludes = [Environment]::GetEnvironmentVariable('BEHAVIORDIFF_EXCLUDE_NAMESPACES', 'Process')
+    $oldTracer = [Environment]::GetEnvironmentVariable('REALDIFF_NODE_TRACER', 'Process')
+    $oldExcludes = [Environment]::GetEnvironmentVariable('REALDIFF_EXCLUDE_NAMESPACES', 'Process')
     try {
-        $env:BEHAVIORDIFF_NODE_TRACER = $tracer
-        $env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = $changedFile
+        $env:REALDIFF_NODE_TRACER = $tracer
+        $env:REALDIFF_EXCLUDE_NAMESPACES = $changedFile
         $cliOutput = @(& dotnet $cli $demoRepo --base $baseSha --pr $prSha `
             --work $cliWork --findings $findingsPath --keep --keep-traces 1d 2>&1)
         $cliExit = $LASTEXITCODE
         $cliOutput | ForEach-Object { Write-Host $_ }
     } finally {
-        [Environment]::SetEnvironmentVariable('BEHAVIORDIFF_NODE_TRACER', $oldTracer, 'Process')
-        [Environment]::SetEnvironmentVariable('BEHAVIORDIFF_EXCLUDE_NAMESPACES', $oldExcludes, 'Process')
+        [Environment]::SetEnvironmentVariable('REALDIFF_NODE_TRACER', $oldTracer, 'Process')
+        [Environment]::SetEnvironmentVariable('REALDIFF_EXCLUDE_NAMESPACES', $oldExcludes, 'Process')
     }
     Assert-True ($cliExit -eq 1) "Expected analyzed findings exit 1, got $cliExit"
     Assert-True (Test-Path $findingsPath) 'CLI did not write findings.json'
@@ -247,16 +247,16 @@ try {
     $repeatMessages = @()
     foreach ($repeat in 1..5) {
         $repeatReport = Join-Path $work "repeat-$repeat-report.json"
-        $oldReport = [Environment]::GetEnvironmentVariable('BEHAVIORDIFF_RUNNER_REPORT', 'Process')
+        $oldReport = [Environment]::GetEnvironmentVariable('REALDIFF_RUNNER_REPORT', 'Process')
         try {
-            $env:BEHAVIORDIFF_RUNNER_REPORT = $repeatReport
+            $env:REALDIFF_RUNNER_REPORT = $repeatReport
             Push-Location $demoRepo
             try {
                 $repeatOutput = @(& node test/run.cjs 2>&1)
                 $repeatExit = $LASTEXITCODE
             } finally { Pop-Location }
         } finally {
-            [Environment]::SetEnvironmentVariable('BEHAVIORDIFF_RUNNER_REPORT', $oldReport, 'Process')
+            [Environment]::SetEnvironmentVariable('REALDIFF_RUNNER_REPORT', $oldReport, 'Process')
         }
         $repeatText = $repeatOutput -join "`n"
         Assert-True ($repeatExit -ne 0 -and $repeatText -match 'Z_CLEARANCE' `
@@ -272,7 +272,7 @@ try {
 
     Write-Host '=== Production deterministic GitHub comments ===' -ForegroundColor Cyan
     $commentPath = Join-Path $cliWork 'comment.md'
-    $commentOutput = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+    $commentOutput = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/RealDiff.CommentPreview.csproj') `
         -c Release -- $findingsPath)
     if ($LASTEXITCODE -ne 0) { throw "CommentPreview failed: $LASTEXITCODE" }
     $commentText = $commentOutput -join "`n"
@@ -302,7 +302,7 @@ try {
     $strict.commentPolicy.suppressedUnexpectedMembers = 0
     $strict.commentPolicy.suppressedUnexpectedCallSites = 0
     $strict | ConvertTo-Json -Depth 100 | Set-Content $strictPath
-    $strictCommentOutput = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+    $strictCommentOutput = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/RealDiff.CommentPreview.csproj') `
         -c Release -- $strictPath)
     if ($LASTEXITCODE -ne 0) { throw "Strict CommentPreview failed: $LASTEXITCODE" }
     $strictCommentText = $strictCommentOutput -join "`n"
@@ -313,7 +313,7 @@ try {
         -and $strictCommentText -match 'CheckoutTotals\.compute' `
         -and $strictCommentText -match 'number:60' -and $strictCommentText -match 'number:85' `
         -and $strictCommentText -match '2 of the 3 tests that executed this did not assert on the change' `
-        -and $strictCommentText -notmatch 'SampleApp|Commerce\.Pricing|Infrastructure\.Collections|io\.behaviordiff|\.java') `
+        -and $strictCommentText -notmatch 'SampleApp|Commerce\.Pricing|Infrastructure\.Collections|io\.realdiff|\.java') `
         'Strict Node comment lost required evidence or contains Java/.NET demo contamination'
 
     $apiKey = Get-ApiKey
@@ -323,7 +323,7 @@ try {
         $oldKey = [Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY', 'Process')
         try {
             $env:ANTHROPIC_API_KEY = $apiKey
-            $modelOutput = @(& dotnet run --project (Join-Path $repo 'tools/AnthropicLive/BehaviorDiff.AnthropicLive.csproj') `
+            $modelOutput = @(& dotnet run --project (Join-Path $repo 'tools/AnthropicLive/RealDiff.AnthropicLive.csproj') `
                 -c Release -- $findingsPath $changedFile $patchPath 2>&1)
             $modelExit = $LASTEXITCODE
             $modelOutput | Set-Content $modelOutputPath

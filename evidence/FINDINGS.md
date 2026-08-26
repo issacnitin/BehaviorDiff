@@ -1,10 +1,10 @@
 # Measured evidence
 
-This document records the measurements behind BehaviorDiff's architecture. It is written for readers who have not followed the implementation history. Commands under `tools/` reproduce maintained behavioral claims; wall times are reference measurements, not performance guarantees.
+This document records the measurements behind RealDiff's architecture. It is written for readers who have not followed the implementation history. Commands under `tools/` reproduce maintained behavioral claims; wall times are reference measurements, not performance guarantees.
 
 ## Why there is a trace specification
 
-BehaviorDiff began as a .NET runtime patcher. Building [`TRACE-FORMAT.md`](../TRACE-FORMAT.md) exposed assumptions that had been distributed across the tracer, engine, and PowerShell proofs rather than stated as a contract:
+RealDiff began as a .NET runtime patcher. Building [`TRACE-FORMAT.md`](../TRACE-FORMAT.md) exposed assumptions that had been distributed across the tracer, engine, and PowerShell proofs rather than stated as a contract:
 
 - call ordinals must be assigned at entry; event/file order is completion order and changes under nesting or asynchronous settlement;
 - `isHarness` events remain as call-tree roots but cannot be frontier candidates;
@@ -137,7 +137,7 @@ edited files exercised : 1 / 1
 expected / unexpected  : 110 / 0
 ```
 
-A second Java proof and a Node proof edited intentionally excluded helpers, forcing downstream behavior in unedited files. Java rendered `io.behaviordiff.reference.Subject.observe(I)I`; Node rendered `samples/NodeReference/src/subject.js#AsyncSettlement.settle`. The real findings pipeline, GitHub renderer, Azure renderer payload, and MCP queries preserved native member names and paths:
+A second Java proof and a Node proof edited intentionally excluded helpers, forcing downstream behavior in unedited files. Java rendered `io.realdiff.reference.Subject.observe(I)I`; Node rendered `samples/NodeReference/src/subject.js#AsyncSettlement.settle`. The real findings pipeline, GitHub renderer, Azure renderer payload, and MCP queries preserved native member names and paths:
 
 | Consumer output | Java | Node |
 | --- | ---: | ---: |
@@ -218,14 +218,14 @@ assertion reactions      : 1
 
 The unstable baseline selection was identical across 20 fresh probe processes. The executable fixture proof also launches five fresh proposed-change processes and verifies that every one selects `SEASONAL_15`.
 
-- [Demo pull request](https://github.com/issacnitin/behaviordiff-live-verification/pull/4)
-- [Hosted workflow run](https://github.com/issacnitin/behaviordiff-live-verification/actions/runs/32369192452)
-- [BehaviorDiff summary](https://github.com/issacnitin/behaviordiff-live-verification/pull/4#issuecomment-5353980185)
+- [Demo pull request](https://github.com/issacnitin/realdiff-live-verification/pull/4)
+- [Hosted workflow run](https://github.com/issacnitin/realdiff-live-verification/actions/runs/32369192452)
+- [RealDiff summary](https://github.com/issacnitin/realdiff-live-verification/pull/4#issuecomment-5353980185)
 
 ## Reproduce maintained claims
 
 ```powershell
-dotnet build BehaviorDiff.sln -c Release
+dotnet build RealDiff.sln -c Release
 pwsh -File tools/verify-contracts.ps1
 pwsh -File tools/conformance-dotnet.ps1
 pwsh -File tools/conformance-java.ps1

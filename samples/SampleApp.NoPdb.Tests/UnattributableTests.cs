@@ -1,5 +1,5 @@
 using System.Runtime.CompilerServices;
-using BehaviorDiff.Tracer;
+using RealDiff.Tracer;
 using SampleApp.NoPdb;
 using Xunit;
 

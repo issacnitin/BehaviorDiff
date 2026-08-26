@@ -5,17 +5,17 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
-$module = Join-Path $repo 'src/BehaviorDiff.Go'
+$module = Join-Path $repo 'src/RealDiff.Go'
 $package = './internal/runtime/canonical'
 
 if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
     $candidates = @(
-        (Join-Path $env:LOCALAPPDATA 'Programs/BehaviorDiffGo/go/bin'),
-        (Join-Path $HOME '.behaviordiff-tools/go/bin')
+        (Join-Path $env:LOCALAPPDATA 'Programs/RealDiffGo/go/bin'),
+        (Join-Path $HOME '.realdiff-tools/go/bin')
     )
     $localGoBin = $candidates | Where-Object { Test-Path (Join-Path $_ 'go.exe') -PathType Leaf } | Select-Object -First 1
     if (-not $localGoBin) {
-        throw 'Go was not found on PATH or in a BehaviorDiff local tool directory.'
+        throw 'Go was not found on PATH or in a RealDiff local tool directory.'
     }
     $env:PATH = "$localGoBin;$env:PATH"
 }
@@ -89,8 +89,8 @@ try {
 
     $null = Invoke-Go @('test', '-count=1', $package)
 
-    $firstOutput = Invoke-Go @('test', '-count=1', '-run', '^TestCanonicalProcessHelper$', '-v', $package) @{ BEHAVIORDIFF_CANONICAL_HELPER = 'first' }
-    $secondOutput = Invoke-Go @('test', '-count=1', '-run', '^TestCanonicalProcessHelper$', '-v', $package) @{ BEHAVIORDIFF_CANONICAL_HELPER = 'second' }
+    $firstOutput = Invoke-Go @('test', '-count=1', '-run', '^TestCanonicalProcessHelper$', '-v', $package) @{ REALDIFF_CANONICAL_HELPER = 'first' }
+    $secondOutput = Invoke-Go @('test', '-count=1', '-run', '^TestCanonicalProcessHelper$', '-v', $package) @{ REALDIFF_CANONICAL_HELPER = 'second' }
     $firstProof = Get-ProofLine $firstOutput 'CANONICAL_MAP_PROOF'
     $secondProof = Get-ProofLine $secondOutput 'CANONICAL_MAP_PROOF'
     if ($firstProof -ne $secondProof) {
@@ -105,7 +105,7 @@ try {
         throw "Unexpected map tie proof counters: $firstTieProof"
     }
 
-    $counterOutput = Invoke-Go @('test', '-count=1', '-run', '^TestCanonicalCounterProof$', '-v', $package) @{ BEHAVIORDIFF_CANONICAL_PROOF = '1' }
+    $counterOutput = Invoke-Go @('test', '-count=1', '-run', '^TestCanonicalCounterProof$', '-v', $package) @{ REALDIFF_CANONICAL_PROOF = '1' }
     $counterProof = Get-ProofLine $counterOutput 'CANONICAL_COUNTER_PROOF'
     $expectedCounterProof = 'CANONICAL_COUNTER_PROOF values=3 depthLimited=0 entryLimited=0 blocklisted=1 mapTies=0 errored=0 renderedTruncated=0 unexported=1 partial=true'
     if ($counterProof -ne $expectedCounterProof) {

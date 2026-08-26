@@ -4,8 +4,8 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <AssemblyName>behaviordiff-weaver</AssemblyName>
-    <RootNamespace>BehaviorDiff.Weaver</RootNamespace>
+    <AssemblyName>realdiff-weaver</AssemblyName>
+    <RootNamespace>RealDiff.Weaver</RootNamespace>
     <!-- The descriptor pass reflection-loads the target, so the weaver must run on a runtime at least as
          new as the assembly it is weaving. -->
     <RollForward>LatestMajor</RollForward>
@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\BehaviorDiff.Tracer\BehaviorDiff.Tracer.csproj" />
+    <ProjectReference Include="..\..\src\RealDiff.Tracer\RealDiff.Tracer.csproj" />
   </ItemGroup>
 
 </Project>

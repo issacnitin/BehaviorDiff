@@ -1,6 +1,6 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-rust-sort-demo-gate'))
+param([string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'realdiff-rust-sort-demo-gate'))
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -11,8 +11,8 @@ $repository = Join-Path $work 'repository'
 $analysis = Join-Path $work 'analysis'
 $findingsPath = Join-Path $analysis 'findings.json'
 $commentPath = Join-Path $analysis 'comment.md'
-$preview = Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj'
-$tracer = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/target/release/behaviordiff-rust-rewrite.exe'
+$preview = Join-Path $repo 'tools/CommentPreview/RealDiff.CommentPreview.csproj'
+$tracer = Join-Path $repo 'src/RealDiff.Rust.Tracer/target/release/realdiff-rust-rewrite.exe'
 if (-not $IsWindows) { $tracer = $tracer.Substring(0, $tracer.Length - 4) }
 
 if (Test-Path $work) { Remove-Item $work -Recurse -Force }
@@ -21,8 +21,8 @@ Get-ChildItem $fixture -Force | Where-Object Name -ne 'target' | ForEach-Object 
     Copy-Item $_.FullName (Join-Path $repository $_.Name) -Recurse -Force
 }
 & git -C $repository init --initial-branch=main --quiet
-& git -C $repository config user.email behaviordiff-proof@example.invalid
-& git -C $repository config user.name 'BehaviorDiff Proof'
+& git -C $repository config user.email realdiff-proof@example.invalid
+& git -C $repository config user.name 'RealDiff Proof'
 & git -C $repository add .
 & git -C $repository commit --quiet -m base
 $base = (& git -C $repository rev-parse HEAD).Trim()
@@ -40,16 +40,16 @@ if ($changed.Count -ne 1 -or $changed[0] -cne $changedFile) {
     throw "Rust demo changed-file input differs: count=$($changed.Count) files=$($changed -join ',')"
 }
 
-& cargo build --release --locked --manifest-path (Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml')
+& cargo build --release --locked --manifest-path (Join-Path $repo 'src/RealDiff.Rust.Tracer/Cargo.toml')
 if ($LASTEXITCODE -ne 0) { throw "Rust tracer build failed: $LASTEXITCODE" }
-$env:BEHAVIORDIFF_RUST_TRACER = $tracer
+$env:REALDIFF_RUST_TRACER = $tracer
 try {
-    $output = @(& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Cli') -c Release --no-build -- `
+    $output = @(& dotnet run --project (Join-Path $repo 'src/RealDiff.Cli') -c Release --no-build -- `
         $repository --base $base --pr $pr --work $analysis --findings $findingsPath `
         --no-baseline --strict --keep --keep-traces 1d 2>&1)
     $exitCode = $LASTEXITCODE
 } finally {
-    Remove-Item Env:BEHAVIORDIFF_RUST_TRACER -ErrorAction SilentlyContinue
+    Remove-Item Env:REALDIFF_RUST_TRACER -ErrorAction SilentlyContinue
 }
 $output | ForEach-Object { Write-Host $_ }
 if ($exitCode -ne 1) { throw "Rust demo CLI exited $exitCode instead of findings exit 1" }
@@ -77,7 +77,7 @@ $comment = @(& dotnet run --project $preview -c Release -- $findingsPath 2>&1)
 if ($LASTEXITCODE -ne 0) { throw "Rust demo comment rendering failed: $LASTEXITCODE" }
 $commentText = $comment -join "`n"
 $commentText | Set-Content $commentPath
-if ($commentText -notmatch 'BehaviorDiff:' -or
+if ($commentText -notmatch 'RealDiff:' -or
     $commentText -notmatch [regex]::Escape($member[0].memberName) -or
     $commentText -notmatch 'did not assert|none asserted|unasserted') {
     throw 'Rust demo rendered comment omitted heading, headline, or untested explanation'

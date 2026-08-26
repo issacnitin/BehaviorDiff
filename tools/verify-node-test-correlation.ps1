@@ -7,12 +7,12 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-node-test-correlation-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-node-test-correlation-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
 $sampleSource = Join-Path $repo 'samples/NodeTestFrameworks'
 $sample = Join-Path $work 'sample'
 $results = Join-Path $work 'results'
-$tracer = Join-Path $repo 'src/BehaviorDiff.Node'
+$tracer = Join-Path $repo 'src/RealDiff.Node'
 $register = Join-Path $tracer 'register.cjs'
 
 function Copy-Sample([string]$destination) {
@@ -31,17 +31,17 @@ function New-JestIntegration([string]$directory) {
         $config = Join-Path $directory 'jest.config.cjs'
         [IO.File]::WriteAllText($bridge, @'
 'use strict';
-const register = require(process.env.BEHAVIORDIFF_NODE_ROOT + '/register.cjs');
-process[Symbol.for('behaviordiff.runtime')] = register.runtime;
+const register = require(process.env.REALDIFF_NODE_ROOT + '/register.cjs');
+process[Symbol.for('realdiff.runtime')] = register.runtime;
 '@)
         [IO.File]::WriteAllText($setup, @'
 'use strict';
-globalThis[Symbol.for('behaviordiff.runtime')] = process[Symbol.for('behaviordiff.runtime')];
+globalThis[Symbol.for('realdiff.runtime')] = process[Symbol.for('realdiff.runtime')];
 '@)
         [IO.File]::WriteAllText($transformer, @'
 'use strict';
 const path = require('node:path');
-const { transform } = require(path.join(process.env.BEHAVIORDIFF_NODE_ROOT, 'src/transform.cjs'));
+const { transform } = require(path.join(process.env.REALDIFF_NODE_ROOT, 'src/transform.cjs'));
 module.exports = {
     process(source, filename) {
         return { code: transform(source, filename, { repositoryRoot: process.cwd() }).code };
@@ -71,14 +71,14 @@ function New-VitestIntegration([string]$directory) {
         $config = Join-Path $directory 'vitest.config.mjs'
         [IO.File]::WriteAllText($bridge, @'
 'use strict';
-const register = require(process.env.BEHAVIORDIFF_NODE_ROOT + '/register.cjs');
-process[Symbol.for('behaviordiff.runtime')] = register.runtime;
+const register = require(process.env.REALDIFF_NODE_ROOT + '/register.cjs');
+process[Symbol.for('realdiff.runtime')] = register.runtime;
 '@)
         [IO.File]::WriteAllText($setup, @'
     import { afterAll } from 'vitest';
 
-    const runtime = process[Symbol.for('behaviordiff.runtime')];
-    globalThis[Symbol.for('behaviordiff.runtime')] = runtime;
+    const runtime = process[Symbol.for('realdiff.runtime')];
+    globalThis[Symbol.for('realdiff.runtime')] = runtime;
     afterAll(() => runtime.shutdown());
 '@)
         $rootLiteral = $sample.Replace('\', '/').Replace("'", "\'")
@@ -94,7 +94,7 @@ const require = createRequire(import.meta.url);
 export default defineConfig({
     root: '$rootLiteral',
     plugins: [{
-        name: 'behaviordiff-subject-transform',
+        name: 'realdiff-subject-transform',
         enforce: 'pre',
         transform(source, id) {
             const filename = id.split('?')[0];
@@ -282,28 +282,28 @@ function Invoke-Framework([ValidateSet('Jest', 'Vitest')] [string]$framework) {
     New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
     $trace = Join-Path $runDirectory 'run.ndjson'
     $report = Join-Path $runDirectory 'runner-report.json'
-    $oldTrace = $env:BEHAVIORDIFF_TRACE
-    $oldReport = $env:BEHAVIORDIFF_RUNNER_REPORT
-    $oldNamespaces = $env:BEHAVIORDIFF_NAMESPACES
-    $oldNodeRoot = $env:BEHAVIORDIFF_NODE_ROOT
+    $oldTrace = $env:REALDIFF_TRACE
+    $oldReport = $env:REALDIFF_RUNNER_REPORT
+    $oldNamespaces = $env:REALDIFF_NAMESPACES
+    $oldNodeRoot = $env:REALDIFF_NODE_ROOT
     $oldNodeOptions = $env:NODE_OPTIONS
     try {
-        $env:BEHAVIORDIFF_TRACE = $trace
-        $env:BEHAVIORDIFF_RUNNER_REPORT = $report
-        $env:BEHAVIORDIFF_NAMESPACES = 'src'
-        $env:BEHAVIORDIFF_NODE_ROOT = $tracer
+        $env:REALDIFF_TRACE = $trace
+        $env:REALDIFF_RUNNER_REPORT = $report
+        $env:REALDIFF_NAMESPACES = 'src'
+        $env:REALDIFF_NODE_ROOT = $tracer
         $env:NODE_OPTIONS = "--require=$register"
         Push-Location $sample
         try {
             if ($framework -ceq 'Jest') {
                 $cli = Join-Path $sample 'node_modules/jest/bin/jest.js'
-                $integration = New-JestIntegration (Join-Path $sample '.behaviordiff-jest')
+                $integration = New-JestIntegration (Join-Path $sample '.realdiff-jest')
                 $env:NODE_OPTIONS = "--require=$register --require=$($integration.Bridge)"
                 & node $cli --config $integration.Config --runInBand --json --outputFile $report |
                     ForEach-Object { Write-Host $_ }
             } else {
                 $cli = Join-Path $sample 'node_modules/vitest/vitest.mjs'
-                $integration = New-VitestIntegration (Join-Path $sample '.behaviordiff-vitest')
+                $integration = New-VitestIntegration (Join-Path $sample '.realdiff-vitest')
                 $env:NODE_OPTIONS = "--require=$register --require=$($integration.Bridge)"
                 & node $cli run --config $integration.Config --maxWorkers=1 --no-file-parallelism --reporter=json --outputFile=$report |
                     ForEach-Object { Write-Host $_ }
@@ -311,10 +311,10 @@ function Invoke-Framework([ValidateSet('Jest', 'Vitest')] [string]$framework) {
         } finally { Pop-Location }
         if ($LASTEXITCODE -ne 0) { throw "$framework failed with exit code $LASTEXITCODE" }
     } finally {
-        $env:BEHAVIORDIFF_TRACE = $oldTrace
-        $env:BEHAVIORDIFF_RUNNER_REPORT = $oldReport
-        $env:BEHAVIORDIFF_NAMESPACES = $oldNamespaces
-        $env:BEHAVIORDIFF_NODE_ROOT = $oldNodeRoot
+        $env:REALDIFF_TRACE = $oldTrace
+        $env:REALDIFF_RUNNER_REPORT = $oldReport
+        $env:REALDIFF_NAMESPACES = $oldNamespaces
+        $env:REALDIFF_NODE_ROOT = $oldNodeRoot
         $env:NODE_OPTIONS = $oldNodeOptions
     }
     $runner = Get-RunnerCounts $report $framework

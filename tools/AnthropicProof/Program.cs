@@ -2,11 +2,11 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using BehaviorDiff.Cli;
+using RealDiff.Cli;
 
 if (args.Length != 1 || !File.Exists(args[0]))
 {
-    Console.Error.WriteLine("usage: BehaviorDiff.AnthropicProof <findings.json>");
+    Console.Error.WriteLine("usage: RealDiff.AnthropicProof <findings.json>");
     return 2;
 }
 
@@ -284,7 +284,7 @@ Assert(!withoutKey.Contains("Optional model explanation", StringComparison.Ordin
 Assert(withKey.Contains("Optional model explanation", StringComparison.Ordinal), "key-enabled comment omitted accepted model output");
 Assert(withKey.Contains("grounded", StringComparison.Ordinal), "model output is not labeled as grounded");
 Assert(!withKey.Contains("422", StringComparison.Ordinal), "comment leaked raw GitHub 422 details");
-Assert(withoutKey.StartsWith("## BehaviorDiff: 1 behavior gap outside this diff", StringComparison.Ordinal),
+Assert(withoutKey.StartsWith("## RealDiff: 1 behavior gap outside this diff", StringComparison.Ordinal),
     "comment does not lead with the outside-diff behavior gap count");
 Assert(withoutKey.Contains("**`ShippingCalculator.IsFreeShipping` changed, but this PR didn't edit it.**", StringComparison.Ordinal),
     "comment does not lead with the unedited member");
@@ -308,7 +308,7 @@ string fullyAssertedComment = GitHubPoster.RenderSummary(
     marker,
     Array.Empty<string>());
 Assert(fullyAssertedComment.StartsWith(
-    "## BehaviorDiff: 1 test-covered behavior change outside this diff",
+    "## RealDiff: 1 test-covered behavior change outside this diff",
     StringComparison.Ordinal),
     "fully asserted change was not labeled test-covered");
 Assert(fullyAssertedComment.Contains(
@@ -353,7 +353,7 @@ Assert(!cleanBudgeted.Contains("not a clean result", StringComparison.OrdinalIgn
 
 using JsonDocument refusedDocument = JsonDocument.Parse(JsonSerializer.Serialize(new
 {
-    schema = "behaviordiff.findings/1",
+    schema = "realdiff.findings/1",
     status = "refused",
     verdict = "could_not_analyze",
     refusal = new { reason = new string('r', 70000) },

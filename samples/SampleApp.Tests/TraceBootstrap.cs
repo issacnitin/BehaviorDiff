@@ -1,5 +1,5 @@
 using System.Runtime.CompilerServices;
-using BehaviorDiff.Tracer;
+using RealDiff.Tracer;
 
 namespace SampleApp.Tests
 {

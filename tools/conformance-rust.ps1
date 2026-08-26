@@ -1,7 +1,7 @@
 #requires -Version 7.0
 [CmdletBinding()]
 param(
-    [string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-rust-conformance'),
+    [string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'realdiff-rust-conformance'),
     [switch]$KeepWork
 )
 
@@ -10,8 +10,8 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $work = [IO.Path]::GetFullPath($WorkDirectory)
 $source = Join-Path $repo 'samples/RustReference'
-$tracerSource = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer'
-Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Conformance.psm1') -Force
+$tracerSource = Join-Path $repo 'src/RealDiff.Rust.Tracer'
+Import-Module (Join-Path $PSScriptRoot 'RealDiff.Conformance.psm1') -Force
 
 function Copy-CleanTree([string]$From, [string]$To) {
     New-Item $To -ItemType Directory -Force | Out-Null
@@ -82,7 +82,7 @@ try {
         Copy-CleanTree $tracerSource $tracer
         & cargo build --release --manifest-path (Join-Path $tracer 'Cargo.toml')
         if ($LASTEXITCODE -ne 0) { throw "Rust tracer build $index failed: $LASTEXITCODE" }
-        $binary = Join-Path $tracer 'target/release/behaviordiff-rust-rewrite.exe'
+        $binary = Join-Path $tracer 'target/release/realdiff-rust-rewrite.exe'
         if (-not $IsWindows) { $binary = $binary.Substring(0, $binary.Length - 4) }
         $rewrite = (& $binary --source $source --cache-root $cache | ConvertFrom-Json)
         if ($rewrite.sourceFiles -le 0 -or $rewrite.rustFiles -le 0) {
@@ -90,12 +90,12 @@ try {
         }
         $trace = Join-Path $run 'run.rust.ndjson'
         $manifest = Join-Path $run 'run.rust.manifest.ndjson'
-        $env:BEHAVIORDIFF_RUST_EXIT_TRACE = $trace
+        $env:REALDIFF_RUST_EXIT_TRACE = $trace
         try {
             $runner = @(& cargo test --quiet --manifest-path (Join-Path $rewrite.output 'Cargo.toml') --lib -- --test-threads=1 2>&1)
             $runnerExit = $LASTEXITCODE
         } finally {
-            Remove-Item Env:BEHAVIORDIFF_RUST_EXIT_TRACE -ErrorAction SilentlyContinue
+            Remove-Item Env:REALDIFF_RUST_EXIT_TRACE -ErrorAction SilentlyContinue
         }
         $runner | ForEach-Object { Write-Host $_ }
         if ($runnerExit -ne 0) { throw "Rust conformance tests $index failed: $runnerExit" }
@@ -104,7 +104,7 @@ try {
         $null = $line[0] -match '^test result: ok\. ([0-9]+) passed;'
         $runnerCount = [int]$Matches[1]
         if ($runnerCount -le 0) { throw "Rust runner $index test input is empty" }
-        $finalize = (& $binary finalize --origin (Join-Path $rewrite.output '.behaviordiff-rust-origin.json') --trace $trace --out $manifest | ConvertFrom-Json)
+        $finalize = (& $binary finalize --origin (Join-Path $rewrite.output '.realdiff-rust-origin.json') --trace $trace --out $manifest | ConvertFrom-Json)
         if ($finalize.events -le 0 -or $finalize.discoveredMembers -le 0) {
             throw "Rust finalization $index is empty: events=$($finalize.events) members=$($finalize.discoveredMembers)"
         }
@@ -118,7 +118,7 @@ try {
         throw "Rust source hashes changed across $($before.Count) non-empty files"
     }
 
-    $metrics = Assert-BehaviorDiffConformanceRuns `
+    $metrics = Assert-RealDiffConformanceRuns `
         -FirstRun (Join-Path $work 'run-1') `
         -SecondRun (Join-Path $work 'run-2') `
         -MinimumMatchedKeys 300 `
@@ -126,8 +126,8 @@ try {
         -ReferenceSourcePathPatterns @('^src/.+\.rs$') `
         -DigestProofEvaluator $digestEvaluator
 
-    $firstRun = Read-BehaviorDiffConformanceRun (Join-Path $work 'run-1')
-    $secondRun = Read-BehaviorDiffConformanceRun (Join-Path $work 'run-2')
+    $firstRun = Read-RealDiffConformanceRun (Join-Path $work 'run-1')
+    $secondRun = Read-RealDiffConformanceRun (Join-Path $work 'run-2')
     $firstRoots = @($firstRun.Events | Where-Object { $_.isHarness -eq $true -and [int]$_.callDepth -eq 0 })
     $secondRoots = @($secondRun.Events | Where-Object { $_.isHarness -eq $true -and [int]$_.callDepth -eq 0 })
     if ($firstRoots.Count -ne $runnerCounts[0] -or $secondRoots.Count -ne $runnerCounts[1]) {
@@ -147,7 +147,7 @@ try {
         throw "Rust completion shape coverage differs: events=$($shapeEvents.Count) methods=$($shapeMethods.Count) generics=$($genericShapes.Count) panic=$($panicShapes.Count) cancel=$($cancelShapes.Count) macros=$($macroBoundaries.Count)"
     }
 
-    $engineMetrics = Invoke-BehaviorDiffEngineConformance `
+    $engineMetrics = Invoke-RealDiffEngineConformance `
         -FirstRun (Join-Path $work 'run-1') `
         -SecondRun (Join-Path $work 'run-2') `
         -BaseRoot $source `
@@ -187,6 +187,6 @@ try {
     } | Format-List
     Write-Host 'RUST_CONFORMANCE: PASS'
 } finally {
-    Remove-Item Env:BEHAVIORDIFF_RUST_EXIT_TRACE -ErrorAction SilentlyContinue
+    Remove-Item Env:REALDIFF_RUST_EXIT_TRACE -ErrorAction SilentlyContinue
     if (-not $KeepWork -and (Test-Path $work)) { Remove-Item $work -Recurse -Force }
 }

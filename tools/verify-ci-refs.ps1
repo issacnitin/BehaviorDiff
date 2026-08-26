@@ -10,16 +10,16 @@
 #>
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$fixture = Join-Path ([System.IO.Path]::GetTempPath()) 'behaviordiff-ci-refs'
-$cli = Join-Path $repoRoot 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
+$fixture = Join-Path ([System.IO.Path]::GetTempPath()) 'realdiff-ci-refs'
+$cli = Join-Path $repoRoot 'src/RealDiff.Cli/RealDiff.Cli.csproj'
 
 Remove-Item $fixture -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $fixture | Out-Null
 Push-Location $fixture
 try {
     git init -q -b target
-    git config user.email 'behaviordiff@example.invalid'
-    git config user.name 'BehaviorDiff proof'
+    git config user.email 'realdiff@example.invalid'
+    git config user.name 'RealDiff proof'
 
     Set-Content common.txt 'common'
     git add .
@@ -75,10 +75,10 @@ try {
     $env:BUILD_SOURCEBRANCH = 'refs/pull/314/merge'
     $env:BUILD_REPOSITORY_LOCALPATH = $fixture
     $env:BUILD_REPOSITORY_ID = '00000000-0000-0000-0000-000000000314'
-    $env:BUILD_REPOSITORY_NAME = 'BehaviorDiff.RefFixture'
+    $env:BUILD_REPOSITORY_NAME = 'RealDiff.RefFixture'
     $env:BUILD_REPOSITORY_PROVIDER = 'TfsGit'
-    $env:BUILD_REPOSITORY_URI = 'https://dev.azure.com/example/project/_git/BehaviorDiff.RefFixture'
-    Remove-Item Env:BEHAVIORDIFF_MAX_CHANGED_FILES -ErrorAction SilentlyContinue
+    $env:BUILD_REPOSITORY_URI = 'https://dev.azure.com/example/project/_git/RealDiff.RefFixture'
+    Remove-Item Env:REALDIFF_MAX_CHANGED_FILES -ErrorAction SilentlyContinue
 
     Write-Host '=== merge-base resolution ===' -ForegroundColor Cyan
     $output = dotnet run --project $cli -c Release --no-build -- --ci=azuredevops 2>&1
@@ -93,11 +93,11 @@ try {
     if ($text -notmatch [regex]::Escape("pr         : refs/heads/source -> $source")) { throw 'source SHA was not resolved from merge parent two' }
     if ($text -notmatch [regex]::Escape("merge base : $common")) { throw 'wrong merge base' }
     if ($text -notmatch 'changed from merge base: 2') { throw 'changed-file set did not use merge base' }
-    Write-Host 'PASS: direct target/source diff=3; BehaviorDiff merge-base changed set=2' -ForegroundColor Green
+    Write-Host 'PASS: direct target/source diff=3; RealDiff merge-base changed set=2' -ForegroundColor Green
 
     Write-Host ''
     Write-Host '=== plausibility guard ===' -ForegroundColor Cyan
-    $env:BEHAVIORDIFF_MAX_CHANGED_FILES = '1'
+    $env:REALDIFF_MAX_CHANGED_FILES = '1'
     $refusedFindings = Join-Path $fixture 'refused-findings.json'
     $guardOutput = dotnet run --project $cli -c Release --no-build -- --ci=azuredevops --findings $refusedFindings 2>&1
     $guardExit = $LASTEXITCODE
@@ -115,7 +115,7 @@ try {
 finally {
     Pop-Location
     Remove-Item $fixture -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item Env:BEHAVIORDIFF_MAX_CHANGED_FILES -ErrorAction SilentlyContinue
+    Remove-Item Env:REALDIFF_MAX_CHANGED_FILES -ErrorAction SilentlyContinue
 }
 
 Write-Host ''

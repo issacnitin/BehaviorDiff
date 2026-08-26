@@ -1,4 +1,4 @@
-name: BehaviorDiff blast radius
+name: RealDiff blast radius
 
 on:
   pull_request:
@@ -9,19 +9,19 @@ permissions:
   pull-requests: write
 
 jobs:
-  behaviordiff:
+  realdiff:
     runs-on: ubuntu-24.04
     env:
-      BEHAVIORDIFF_WORK: ${{ github.workspace }}/../behaviordiff-work
-      BEHAVIORDIFF_FINDINGS: ${{ github.workspace }}/.behaviordiff/artifacts/findings.json
-      BEHAVIORDIFF_GATE: warn-only
-      BEHAVIORDIFF_EXCLUDE_NAMESPACES: SampleApp.Diagnostics,SampleApp.Persistence,Infrastructure.Collections
+      REALDIFF_WORK: ${{ github.workspace }}/../realdiff-work
+      REALDIFF_FINDINGS: ${{ github.workspace }}/.realdiff/artifacts/findings.json
+      REALDIFF_GATE: warn-only
+      REALDIFF_EXCLUDE_NAMESPACES: SampleApp.Diagnostics,SampleApp.Persistence,Infrastructure.Collections
 
     steps:
       - name: Check out complete history
         uses: actions/checkout@v4
         with:
-          # BehaviorDiff creates worktrees at github.event.pull_request.base.sha and head.sha and
+          # RealDiff creates worktrees at github.event.pull_request.base.sha and head.sha and
           # calculates their merge base. The checkout action defaults to depth 1, which cannot work.
           fetch-depth: 0
 
@@ -30,23 +30,23 @@ jobs:
         with:
           dotnet-version: 8.x
 
-      - name: Build BehaviorDiff CLI
-        run: dotnet build src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj -c Release --nologo -v quiet
+      - name: Build RealDiff CLI
+        run: dotnet build src/RealDiff.Cli/RealDiff.Cli.csproj -c Release --nologo -v quiet
 
       - name: Analyze runtime behavior and measure
         id: analyze
         shell: bash
         run: |
           set +e
-          mkdir -p "$(dirname "$BEHAVIORDIFF_FINDINGS")"
-          cli="$GITHUB_WORKSPACE/src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll"
-          metrics="$RUNNER_TEMP/behaviordiff-time.txt"
-          stdout="$RUNNER_TEMP/behaviordiff.stdout.log"
-          stderr="$RUNNER_TEMP/behaviordiff.stderr.log"
+          mkdir -p "$(dirname "$REALDIFF_FINDINGS")"
+          cli="$GITHUB_WORKSPACE/src/RealDiff.Cli/bin/Release/net8.0/realdiff.dll"
+          metrics="$RUNNER_TEMP/realdiff-time.txt"
+          stdout="$RUNNER_TEMP/realdiff.stdout.log"
+          stderr="$RUNNER_TEMP/realdiff.stderr.log"
 
           /usr/bin/time -v -o "$metrics" \
             dotnet "$cli" "$GITHUB_WORKSPACE" --ci=github \
-            --work "$BEHAVIORDIFF_WORK" --findings "$BEHAVIORDIFF_FINDINGS" \
+            --work "$REALDIFF_WORK" --findings "$REALDIFF_FINDINGS" \
             >"$stdout" 2>"$stderr"
           analysis_exit=$?
           cat "$stdout"
@@ -54,12 +54,12 @@ jobs:
 
           wall=$(awk -F': ' '/Elapsed \(wall clock\) time/{print $2}' "$metrics")
           peak_kb=$(awk -F': ' '/Maximum resident set size/{print $2}' "$metrics")
-          trace_bytes=$(find "$BEHAVIORDIFF_WORK" -type f -name '*.ndjson' ! -name '*manifest*' \
+          trace_bytes=$(find "$REALDIFF_WORK" -type f -name '*.ndjson' ! -name '*manifest*' \
             -printf '%s\n' 2>/dev/null | awk '{s+=$1} END {print s+0}')
 
           echo "HOSTED MEASUREMENT wall=$wall peak_rss_kb=$peak_kb traces_bytes=$trace_bytes exit=$analysis_exit"
           {
-            echo "### BehaviorDiff hosted measurement"
+            echo "### RealDiff hosted measurement"
             echo "- Wall clock: $wall"
             echo "- Peak RSS: $peak_kb KB"
             echo "- Trace bytes: $trace_bytes"
@@ -71,17 +71,17 @@ jobs:
           echo "peak_rss_kb=$peak_kb" >> "$GITHUB_OUTPUT"
           echo "trace_bytes=$trace_bytes" >> "$GITHUB_OUTPUT"
 
-          if [[ ! -f "$BEHAVIORDIFF_FINDINGS" ]]; then
-            cat > "$BEHAVIORDIFF_FINDINGS" <<JSON
+          if [[ ! -f "$REALDIFF_FINDINGS" ]]; then
+            cat > "$REALDIFF_FINDINGS" <<JSON
           {
-            "schema": "behaviordiff.findings/1",
+            "schema": "realdiff.findings/1",
             "status": "failed",
             "verdict": "could_not_analyze",
             "isCleanResult": false,
             "exitCode": $analysis_exit,
             "exitReason": "analysis_process_failed_without_artifact",
             "refs": { "baseSha": null, "prSha": null, "mergeBaseSha": null },
-            "refusal": { "reason": "BehaviorDiff exited without findings.json. No safety verdict was produced; inspect the workflow logs." }
+            "refusal": { "reason": "RealDiff exited without findings.json. No safety verdict was produced; inspect the workflow logs." }
           }
           JSON
           fi
@@ -94,25 +94,25 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          if [[ ! -f "$BEHAVIORDIFF_FINDINGS" ]]; then
+          if [[ ! -f "$REALDIFF_FINDINGS" ]]; then
             echo "::error::findings.json is missing; no PR safety verdict or comment can be produced."
             exit 4
           fi
-          dotnet src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll post \
-            --provider=github --findings "$BEHAVIORDIFF_FINDINGS" --gate "$BEHAVIORDIFF_GATE"
+          dotnet src/RealDiff.Cli/bin/Release/net8.0/realdiff.dll post \
+            --provider=github --findings "$REALDIFF_FINDINGS" --gate "$REALDIFF_GATE"
 
       - name: Upload machine-readable findings
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: behaviordiff-findings
-          path: ${{ env.BEHAVIORDIFF_FINDINGS }}
+          name: realdiff-findings
+          path: ${{ env.REALDIFF_FINDINGS }}
           if-no-files-found: error
 
       - name: Delete traces and worktrees
         if: always()
         shell: bash
         run: |
-          before=$(du -sb "$BEHAVIORDIFF_WORK" 2>/dev/null | cut -f1 || echo 0)
-          rm -rf "$BEHAVIORDIFF_WORK"
-          echo "BehaviorDiff cleanup removed $before bytes; findings.json was retained as an artifact."
+          before=$(du -sb "$REALDIFF_WORK" 2>/dev/null | cut -f1 || echo 0)
+          rm -rf "$REALDIFF_WORK"
+          echo "RealDiff cleanup removed $before bytes; findings.json was retained as an artifact."

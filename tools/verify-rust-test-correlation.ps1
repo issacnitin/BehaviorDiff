@@ -1,6 +1,6 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-rust-test-correlation-gate'))
+param([string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'realdiff-rust-test-correlation-gate'))
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -9,8 +9,8 @@ $source = Join-Path $repo 'samples/RustReference'
 $work = [IO.Path]::GetFullPath($WorkDirectory)
 $cache = Join-Path $work 'cache'
 $trace = Join-Path $work 'correlation.ndjson'
-$manifest = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml'
-$binary = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/target/release/behaviordiff-rust-rewrite.exe'
+$manifest = Join-Path $repo 'src/RealDiff.Rust.Tracer/Cargo.toml'
+$binary = Join-Path $repo 'src/RealDiff.Rust.Tracer/target/release/realdiff-rust-rewrite.exe'
 if (-not $IsWindows) { $binary = $binary.Substring(0, $binary.Length - 4) }
 
 if (Test-Path $work) { Remove-Item $work -Recurse -Force }
@@ -22,12 +22,12 @@ if ($rewrite.sourceFiles -le 0 -or $rewrite.rustFiles -le 0) {
     throw "Rust correlation inputs are empty: source=$($rewrite.sourceFiles) rust=$($rewrite.rustFiles)"
 }
 
-$env:BEHAVIORDIFF_RUST_EXIT_TRACE = $trace
+$env:REALDIFF_RUST_EXIT_TRACE = $trace
 try {
     $runnerOutput = @(& cargo test --quiet --manifest-path (Join-Path $rewrite.output 'Cargo.toml') --lib -- --test-threads=1 2>&1)
     $runnerExit = $LASTEXITCODE
 } finally {
-    Remove-Item Env:BEHAVIORDIFF_RUST_EXIT_TRACE -ErrorAction SilentlyContinue
+    Remove-Item Env:REALDIFF_RUST_EXIT_TRACE -ErrorAction SilentlyContinue
 }
 $runnerOutput | ForEach-Object { Write-Host $_ }
 if ($runnerExit -ne 0) { throw "Rewritten Rust tests failed: $runnerExit" }

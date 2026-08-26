@@ -4,8 +4,8 @@ import { expect, test as vitestTest } from 'vitest';
 import subject from '../src/subject.js';
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-const nodeRoot = process.env.BEHAVIORDIFF_NODE_ROOT
-  || path.resolve(currentDirectory, '../../../src/BehaviorDiff.Node');
+const nodeRoot = process.env.REALDIFF_NODE_ROOT
+  || path.resolve(currentDirectory, '../../../src/RealDiff.Node');
 const { default: adaptVitest } = await import(
   pathToFileURL(path.join(nodeRoot, 'adapters/vitest.mjs')).href
 );

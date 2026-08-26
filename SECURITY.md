@@ -8,7 +8,7 @@ Include a clear description, reproduction steps, affected versions, and any sugg
 
 ## Security model
 
-BehaviorDiff builds and executes the target repository's tests. Treat target code as untrusted:
+RealDiff builds and executes the target repository's tests. Treat target code as untrusted:
 
 - Run it only on an isolated CI agent or disposable environment.
 - Do not expose long-lived credentials to analysis jobs.
@@ -16,4 +16,4 @@ BehaviorDiff builds and executes the target repository's tests. Treat target cod
 - Keep optional model credentials in a trusted post-processing environment, not in a job that builds pull-request code.
 - Review trace artifacts before sharing them; arguments and return values can contain application data.
 
-BehaviorDiff does not provide a sandbox. Its output is evidence from executed tests, not a security verdict.
+RealDiff does not provide a sandbox. Its output is evidence from executed tests, not a security verdict.

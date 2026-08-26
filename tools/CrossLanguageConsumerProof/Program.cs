@@ -1,9 +1,9 @@
 using System.Text;
 using System.Text.Json;
-using BehaviorDiff.Cli;
-using BehaviorDiff.Mcp;
+using RealDiff.Cli;
+using RealDiff.Mcp;
 
-namespace BehaviorDiff.CrossLanguageConsumerProof;
+namespace RealDiff.CrossLanguageConsumerProof;
 
 internal static class Program
 {
@@ -15,7 +15,7 @@ internal static class Program
         {
             ArtifactPair[] artifacts = ParseArguments(args);
             string originalRoot = RunStore.Root;
-            string proofRoot = Path.Combine(Path.GetTempPath(), "behaviordiff-cross-language-consumer-proof-runs");
+            string proofRoot = Path.Combine(Path.GetTempPath(), "realdiff-cross-language-consumer-proof-runs");
             try
             {
                 Directory.Delete(proofRoot, recursive: true);
@@ -71,9 +71,9 @@ internal static class Program
         }
 
         throw new ArgumentException(
-            "usage: BehaviorDiff.CrossLanguageConsumerProof <java-artifact-dir> <node-artifact-dir>"
+            "usage: RealDiff.CrossLanguageConsumerProof <java-artifact-dir> <node-artifact-dir>"
             + Environment.NewLine
-            + "   or: BehaviorDiff.CrossLanguageConsumerProof <java-findings> <java-divergence> <node-findings> <node-divergence>");
+            + "   or: RealDiff.CrossLanguageConsumerProof <java-findings> <java-divergence> <node-findings> <node-divergence>");
     }
 
     private static ArtifactPair FromDirectory(LanguageSpec language, string directory) =>
@@ -108,7 +108,7 @@ internal static class Program
         JsonElement selected = SelectMember(findings.RootElement, artifact.Language);
         string memberName = selected.GetProperty("memberName").GetString() ?? string.Empty;
         string filePath = selected.GetProperty("filePath").GetString() ?? string.Empty;
-        string marker = "<!-- behaviordiff:cross-language-consumer-proof:" + artifact.Language.Name + " -->";
+        string marker = "<!-- realdiff:cross-language-consumer-proof:" + artifact.Language.Name + " -->";
 
         string githubFirst = GitHubPoster.RenderSummary(
             findings.RootElement,
@@ -159,7 +159,7 @@ internal static class Program
         string renderer)
     {
         Assert(Encoding.UTF8.GetByteCount(comment) >= 100, language.Name + " " + renderer + " markdown is unreasonably short");
-        Assert(comment.Contains("BehaviorDiff", StringComparison.Ordinal), language.Name + " " + renderer + " markdown has no heading");
+        Assert(comment.Contains("RealDiff", StringComparison.Ordinal), language.Name + " " + renderer + " markdown has no heading");
         Assert(comment.Contains(marker, StringComparison.Ordinal), language.Name + " " + renderer + " markdown lost its marker");
         Assert(comment.Contains(language.CommentMemberToken, StringComparison.Ordinal),
             language.Name + " " + renderer + " markdown lost member pattern " + language.CommentMemberToken);
@@ -199,7 +199,7 @@ internal static class Program
         File.Copy(artifact.FindingsPath, Path.Combine(RunStore.Directory_(runId), "findings.json"), overwrite: true);
         File.Copy(artifact.DivergencePath, Path.Combine(RunStore.Directory_(runId), "divergence-set.json"), overwrite: true);
 
-        using JsonDocument listed = ParseMcp(BehaviorDiffTools.ListDivergences(runId, "unexpected"), "list_divergences");
+        using JsonDocument listed = ParseMcp(RealDiffTools.ListDivergences(runId, "unexpected"), "list_divergences");
         int unexpectedMembers = listed.RootElement.GetProperty("total_members").GetInt32();
         Assert(unexpectedMembers > 0, artifact.Language.Name + " MCP list returned no unexpected members");
         Assert(listed.RootElement.GetProperty("members").EnumerateArray().Any(member =>
@@ -207,13 +207,13 @@ internal static class Program
                 && (member.GetProperty("file").GetString() ?? string.Empty).EndsWith(artifact.Language.Extension, StringComparison.Ordinal)),
             artifact.Language.Name + " MCP list did not preserve the selected member and source path");
 
-        using JsonDocument detail = ParseMcp(BehaviorDiffTools.GetDivergence(runId, memberName), "get_divergence");
+        using JsonDocument detail = ParseMcp(RealDiffTools.GetDivergence(runId, memberName), "get_divergence");
         Assert(detail.RootElement.GetProperty("member").GetString() == memberName,
             artifact.Language.Name + " MCP detail changed the selected member name");
         Assert((detail.RootElement.GetProperty("file").GetString() ?? string.Empty).EndsWith(artifact.Language.Extension, StringComparison.Ordinal),
             artifact.Language.Name + " MCP detail changed the source path");
 
-        using JsonDocument callPath = ParseMcp(BehaviorDiffTools.GetCallPath(runId, memberName), "get_call_path");
+        using JsonDocument callPath = ParseMcp(RealDiffTools.GetCallPath(runId, memberName), "get_call_path");
         string testName = callPath.RootElement.GetProperty("test").GetString() ?? string.Empty;
         JsonElement[] path = callPath.RootElement.GetProperty("path").EnumerateArray().ToArray();
         Assert(path.Length > 0, artifact.Language.Name + " MCP call path is empty");
@@ -224,7 +224,7 @@ internal static class Program
         Assert(artifact.Language.TestMatch(testName),
             artifact.Language.Name + " MCP test name was not preserved: " + testName);
 
-        using JsonDocument untested = ParseMcp(BehaviorDiffTools.GetUntestedDivergences(runId), "get_untested_divergences");
+        using JsonDocument untested = ParseMcp(RealDiffTools.GetUntestedDivergences(runId), "get_untested_divergences");
         int untestedMembers = untested.RootElement.GetProperty("total_members").GetInt32();
         Assert(untestedMembers >= 0 && untested.RootElement.GetProperty("members").ValueKind == JsonValueKind.Array,
             artifact.Language.Name + " MCP untested query returned an invalid count");

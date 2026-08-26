@@ -7,17 +7,17 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-go-conformance-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-go-conformance-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
 $expectedRunnerTests = 10
-Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Conformance.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'RealDiff.Conformance.psm1') -Force
 
 if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
     $goBin = @(
-        (Join-Path $env:LOCALAPPDATA 'Programs/BehaviorDiffGo/go/bin'),
-        (Join-Path $HOME '.behaviordiff-tools/go/bin')
+        (Join-Path $env:LOCALAPPDATA 'Programs/RealDiffGo/go/bin'),
+        (Join-Path $HOME '.realdiff-tools/go/bin')
     ) | Where-Object { Test-Path (Join-Path $_ 'go.exe') -PathType Leaf } | Select-Object -First 1
-    if (-not $goBin) { throw 'Go was not found on PATH or in a BehaviorDiff local tool directory.' }
+    if (-not $goBin) { throw 'Go was not found on PATH or in a RealDiff local tool directory.' }
     $env:PATH = "$goBin;$env:PATH"
 }
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
@@ -40,7 +40,7 @@ function Copy-CleanDirectory([string]$source, [string]$destination) {
 function New-CleanTree([string]$tree) {
     New-Item -ItemType Directory -Path (Join-Path $tree 'src') -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $tree 'samples') -Force | Out-Null
-    Copy-CleanDirectory (Join-Path $repo 'src/BehaviorDiff.Go') (Join-Path $tree 'src/BehaviorDiff.Go')
+    Copy-CleanDirectory (Join-Path $repo 'src/RealDiff.Go') (Join-Path $tree 'src/RealDiff.Go')
     Copy-CleanDirectory (Join-Path $repo 'samples/GoReference') (Join-Path $tree 'samples/GoReference')
 }
 
@@ -77,23 +77,23 @@ function Invoke-Go([string]$directory, [string[]]$arguments) {
 }
 
 function Build-Rewriter([string]$tree, [string]$binary) {
-    $null = Invoke-Go (Join-Path $tree 'src/BehaviorDiff.Go') @(
-    'build', '-o', $binary, './cmd/behaviordiff-go-rewrite')
+    $null = Invoke-Go (Join-Path $tree 'src/RealDiff.Go') @(
+    'build', '-o', $binary, './cmd/realdiff-go-rewrite')
 }
 
 function Rewrite-Reference([string]$tree, [string]$binary, [string]$cache, [string]$label) {
     $source = Join-Path $tree 'samples/GoReference'
     $before = Get-SourceHashes $source
-    $previousRoot = $env:BEHAVIORDIFF_REPOSITORY_ROOT
+    $previousRoot = $env:REALDIFF_REPOSITORY_ROOT
     try {
-        $env:BEHAVIORDIFF_REPOSITORY_ROOT = $tree
+        $env:REALDIFF_REPOSITORY_ROOT = $tree
         $output = @(& $binary --source $source --out $cache 2>&1)
         $exitCode = $LASTEXITCODE
         $output | ForEach-Object { Write-Host $_ }
         if ($exitCode -ne 0) { throw "Go rewrite failed ($label) with exit code $exitCode" }
-    } finally { $env:BEHAVIORDIFF_REPOSITORY_ROOT = $previousRoot }
+    } finally { $env:REALDIFF_REPOSITORY_ROOT = $previousRoot }
     Assert-SourceHashes $before (Get-SourceHashes $source) $label
-    $reportPath = Join-Path $cache 'behaviordiff-rewrite-report.json'
+    $reportPath = Join-Path $cache 'realdiff-rewrite-report.json'
     if (-not (Test-Path $reportPath -PathType Leaf)) { throw "Go rewrite report missing ($label)" }
     return Get-Content $reportPath -Raw | ConvertFrom-Json
 }
@@ -102,12 +102,12 @@ function Run-Reference([string]$cache, [string]$runDirectory, [string]$label) {
     Remove-Item $runDirectory -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $runDirectory | Out-Null
     $runnerPath = Join-Path $runDirectory 'go-test.jsonl'
-    $previousTrace = $env:BEHAVIORDIFF_TRACE
+    $previousTrace = $env:REALDIFF_TRACE
     try {
-        $env:BEHAVIORDIFF_TRACE = Join-Path $runDirectory 'run.ndjson'
+        $env:REALDIFF_TRACE = Join-Path $runDirectory 'run.ndjson'
         $output = @(Invoke-Go $cache @('test', '-count=1', '-json', './...'))
         $output | Set-Content $runnerPath -Encoding utf8NoBOM
-    } finally { $env:BEHAVIORDIFF_TRACE = $previousTrace }
+    } finally { $env:REALDIFF_TRACE = $previousTrace }
 
     $events = @($output | ForEach-Object {
         try { $_ | ConvertFrom-Json -ErrorAction Stop } catch { $null }
@@ -125,7 +125,7 @@ function Run-Reference([string]$cache, [string]$runDirectory, [string]$label) {
 }
 
 function Assert-RunIntegrity([string]$runDirectory, [string]$tree, [object]$report, [string]$label) {
-    $run = Read-BehaviorDiffConformanceRun $runDirectory
+    $run = Read-RealDiffConformanceRun $runDirectory
     $rootMethods = @($run.ManifestRecords | Where-Object {
         $_.kind -eq 'member' -and $null -ne $_.PSObject.Properties['isTestRoot'] -and [bool]$_.isTestRoot
     } | ForEach-Object method | Sort-Object -Unique)
@@ -139,7 +139,7 @@ function Assert-RunIntegrity([string]$runDirectory, [string]$tree, [object]$repo
 
     $wrongPaths = @($run.Events | Where-Object {
         [string]$_.filePath -notmatch '^samples/GoReference/.+\.go$' -or
-        [string]$_.filePath -match '(?i)cache|internal/behaviordiffrt|\\'
+        [string]$_.filePath -match '(?i)cache|internal/realdiffrt|\\'
     })
     if ($wrongPaths.Count -ne 0) { throw "Go source path guard failed ($label): $($wrongPaths.Count) event(s)" }
     foreach ($path in @($run.Events.filePath | Sort-Object -Unique)) {
@@ -178,7 +178,7 @@ function Assert-RunIntegrity([string]$runDirectory, [string]$tree, [object]$repo
         $runRecords = @($records | Where-Object kind -eq 'run')
         $writers = @($records | Where-Object kind -eq 'writer')
         $digests = @($records | Where-Object kind -eq 'digest')
-        if ($runRecords.Count -ne 1 -or $runRecords[0].schema -ne 'behaviordiff.trace/1' -or $runRecords[0].language -ne 'go') {
+        if ($runRecords.Count -ne 1 -or $runRecords[0].schema -ne 'realdiff.trace/1' -or $runRecords[0].language -ne 'go') {
             throw "Go run metadata mismatch ($label/$($manifestFile.Name))"
         }
         if ($writers.Count -ne 1 -or $digests.Count -ne 1) {
@@ -314,8 +314,8 @@ $digestEvaluator = {
 }
 
 $originalEnvironment = @{
-    BEHAVIORDIFF_TRACE = $env:BEHAVIORDIFF_TRACE
-    BEHAVIORDIFF_REPOSITORY_ROOT = $env:BEHAVIORDIFF_REPOSITORY_ROOT
+    REALDIFF_TRACE = $env:REALDIFF_TRACE
+    REALDIFF_REPOSITORY_ROOT = $env:REALDIFF_REPOSITORY_ROOT
 }
 
 try {
@@ -323,8 +323,8 @@ try {
     $tree1 = Join-Path $work 'tree-1'; $tree2 = Join-Path $work 'tree-2'
     $cache1 = Join-Path $work 'cache-1'; $cache2 = Join-Path $work 'cache-2'
     $run1 = Join-Path $work 'run-1'; $run2 = Join-Path $work 'run-2'
-    $rewriter1 = Join-Path $work 'behaviordiff-go-rewrite-1.exe'
-    $rewriter2 = Join-Path $work 'behaviordiff-go-rewrite-2.exe'
+    $rewriter1 = Join-Path $work 'realdiff-go-rewrite-1.exe'
+    $rewriter2 = Join-Path $work 'realdiff-go-rewrite-2.exe'
 
     Write-Host '=== original Go reference ===' -ForegroundColor Cyan
     $null = Invoke-Go (Join-Path $repo 'samples/GoReference') @('test', '-count=1', './...')
@@ -338,15 +338,15 @@ try {
     $integrity1 = Assert-RunIntegrity $run1 $tree1 $report1 'run 1'
     $integrity2 = Assert-RunIntegrity $run2 $tree2 $report2 'run 2'
 
-    $guard = Assert-BehaviorDiffConformanceRuns -FirstRun $run1 -SecondRun $run2 -MinimumMatchedKeys 100 `
+    $guard = Assert-RealDiffConformanceRuns -FirstRun $run1 -SecondRun $run2 -MinimumMatchedKeys 100 `
         -UsableSourceResolutions @('debugInfo') -ReferenceSourcePathPatterns @('^samples/GoReference/.+\.go$') `
         -DigestProofEvaluator $digestEvaluator
     if ($guard.SubjectMethods -lt 30) { throw "Go observed method guard failed: $($guard.SubjectMethods), minimum is 30" }
 
     Write-Host '=== solution and engine ===' -ForegroundColor Cyan
-    & dotnet build (Join-Path $repo 'BehaviorDiff.sln') -c Release --nologo -v quiet
+    & dotnet build (Join-Path $repo 'RealDiff.sln') -c Release --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw 'Solution build failed' }
-    $engine = Invoke-BehaviorDiffEngineConformance -FirstRun $run1 -SecondRun $run2 `
+    $engine = Invoke-RealDiffEngineConformance -FirstRun $run1 -SecondRun $run2 `
         -BaseRoot $tree1 -PrRoot $tree2
 
     $proofs1 = @(& $digestEvaluator $integrity1.Run)

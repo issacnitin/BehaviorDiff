@@ -46,10 +46,10 @@ run_container() {
         --volume "$(docker_path "$state/cache"):/proof/cache" \
         --volume "$(docker_path "$state/baseline"):/proof/baseline" \
         --volume "$(docker_path "$state/metrics"):/proof/metrics" \
-        --env BEHAVIORDIFF_CONTAINER_PROOF_ROOT=/proof/workspace \
-        --env BEHAVIORDIFF_CONTAINER_CACHE=/proof/cache \
-        --env BEHAVIORDIFF_CONTAINER_BASELINE=/proof/baseline/baseline.yml \
-        --env BEHAVIORDIFF_CONTAINER_METRICS=/proof/metrics \
+        --env REALDIFF_CONTAINER_PROOF_ROOT=/proof/workspace \
+        --env REALDIFF_CONTAINER_CACHE=/proof/cache \
+        --env REALDIFF_CONTAINER_BASELINE=/proof/baseline/baseline.yml \
+        --env REALDIFF_CONTAINER_METRICS=/proof/metrics \
         "$image" /source/tools/verify-container-fixtures.sh "$phase"
 }
 
@@ -97,7 +97,7 @@ run_phase cold
 [[ "$cold_cache_status" == miss ]] || { echo "cold container did not report a cache miss" >&2; exit 1; }
 cache_entries="$(find "$state/cache" -name metadata.json -type f | wc -l | tr -d ' ')"
 (( cache_entries > 0 )) || { echo "cold container did not persist trace cache metadata" >&2; exit 1; }
-grep -q '^schema: behaviordiff.baseline/2$' "$state/baseline/baseline.yml"
+grep -q '^schema: realdiff.baseline/2$' "$state/baseline/baseline.yml"
 
 run_phase warm
 [[ "$warm_cache_status" == hit ]] || { echo "warm container did not reuse the trace cache" >&2; exit 1; }
@@ -109,7 +109,7 @@ run_phase warm
 run_container java
 run_container rust
 
-echo "CONTAINER_PERSISTENT_MOUNTS cache_entries=$cache_entries baseline_schema=behaviordiff.baseline/2 suppressed_members=$warm_suppressed_members"
+echo "CONTAINER_PERSISTENT_MOUNTS cache_entries=$cache_entries baseline_schema=realdiff.baseline/2 suppressed_members=$warm_suppressed_members"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     cat >> "$GITHUB_STEP_SUMMARY" <<EOF
 ### Container cold/warm proof

@@ -1,6 +1,6 @@
 using System;
 using System.Linq;
-using BehaviorDiff.Contracts;
+using RealDiff.Contracts;
 
 internal static class Program
 {

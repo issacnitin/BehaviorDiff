@@ -55,8 +55,8 @@ foreach ($case in $cases) {
     Write-Host ''
     Write-Host "=== $($case.Change) demo ===" -ForegroundColor Cyan
     $runId = [Guid]::NewGuid().ToString('N')
-    $work = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-demo-$runId"
-    $prTree = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-demo-pr-$runId"
+    $work = Join-Path ([IO.Path]::GetTempPath()) "realdiff-demo-$runId"
+    $prTree = Join-Path ([IO.Path]::GetTempPath()) "realdiff-demo-pr-$runId"
     try {
         & (Join-Path $PSScriptRoot 'verify-diff.ps1') -Mutate -Change $case.Change `
             -WorkDirectory $work -PrTreeDirectory $prTree
@@ -138,7 +138,7 @@ foreach ($case in $cases) {
         throw "$($case.Change): canonical member rollup drifted: $($findings.summary | ConvertTo-Json -Compress)"
     }
 
-    $commentOutput = & dotnet run --project (Join-Path $PSScriptRoot 'CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+    $commentOutput = & dotnet run --project (Join-Path $PSScriptRoot 'CommentPreview/RealDiff.CommentPreview.csproj') `
         -c Release -- $findingsPath
     if ($LASTEXITCODE -ne 0) { throw "$($case.Change): comment preview failed: $LASTEXITCODE" }
     $comment = $commentOutput -join "`n"
@@ -146,7 +146,7 @@ foreach ($case in $cases) {
     $strictComment = $null
     if ($case.DefaultCommentEligible) {
         $gapWord = if ($case.UnexpectedMembers -eq 1) { 'gap' } else { 'gaps' }
-        $expectedHeading = '^## BehaviorDiff: {0} behavior {1} outside this diff' -f `
+        $expectedHeading = '^## RealDiff: {0} behavior {1} outside this diff' -f `
             $case.UnexpectedMembers, $gapWord
         if ($comment -notmatch $expectedHeading `
             -or $comment -notmatch '<details><summary>Why, and the evidence</summary>' `
@@ -155,7 +155,7 @@ foreach ($case in $cases) {
             throw "$($case.Change): high-confidence concise comment contract drifted"
         }
     } else {
-        if ($comment -notmatch '^## BehaviorDiff: no high-confidence findings to comment' `
+        if ($comment -notmatch '^## RealDiff: no high-confidence findings to comment' `
             -or $comment -notmatch 'lower-confidence or nondeterministic finding\(s\) remain' `
             -or $comment -match [regex]::Escape($case.Headline)) {
             throw "$($case.Change): default confidence suppression contract drifted"
@@ -169,9 +169,9 @@ foreach ($case in $cases) {
         $strict.commentPolicy.suppressedUnexpectedMembers = 0
         $strict.commentPolicy.suppressedUnexpectedCallSites = 0
         $strict | ConvertTo-Json -Depth 100 | Set-Content $strictPath
-        $strictComment = @(& dotnet run --project (Join-Path $PSScriptRoot 'CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+        $strictComment = @(& dotnet run --project (Join-Path $PSScriptRoot 'CommentPreview/RealDiff.CommentPreview.csproj') `
             -c Release -- $strictPath 2>&1) -join "`n"
-        if ($LASTEXITCODE -ne 0 -or $strictComment -notmatch '^## BehaviorDiff: 1 behavior gap outside this diff' `
+        if ($LASTEXITCODE -ne 0 -or $strictComment -notmatch '^## RealDiff: 1 behavior gap outside this diff' `
             -or $strictComment -notmatch '<details><summary>Why, and the evidence</summary>') {
             throw "$($case.Change): strict confidence comment contract drifted"
         }

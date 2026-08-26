@@ -4,8 +4,8 @@ const path = require('node:path');
 const { expect, test: jestTest } = require('@jest/globals');
 const { asyncWork, work } = require('../src/subject.js');
 
-const nodeRoot = process.env.BEHAVIORDIFF_NODE_ROOT
-  || path.resolve(__dirname, '../../../src/BehaviorDiff.Node');
+const nodeRoot = process.env.REALDIFF_NODE_ROOT
+  || path.resolve(__dirname, '../../../src/RealDiff.Node');
 const adaptJest = require(path.join(nodeRoot, 'adapters/jest.cjs'));
 const test = adaptJest(jestTest);
 

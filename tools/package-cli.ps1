@@ -36,7 +36,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 New-Item -ItemType Directory -Path $packages -Force | Out-Null
-& dotnet pack (Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj') `
+& dotnet pack (Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj') `
     -c $Configuration -o $packages --nologo `
     "-p:CrossLanguageTracerRoot=$tracers" `
     "-p:RustEngineRoot=$rustEngine"
@@ -44,4 +44,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "CLI pack failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "BehaviorDiff CLI packages written to $packages" -ForegroundColor Green
+Write-Host "RealDiff CLI packages written to $packages" -ForegroundColor Green

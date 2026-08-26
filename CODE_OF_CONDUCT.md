@@ -1,6 +1,6 @@
 # Code of Conduct
 
-We want participation in BehaviorDiff to be respectful, constructive, and technically rigorous.
+We want participation in RealDiff to be respectful, constructive, and technically rigorous.
 
 ## Expected behavior
 

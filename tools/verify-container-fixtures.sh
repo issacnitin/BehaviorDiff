@@ -3,21 +3,21 @@ set -euo pipefail
 trap 'status=$?; echo "::error file=.github,line=8::Container fixture failed at line $LINENO: $BASH_COMMAND (exit $status)"; exit $status' ERR
 
 owns_root=false
-if [[ -n "${BEHAVIORDIFF_CONTAINER_PROOF_ROOT:-}" ]]; then
-    root="$BEHAVIORDIFF_CONTAINER_PROOF_ROOT"
+if [[ -n "${REALDIFF_CONTAINER_PROOF_ROOT:-}" ]]; then
+    root="$REALDIFF_CONTAINER_PROOF_ROOT"
 else
     root="$(mktemp -d)"
     owns_root=true
 fi
-cache="${BEHAVIORDIFF_CONTAINER_CACHE:-$root/cache}"
-baseline="${BEHAVIORDIFF_CONTAINER_BASELINE:-$root/baseline/baseline.yml}"
-metrics="${BEHAVIORDIFF_CONTAINER_METRICS:-$root/metrics}"
+cache="${REALDIFF_CONTAINER_CACHE:-$root/cache}"
+baseline="${REALDIFF_CONTAINER_BASELINE:-$root/baseline/baseline.yml}"
+metrics="${REALDIFF_CONTAINER_METRICS:-$root/metrics}"
 mkdir -p "$root" "$cache" "$(dirname "$baseline")" "$metrics"
 trap 'if [[ "$owns_root" == true ]]; then rm -rf "$root"; fi' EXIT
 
 git config --global --add safe.directory '*'
 
-for command in dotnet java mvn node npm go cargo rustc git behaviordiff behaviordiff-go-rewrite; do
+for command in dotnet java mvn node npm go cargo rustc git realdiff realdiff-go-rewrite; do
     command -v "$command" >/dev/null || { echo "missing image command: $command" >&2; exit 1; }
 done
 
@@ -28,8 +28,8 @@ initialize_fixture() {
     cp -a "/source/samples/$sample/." "$destination/"
     rm -rf "$destination/node_modules" "$destination/target"
     git -C "$destination" init --initial-branch=main --quiet
-    git -C "$destination" config user.name 'BehaviorDiff Container Proof'
-    git -C "$destination" config user.email 'container-proof@behaviordiff.invalid'
+    git -C "$destination" config user.name 'RealDiff Container Proof'
+    git -C "$destination" config user.email 'container-proof@realdiff.invalid'
     git -C "$destination" add .
     git -C "$destination" commit --quiet -m 'base: stable priority ordering'
 }
@@ -95,7 +95,7 @@ run_node_proof() {
     pr="$(git -C "$repo" rev-parse HEAD)"
 
         cat > "$event" <<JSON
-{"number":1,"pull_request":{"base":{"sha":"$base","repo":{"full_name":"behaviordiff/container-proof","fork":false}},"head":{"sha":"$pr","repo":{"full_name":"behaviordiff/container-proof","fork":false}}}}
+{"number":1,"pull_request":{"base":{"sha":"$base","repo":{"full_name":"realdiff/container-proof","fork":false}},"head":{"sha":"$pr","repo":{"full_name":"realdiff/container-proof","fork":false}}}}
 JSON
 
         cat > "$mock_api" <<'NODE'
@@ -132,14 +132,14 @@ NODE
             read -r api_port <&"${GITHUB_API[0]}"
             set +e
             GITHUB_EVENT_PATH="$event" \
-            GITHUB_REPOSITORY=behaviordiff/container-proof \
+            GITHUB_REPOSITORY=realdiff/container-proof \
             GITHUB_TOKEN=container-proof-token \
             GITHUB_API_URL="http://127.0.0.1:$api_port" \
             ANTHROPIC_API_KEY= \
             GITHUB_WORKSPACE="$repo" \
             GITHUB_OUTPUT="$output" \
-            BEHAVIORDIFF_EXCLUDE_NAMESPACES=src/sorting/rule-ordering.js \
-                /usr/local/bin/behaviordiff-entrypoint __action \
+            REALDIFF_EXCLUDE_NAMESPACES=src/sorting/rule-ordering.js \
+                /usr/local/bin/realdiff-entrypoint __action \
                 "$repo" "$work" "$findings" "$cache" 1d warn-only true true
             action_exit=$?
             set -e
@@ -165,16 +165,16 @@ const token = member?.memberName.split(/[.#]/).at(-1)?.split('(')[0];
 if (typeof payload.body !== 'string' || payload.body.length < 100) {
     throw new Error('production GitHub comment was not captured');
 }
-if (!payload.body.includes('## BehaviorDiff:')
-        || !payload.body.includes('<!-- behaviordiff:github:pr:1:summary -->')
+if (!payload.body.includes('## RealDiff:')
+        || !payload.body.includes('<!-- realdiff:github:pr:1:summary -->')
         || !token || !payload.body.includes(token)) {
     throw new Error(`rendered comment lost its heading, marker, or member token ${token}`);
 }
 console.log(`CONTAINER_NODE_RENDERED_COMMENT bytes=${Buffer.byteLength(payload.body)} member=${token}`);
 NODE
     write_metrics cold "$findings" miss
-    behaviordiff baseline write --findings "$findings" --output "$baseline" --no-expiry
-    grep -q '^schema: behaviordiff.baseline/2$' "$baseline"
+    realdiff baseline write --findings "$findings" --output "$baseline" --no-expiry
+    grep -q '^schema: realdiff.baseline/2$' "$baseline"
     echo 'CONTAINER_NODE_ACTION_ANALYSIS: PASS'
 }
 
@@ -194,8 +194,8 @@ run_node_warm_proof() {
     base="$(git -C "$repo" rev-list --max-parents=0 HEAD)"
     pr="$(git -C "$repo" rev-parse HEAD)"
     set +e
-    BEHAVIORDIFF_EXCLUDE_NAMESPACES=src/sorting/rule-ordering.js \
-        behaviordiff "$repo" --base "$base" --pr "$pr" --work "$work" \
+    REALDIFF_EXCLUDE_NAMESPACES=src/sorting/rule-ordering.js \
+        realdiff "$repo" --base "$base" --pr "$pr" --work "$work" \
         --findings "$findings" --cache-dir "$cache" --cache-retention 1d \
         --baseline "$baseline" --strict
     local exit_code=$?
@@ -221,15 +221,15 @@ run_java_proof() {
     base="$(git -C "$repo" rev-parse HEAD)"
     sed -i \
         's|ordered.sort(Comparator.comparingInt(RuleOrdering::priority));|ordered.sort(Comparator.comparingInt(RuleOrdering::priority).thenComparing(RuleOrdering::code));|' \
-        "$repo/src/main/java/io/behaviordiff/demo/sorting/RuleOrdering.java"
-    git -C "$repo" add src/main/java/io/behaviordiff/demo/sorting/RuleOrdering.java
+        "$repo/src/main/java/io/realdiff/demo/sorting/RuleOrdering.java"
+    git -C "$repo" add src/main/java/io/realdiff/demo/sorting/RuleOrdering.java
     git -C "$repo" commit --quiet -m 'pr: make priority ties deterministic by code'
     local pr
     pr="$(git -C "$repo" rev-parse HEAD)"
 
     set +e
-    BEHAVIORDIFF_EXCLUDE_NAMESPACES=io.behaviordiff.demo.sorting \
-        behaviordiff "$repo" --base "$base" --pr "$pr" --work "$work" \
+    REALDIFF_EXCLUDE_NAMESPACES=io.realdiff.demo.sorting \
+        realdiff "$repo" --base "$base" --pr "$pr" --work "$work" \
         --findings "$work/findings.json"
     local exit_code=$?
     set -e
@@ -253,13 +253,13 @@ run_rust_proof() {
     pr="$(git -C "$repo" rev-parse HEAD)"
 
     set +e
-    behaviordiff "$repo" --base "$base" --pr "$pr" --work "$work" \
+    realdiff "$repo" --base "$base" --pr "$pr" --work "$work" \
         --findings "$findings" --no-baseline --strict --keep-traces 1d 2>&1 | tee "$output"
     local exit_code=${PIPESTATUS[0]}
     set -e
     [[ $exit_code -eq 1 ]] || { echo "Rust container analysis exited $exit_code, expected 1" >&2; exit 1; }
     grep -Eq '^  engine: rust$' "$output"
-    grep -Eq '^  rust tracer: /opt/behaviordiff/tracers/rust/linux-(x64|arm64)/behaviordiff-rust-rewrite$' "$output"
+    grep -Eq '^  rust tracer: /opt/realdiff/tracers/rust/linux-(x64|arm64)/realdiff-rust-rewrite$' "$output"
     assert_analyzed_findings "$findings"
     local events
     events="$(find "$work/base_run1" -name 'run.*.ndjson' ! -name '*.manifest.ndjson' -type f -exec cat {} + | grep -cve '^$')"

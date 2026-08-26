@@ -1,7 +1,7 @@
 #requires -Version 7.0
 [CmdletBinding()]
 param(
-    [string]$BehaviorDiffCommand,
+    [string]$RealDiffCommand,
     [string]$WorkDirectory,
     [switch]$KeepWork
 )
@@ -9,21 +9,21 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $source = Split-Path -Parent $PSScriptRoot
-$cli = if ([string]::IsNullOrWhiteSpace($BehaviorDiffCommand)) {
-    Join-Path $source 'src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.exe'
+$cli = if ([string]::IsNullOrWhiteSpace($RealDiffCommand)) {
+    Join-Path $source 'src/RealDiff.Cli/bin/Release/net8.0/realdiff.exe'
 } else {
-    [IO.Path]::GetFullPath($BehaviorDiffCommand)
+    [IO.Path]::GetFullPath($RealDiffCommand)
 }
 $root = if ([string]::IsNullOrWhiteSpace($WorkDirectory)) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-rust-cli-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-rust-cli-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else {
     [IO.Path]::GetFullPath($WorkDirectory)
 }
-$preview = Join-Path $source 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj'
-$previousExclusions = $env:BEHAVIORDIFF_EXCLUDE_NAMESPACES
+$preview = Join-Path $source 'tools/CommentPreview/RealDiff.CommentPreview.csproj'
+$previousExclusions = $env:REALDIFF_EXCLUDE_NAMESPACES
 
 if (-not (Test-Path $cli -PathType Leaf)) {
-    throw "BehaviorDiff CLI was not found: $cli"
+    throw "RealDiff CLI was not found: $cli"
 }
 
 $cases = @(
@@ -64,9 +64,9 @@ $archivePaths = @(
     'samples/SampleApp',
     'samples/SampleApp.Plugin',
     'samples/SampleApp.Tests',
-    'src/BehaviorDiff.Contracts',
-    'src/BehaviorDiff.Tracer',
-    'src/BehaviorDiff.Tracer.Xunit',
+    'src/RealDiff.Contracts',
+    'src/RealDiff.Tracer',
+    'src/RealDiff.Tracer.Xunit',
     'src/Commerce.Pricing',
     'src/Infrastructure.Collections'
 )
@@ -90,8 +90,8 @@ function Initialize-DemoRepository([string]$repository) {
             (Join-Path $repository 'samples/SampleApp.Tests/SampleApp.Tests.csproj')
     }
     Invoke-Checked 'Git initialization' { & git -C $repository init --initial-branch=main }
-    Invoke-Checked 'Git identity' { & git -C $repository config user.email behaviordiff@example.invalid }
-    Invoke-Checked 'Git identity' { & git -C $repository config user.name BehaviorDiff }
+    Invoke-Checked 'Git identity' { & git -C $repository config user.email realdiff@example.invalid }
+    Invoke-Checked 'Git identity' { & git -C $repository config user.name RealDiff }
     Invoke-Checked 'Base commit' { & git -C $repository add .; & git -C $repository commit -m base }
 }
 
@@ -99,7 +99,7 @@ if (Test-Path $root) {
     Remove-Item $root -Recurse -Force
 }
 New-Item -ItemType Directory -Path $root -Force | Out-Null
-$env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics,SampleApp.Persistence,Infrastructure.Collections'
+$env:REALDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics,SampleApp.Persistence,Infrastructure.Collections'
 
 try {
     foreach ($case in $cases) {
@@ -157,7 +157,7 @@ try {
     }
 }
 finally {
-    $env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = $previousExclusions
+    $env:REALDIFF_EXCLUDE_NAMESPACES = $previousExclusions
     if (-not $KeepWork -and (Test-Path $root)) {
         Remove-Item $root -Recurse -Force
     }

@@ -7,11 +7,11 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-cache-proof-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-cache-proof-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
 $cache = Join-Path $work 'cache'
-$cliProject = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
-$cli = Join-Path $repo 'src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll'
+$cliProject = Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj'
+$cli = Join-Path $repo 'src/RealDiff.Cli/bin/Release/net8.0/realdiff.dll'
 
 function Invoke-Checked([string]$label, [scriptblock]$command) {
     & $command | ForEach-Object { Write-Host $_ }
@@ -20,8 +20,8 @@ function Invoke-Checked([string]$label, [scriptblock]$command) {
 
 function Initialize-History([string]$directory) {
     Invoke-Checked 'git init' { & git -C $directory init --initial-branch=main --quiet }
-    Invoke-Checked 'git identity' { & git -C $directory config user.email 'cache-proof@behaviordiff.invalid' }
-    Invoke-Checked 'git identity' { & git -C $directory config user.name 'BehaviorDiff Cache Proof' }
+    Invoke-Checked 'git identity' { & git -C $directory config user.email 'cache-proof@realdiff.invalid' }
+    Invoke-Checked 'git identity' { & git -C $directory config user.name 'RealDiff Cache Proof' }
     Invoke-Checked 'git add' { & git -C $directory add . }
     Invoke-Checked 'base commit' { & git -C $directory commit --quiet -m 'base' }
     $base = (& git -C $directory rev-parse HEAD).Trim()
@@ -160,11 +160,11 @@ function Assert-WarmCommandHit([string]$language, [string]$directory, [object]$r
     }
 }
 
-$previousNodeTracer = $env:BEHAVIORDIFF_NODE_TRACER
+$previousNodeTracer = $env:REALDIFF_NODE_TRACER
 try {
     New-Item -ItemType Directory -Path $work, $cache -Force | Out-Null
     Invoke-Checked 'CLI build' { & dotnet build $cliProject -c Release --nologo -v quiet }
-    $env:BEHAVIORDIFF_NODE_TRACER = Join-Path $repo 'src/BehaviorDiff.Node'
+    $env:REALDIFF_NODE_TRACER = Join-Path $repo 'src/RealDiff.Node'
 
     $dotnetRepo = Join-Path $work 'dotnet-repo'
     $nodeRepo = Join-Path $work 'node-repo'
@@ -188,7 +188,7 @@ try {
     Write-Host 'verify-base-trace-cache: PASS' -ForegroundColor Green
 }
 finally {
-    $env:BEHAVIORDIFF_NODE_TRACER = $previousNodeTracer
+    $env:REALDIFF_NODE_TRACER = $previousNodeTracer
     if ($ownsWork -and -not $KeepWork) {
         Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
     } else {

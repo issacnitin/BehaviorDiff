@@ -76,7 +76,7 @@ The ten shared proofs were `NoUserCodeInvoked`, `CyclesTerminate`, `ReferenceTop
 
 ## Installed-package proof
 
-The installed tool package was 7.52 MiB with 1,038 entries. The installed Rust tracer resolved from `tools/net8.0/any/tracers/rust/win-x64/behaviordiff-rust-rewrite.exe`, not the source tree. Four Rust runs emitted 1,604 events total (401 per run), matched 378 keys, produced 7 harness roots and 0 orphans, and completed analyzed/clean. Existing package proofs remained non-empty: Java 1,084 events and Node 1,228 events.
+The installed tool package was 7.52 MiB with 1,038 entries. The installed Rust tracer resolved from `tools/net8.0/any/tracers/rust/win-x64/realdiff-rust-rewrite.exe`, not the source tree. Four Rust runs emitted 1,604 events total (401 per run), matched 378 keys, produced 7 harness roots and 0 orphans, and completed analyzed/clean. Existing package proofs remained non-empty: Java 1,084 events and Node 1,228 events.
 
 ## Behavior demo
 

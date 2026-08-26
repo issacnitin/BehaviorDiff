@@ -7,12 +7,12 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-node-attribution-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-node-attribution-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
 $changedFile = 'samples/NodeReference/src/config.js'
 $subjectFile = 'samples/NodeReference/src/subject.js'
 $dotnet = Join-Path $env:LOCALAPPDATA 'Microsoft/dotnet/dotnet.exe'
-Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Conformance.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'RealDiff.Conformance.psm1') -Force
 
 function Copy-ReferenceTree([string]$destination) {
     $sample = Join-Path $destination 'samples/NodeReference'
@@ -133,14 +133,14 @@ function Run-Reference(
     New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
     $trace = Join-Path $runDirectory 'run.ndjson'
     $report = Join-Path $runDirectory 'runner-report.json'
-    $register = Join-Path $repo 'src/BehaviorDiff.Node/register.cjs'
+    $register = Join-Path $repo 'src/RealDiff.Node/register.cjs'
     $runner = Join-Path $tree 'samples/NodeReference/test/run.cjs'
     $environmentNames = @(
-        'BEHAVIORDIFF_TRACE',
-        'BEHAVIORDIFF_NAMESPACES',
-        'BEHAVIORDIFF_EXCLUDE_NAMESPACES',
-        'BEHAVIORDIFF_REPOSITORY_ROOT',
-        'BEHAVIORDIFF_RUNNER_REPORT'
+        'REALDIFF_TRACE',
+        'REALDIFF_NAMESPACES',
+        'REALDIFF_EXCLUDE_NAMESPACES',
+        'REALDIFF_REPOSITORY_ROOT',
+        'REALDIFF_RUNNER_REPORT'
     )
     $previous = @{}
     foreach ($name in $environmentNames) {
@@ -149,11 +149,11 @@ function Run-Reference(
 
     $exitCode = -1
     try {
-        $env:BEHAVIORDIFF_TRACE = $trace
-        $env:BEHAVIORDIFF_NAMESPACES = 'samples/NodeReference/src'
-        $env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = $changedFile
-        $env:BEHAVIORDIFF_REPOSITORY_ROOT = $tree
-        $env:BEHAVIORDIFF_RUNNER_REPORT = $report
+        $env:REALDIFF_TRACE = $trace
+        $env:REALDIFF_NAMESPACES = 'samples/NodeReference/src'
+        $env:REALDIFF_EXCLUDE_NAMESPACES = $changedFile
+        $env:REALDIFF_REPOSITORY_ROOT = $tree
+        $env:REALDIFF_RUNNER_REPORT = $report
         Push-Location $tree
         try {
             & node --require $register $runner 2>&1 | ForEach-Object { Write-Host $_ }
@@ -175,7 +175,7 @@ function Run-Reference(
         throw 'Mutated Node runner reached its success report after the expected final assertion failure'
     }
 
-    $run = Read-BehaviorDiffConformanceRun $runDirectory
+    $run = Read-RealDiffConformanceRun $runDirectory
     $accounting = Assert-RunAccounting $run $label
     if ($accounting.SubjectEvents -lt 100 -or $accounting.RootEvents -ne 120) {
         throw "Node comparison volume too small ($label): subjectEvents=$($accounting.SubjectEvents) roots=$($accounting.RootEvents)"
@@ -208,8 +208,8 @@ try {
     Write-Host '=== Node mutated PR run ===' -ForegroundColor Cyan
     $pr = Run-Reference $prTree $prRun $false 'PR run'
 
-    Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Engine.psm1') -Force
-    $engine = Get-BehaviorDiffEngine
+    Import-Module (Join-Path $PSScriptRoot 'RealDiff.Engine.psm1') -Force
+    $engine = Get-RealDiffEngine
 
     $divergencesPath = Join-Path $work 'divergence-set.json'
     & $engine stream-diff --base1 $baseRun1 --base2 $baseRun2 --base3 $baseRun1 `
@@ -259,16 +259,16 @@ try {
     if ($rendered.Count -eq 0) { $rendered = @($downstream | Select-Object -First 1) }
     $renderedMember = [string]$rendered[0].memberName
     $commentPath = Join-Path $work 'comment.md'
-    $comment = & $dotnet run --project (Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+    $comment = & $dotnet run --project (Join-Path $repo 'tools/CommentPreview/RealDiff.CommentPreview.csproj') `
         -c Release -- $findingsPath
     if ($LASTEXITCODE -ne 0) { throw "Node comment rendering failed: $LASTEXITCODE" }
     $commentText = $comment -join "`n"
     $commentText | Set-Content $commentPath
-    if ($commentText -notmatch 'BehaviorDiff: [1-9][0-9]* test-covered behavior change' -or
+    if ($commentText -notmatch 'RealDiff: [1-9][0-9]* test-covered behavior change' -or
         $commentText -notmatch 'samples/NodeReference/src/subject\.js#(AsyncSettlement\.settle|promiseWorkflow)' -or
         $commentText -notmatch 'node-reference/promise-chain' -or
         $commentText -notmatch 'samples/NodeReference/src/subject\.js' -or
-        $commentText -match 'SampleApp|io\.behaviordiff\.reference|\.java') {
+        $commentText -match 'SampleApp|io\.realdiff\.reference|\.java') {
         throw 'Node comment rendering retained a .NET/Java-shaped assumption or lost the Node evidence'
     }
 

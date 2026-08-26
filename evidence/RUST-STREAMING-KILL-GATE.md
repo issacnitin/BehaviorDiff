@@ -89,7 +89,7 @@ In this pre-optimization benchmark, Rust reduces peak engine-interval RSS by 85.
 
 The retained FluentValidation #2136 traces were profiled directly with opt-in phase timers before changing the algorithm. This run consumed 424,024 events and 596,672,852 trace bytes and produced a 129,720,903-byte DivergenceSet with 53,255 matched keys and 3,181 remaining divergences. The direct process took 80.125 seconds wall clock; instrumented internal time was 79.300 seconds.
 
-Profiling is output-neutral. The same release executable rerun against the same retained inputs with `BEHAVIORDIFF_RUST_PROFILE` disabled completed in 79.145 seconds and produced the same 129,720,903-byte artifact. Profiling-enabled and profiling-disabled outputs had the same SHA-256 after excluding only `generatedUtc`: `94B18AF13936FCB0E4E2148E4CB5FDB80100EEA5186AC062A412A10F1270D707`.
+Profiling is output-neutral. The same release executable rerun against the same retained inputs with `REALDIFF_RUST_PROFILE` disabled completed in 79.145 seconds and produced the same 129,720,903-byte artifact. Profiling-enabled and profiling-disabled outputs had the same SHA-256 after excluding only `generatedUtc`: `94B18AF13936FCB0E4E2148E4CB5FDB80100EEA5186AC062A412A10F1270D707`.
 
 | Rust `stream-diff` phase | Time | Share of internal time |
 | --- | ---: | ---: |
@@ -152,5 +152,5 @@ Run the hard gate with:
 
 ```powershell
 pwsh -File tools/verify-rust-streaming-kill-gate.ps1 `
-  -WorkDirectory $env:TEMP\behaviordiff-fluentvalidation-cli\rust-corpus
+  -WorkDirectory $env:TEMP\realdiff-fluentvalidation-cli\rust-corpus
 ```

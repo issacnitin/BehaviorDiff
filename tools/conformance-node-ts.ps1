@@ -7,9 +7,9 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-node-ts-conformance-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-node-ts-conformance-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
-Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Conformance.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'RealDiff.Conformance.psm1') -Force
 
 $referenceRelativePath = 'samples/NodeReference.TypeScript'
 $subjectSourcePattern = '^samples/NodeReference\.TypeScript/src/.+\.ts$'
@@ -29,7 +29,7 @@ $expandedSubjectMethods = @(
 function Copy-TracerSource([string]$destination) {
     Remove-Item $destination -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $destination | Out-Null
-    Get-ChildItem (Join-Path $repo 'src/BehaviorDiff.Node') -Force |
+    Get-ChildItem (Join-Path $repo 'src/RealDiff.Node') -Force |
         Where-Object Name -ne 'node_modules' |
         ForEach-Object { Copy-Item $_.FullName -Destination $destination -Recurse -Force }
 }
@@ -152,23 +152,23 @@ function Run-Reference(
     $report = Join-Path $runDirectory 'runner-report.json'
     $register = Join-Path $tracer 'register.cjs'
     $runner = Join-Path $reference 'dist/test/run.js'
-    $oldTrace = $env:BEHAVIORDIFF_TRACE
-    $oldNamespaces = $env:BEHAVIORDIFF_NAMESPACES
-    $oldReport = $env:BEHAVIORDIFF_RUNNER_REPORT
+    $oldTrace = $env:REALDIFF_TRACE
+    $oldNamespaces = $env:REALDIFF_NAMESPACES
+    $oldReport = $env:REALDIFF_RUNNER_REPORT
     $oldNodePath = $env:NODE_PATH
     try {
-        $env:BEHAVIORDIFF_TRACE = $trace
-        $env:BEHAVIORDIFF_NAMESPACES = "$referenceRelativePath/dist/src"
-        $env:BEHAVIORDIFF_RUNNER_REPORT = $report
+        $env:REALDIFF_TRACE = $trace
+        $env:REALDIFF_NAMESPACES = "$referenceRelativePath/dist/src"
+        $env:REALDIFF_RUNNER_REPORT = $report
         $env:NODE_PATH = Join-Path $tracer 'node_modules'
         Push-Location $repositoryRoot
         try { & node --require $register $runner | ForEach-Object { Write-Host $_ } }
         finally { Pop-Location }
         if ($LASTEXITCODE -ne 0) { throw "TypeScript reference tests failed with $tracer" }
     } finally {
-        $env:BEHAVIORDIFF_TRACE = $oldTrace
-        $env:BEHAVIORDIFF_NAMESPACES = $oldNamespaces
-        $env:BEHAVIORDIFF_RUNNER_REPORT = $oldReport
+        $env:REALDIFF_TRACE = $oldTrace
+        $env:REALDIFF_NAMESPACES = $oldNamespaces
+        $env:REALDIFF_RUNNER_REPORT = $oldReport
         $env:NODE_PATH = $oldNodePath
     }
 
@@ -176,7 +176,7 @@ function Run-Reference(
     $runnerTests = [int](Get-Content $report -Raw | ConvertFrom-Json).runnerTests
     if ($runnerTests -ne 120) { throw "Node runner count mismatch ($label): expected=120 actual=$runnerTests" }
 
-    $run = Read-BehaviorDiffConformanceRun $runDirectory
+    $run = Read-RealDiffConformanceRun $runDirectory
     $rootMethods = @($run.ManifestRecords | Where-Object {
         $_.kind -eq 'member' -and $null -ne $_.PSObject.Properties['isTestRoot'] -and [bool]$_.isTestRoot
     } | ForEach-Object method | Sort-Object -Unique)
@@ -289,11 +289,11 @@ try {
     Write-Host '=== TypeScript reference run 1 ===' -ForegroundColor Cyan; $result1 = Run-Reference $tracer1 $repositoryRoot $reference $run1 'run 1'
     Write-Host '=== TypeScript reference run 2 ===' -ForegroundColor Cyan; $result2 = Run-Reference $tracer2 $repositoryRoot $reference $run2 'run 2'
 
-    $guard = Assert-BehaviorDiffConformanceRuns -FirstRun $run1 -SecondRun $run2 -MinimumMatchedKeys 100 `
+    $guard = Assert-RealDiffConformanceRuns -FirstRun $run1 -SecondRun $run2 -MinimumMatchedKeys 100 `
         -UsableSourceResolutions @('debugInfo') `
         -ReferenceSourcePathPatterns @($subjectSourcePattern) -DigestProofEvaluator $digestEvaluator
 
-    $engine = Invoke-BehaviorDiffEngineConformance -FirstRun $run1 -SecondRun $run2
+    $engine = Invoke-RealDiffEngineConformance -FirstRun $run1 -SecondRun $run2
 
     $proofs1 = @(& $digestEvaluator $result1.Run)
     $proofs2 = @(& $digestEvaluator $result2.Run)

@@ -10,7 +10,7 @@ $output = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
 } else {
     [IO.Path]::GetFullPath((Join-Path $repo $OutputDirectory))
 }
-$manifest = Join-Path $repo 'src/BehaviorDiff.Launcher.Rust/Cargo.toml'
+$manifest = Join-Path $repo 'src/RealDiff.Launcher.Rust/Cargo.toml'
 
 & cargo build --release --locked --manifest-path $manifest
 if ($LASTEXITCODE -ne 0) { throw "Rust launcher build failed with exit code $LASTEXITCODE" }
@@ -23,8 +23,8 @@ $architecture = switch ([Runtime.InteropServices.RuntimeInformation]::OSArchitec
     ([Runtime.InteropServices.Architecture]::Arm64) { 'arm64' }
     default { throw "The Rust launcher cannot be staged for architecture $($_)." }
 }
-$fileName = if ($IsWindows) { 'behaviordiff.exe' } else { 'behaviordiff' }
-$source = Join-Path $repo "src/BehaviorDiff.Launcher.Rust/target/release/$fileName"
+$fileName = if ($IsWindows) { 'realdiff.exe' } else { 'realdiff' }
+$source = Join-Path $repo "src/RealDiff.Launcher.Rust/target/release/$fileName"
 if (-not (Test-Path $source -PathType Leaf)) { throw "Rust launcher binary was not found: $source" }
 
 $destination = Join-Path $output "$os-$architecture"

@@ -6,8 +6,8 @@ command -v dotnet >/dev/null 2>&1 && { echo 'clean Linux proof unexpectedly has 
 
 root="$(mktemp -d)"
 trap 'rm -rf "$root"' EXIT
-git config --global user.name 'BehaviorDiff Release Proof'
-git config --global user.email 'release-proof@behaviordiff.invalid'
+git config --global user.name 'RealDiff Release Proof'
+git config --global user.email 'release-proof@realdiff.invalid'
 
 cat > "$root/mock-github.js" <<'NODE'
 const fs = require('node:fs');
@@ -51,8 +51,8 @@ if (findings.status !== 'analyzed' || !(findings.summary.unexpectedMembers > 0))
   throw new Error(`${language} findings were ${findings.status}/${findings.verdict}`);
 }
 if (typeof payload.body !== 'string' || payload.body.length < 100
-    || !payload.body.includes('## BehaviorDiff:')
-    || !payload.body.includes('<!-- behaviordiff:github:pr:1:summary -->')) {
+    || !payload.body.includes('## RealDiff:')
+    || !payload.body.includes('<!-- realdiff:github:pr:1:summary -->')) {
   throw new Error(`${language} rendered comment contract failed`);
 }
 console.log(`SELF_CONTAINED_${language.toUpperCase()} events=${events} findings=${findings.summary.unexpectedMembers} commentBytes=${Buffer.byteLength(payload.body)}`);
@@ -83,12 +83,12 @@ run_proof() {
     git -C "$repo" commit --quiet -m 'behavior change'
     local pr
     pr="$(git -C "$repo" rev-parse HEAD)"
-    printf '{"number":1,"pull_request":{"base":{"sha":"%s","repo":{"full_name":"behaviordiff/release-proof","fork":false}},"head":{"sha":"%s","repo":{"full_name":"behaviordiff/release-proof","fork":false}}}}\n' "$base" "$pr" > "$event"
+    printf '{"number":1,"pull_request":{"base":{"sha":"%s","repo":{"full_name":"realdiff/release-proof","fork":false}},"head":{"sha":"%s","repo":{"full_name":"realdiff/release-proof","fork":false}}}}\n' "$base" "$pr" > "$event"
 
     set +e
-    GITHUB_EVENT_PATH="$event" GITHUB_REPOSITORY=behaviordiff/release-proof \
-      BEHAVIORDIFF_EXCLUDE_NAMESPACES="$(if [[ "$language" == node ]]; then printf 'src/sorting/rule-ordering.js'; fi)" \
-      behaviordiff "$repo" --ci=github --work "$work" --findings "$findings" \
+    GITHUB_EVENT_PATH="$event" GITHUB_REPOSITORY=realdiff/release-proof \
+      REALDIFF_EXCLUDE_NAMESPACES="$(if [[ "$language" == node ]]; then printf 'src/sorting/rule-ordering.js'; fi)" \
+      realdiff "$repo" --ci=github --work "$work" --findings "$findings" \
       --no-baseline --strict --keep-traces 1d
     local analysis_exit=$?
     set -e
@@ -98,9 +98,9 @@ run_proof() {
     local api_pid=$MOCK_API_PID
     read -r api_port <&"${MOCK_API[0]}"
     set +e
-    GITHUB_EVENT_PATH="$event" GITHUB_REPOSITORY=behaviordiff/release-proof \
+    GITHUB_EVENT_PATH="$event" GITHUB_REPOSITORY=realdiff/release-proof \
       GITHUB_TOKEN=release-proof-token GITHUB_API_URL="http://127.0.0.1:$api_port" \
-      behaviordiff post --provider=github --findings "$findings" --gate warn-only
+      realdiff post --provider=github --findings "$findings" --gate warn-only
     local post_exit=$?
     set -e
     kill "$api_pid" 2>/dev/null || true

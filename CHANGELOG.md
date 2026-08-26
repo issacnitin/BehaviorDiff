@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to BehaviorDiff are documented here.
+All notable changes to RealDiff are documented here.
 
 ## 0.3.0 - 2026-08-26
 
@@ -23,7 +23,7 @@ All notable changes to BehaviorDiff are documented here.
 ### Changed
 
 - Complete migration from the C# engine to the standalone Rust diff and frontier engine.
-- Removed `--engine` selection; BehaviorDiff executes exclusively on the qualified Rust engine.
+- Removed `--engine` selection; RealDiff executes exclusively on the qualified Rust engine.
 - Rebased the all-language container onto a runtime-free Ubuntu base while retaining the .NET SDK only for target builds.
 
 ### Fixed
@@ -46,4 +46,4 @@ Initial open-source preview.
 - Idempotent PR summaries and cause-hunk comments.
 - Optional citation-grounded Anthropic explanations.
 - Stable-sort, retry-policy, and configuration-parser executable demos.
-- Optional MCP server over completed BehaviorDiff runs.
+- Optional MCP server over completed RealDiff runs.

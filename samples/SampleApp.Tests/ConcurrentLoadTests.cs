@@ -38,7 +38,7 @@ namespace SampleApp.Tests
                 {
                     try
                     {
-                        var context = new AssemblyLoadContext("behaviordiff-concurrent-" + index, isCollectible: false);
+                        var context = new AssemblyLoadContext("realdiff-concurrent-" + index, isCollectible: false);
                         barrier.SignalAndWait();
                         loaded[index] = context.LoadFromAssemblyPath(pluginPath);
                     }

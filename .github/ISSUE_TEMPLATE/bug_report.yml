@@ -5,7 +5,7 @@ labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Thanks for helping improve BehaviorDiff. Remove secrets and proprietary source from logs and traces.
+      value: Thanks for helping improve RealDiff. Remove secrets and proprietary source from logs and traces.
   - type: textarea
     id: description
     attributes:
@@ -16,7 +16,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: BehaviorDiff version or commit
+      label: RealDiff version or commit
     validations:
       required: true
   - type: input

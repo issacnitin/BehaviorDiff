@@ -1,4 +1,4 @@
-using BehaviorDiff.Tracer;
+using RealDiff.Tracer;
 using SampleApp;
 using Xunit;
 

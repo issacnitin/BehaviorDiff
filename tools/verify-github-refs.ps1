@@ -5,17 +5,17 @@
 #>
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$fixture = Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-github-refs'
-$shallow = Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-github-shallow'
-$cli = Join-Path $repoRoot 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
+$fixture = Join-Path ([IO.Path]::GetTempPath()) 'realdiff-github-refs'
+$shallow = Join-Path ([IO.Path]::GetTempPath()) 'realdiff-github-shallow'
+$cli = Join-Path $repoRoot 'src/RealDiff.Cli/RealDiff.Cli.csproj'
 
 Remove-Item $fixture, $shallow -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $fixture | Out-Null
 Push-Location $fixture
 try {
     git init -q -b main
-    git config user.email 'behaviordiff@example.invalid'
-    git config user.name 'BehaviorDiff proof'
+    git config user.email 'realdiff@example.invalid'
+    git config user.name 'RealDiff proof'
     Set-Content common.txt 'common'
     git add .
     git commit -q -m common

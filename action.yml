@@ -1,4 +1,4 @@
-name: BehaviorDiff
+name: RealDiff
 description: Analyze a pull request for runtime behavior changes with the published all-language container.
 author: Nitin Issac Joy
 branding:
@@ -12,15 +12,15 @@ inputs:
   work:
     description: Temporary worktree and trace directory.
     required: false
-    default: /github/workspace/.behaviordiff/work
+    default: /github/workspace/.realdiff/work
   findings:
     description: Machine-readable findings output path.
     required: false
-    default: /github/workspace/.behaviordiff/artifacts/findings.json
+    default: /github/workspace/.realdiff/artifacts/findings.json
   cache-dir:
     description: Persistent baseline trace cache directory.
     required: false
-    default: /github/workspace/.behaviordiff/cache
+    default: /github/workspace/.realdiff/cache
   cache-retention:
     description: Baseline cache retention window.
     required: false
@@ -39,7 +39,7 @@ inputs:
     default: 'false'
 outputs:
   analysis-exit:
-    description: BehaviorDiff analysis exit code before posting policy.
+    description: RealDiff analysis exit code before posting policy.
   findings:
     description: Path to findings.json.
   status:
@@ -48,7 +48,7 @@ outputs:
     description: Findings artifact verdict.
 runs:
   using: docker
-  image: docker://ghcr.io/issacnitin/behaviordiff:main
+  image: docker://ghcr.io/issacnitin/realdiff:main
   args:
     - __action
     - ${{ inputs.repo }}

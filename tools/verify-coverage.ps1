@@ -12,13 +12,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Engine.psm1') -Force
-$engine = Get-BehaviorDiffEngine
+Import-Module (Join-Path $PSScriptRoot 'RealDiff.Engine.psm1') -Force
+$engine = Get-RealDiffEngine
 $runId = [Guid]::NewGuid().ToString('N')
 $ownsWork = -not $WorkDirectory
 $ownsPrTree = -not $PrTreeDirectory
-$work = if ($WorkDirectory) { $WorkDirectory } else { Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-coverage-$runId" }
-$prTree = if ($PrTreeDirectory) { $PrTreeDirectory } else { Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-coverage-pr-$runId" }
+$work = if ($WorkDirectory) { $WorkDirectory } else { Join-Path ([IO.Path]::GetTempPath()) "realdiff-coverage-$runId" }
+$prTree = if ($PrTreeDirectory) { $PrTreeDirectory } else { Join-Path ([IO.Path]::GetTempPath()) "realdiff-coverage-pr-$runId" }
 $divergences = Join-Path $work 'divergence-set.json'
 
 try {

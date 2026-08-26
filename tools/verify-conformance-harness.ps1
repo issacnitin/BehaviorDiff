@@ -5,9 +5,9 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Conformance.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'RealDiff.Conformance.psm1') -Force
 
-$work = Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-conformance-harness-{0}" -f [Guid]::NewGuid().ToString('N'))
+$work = Join-Path ([IO.Path]::GetTempPath()) ("realdiff-conformance-harness-{0}" -f [Guid]::NewGuid().ToString('N'))
 
 function New-Event {
     param(
@@ -100,40 +100,40 @@ try {
         DigestProofEvaluator = $digestEvaluator
     }
 
-    $result = Assert-BehaviorDiffConformanceRuns @parameters
+    $result = Assert-RealDiffConformanceRuns @parameters
     if ($result.MatchedKeys -ne 3 -or $result.SubjectMethods -ne 3 -or $result.DigestProofsPerRun -ne 10) {
         throw 'Passing fixture returned unexpected conformance counts'
     }
 
-    Assert-Throws { Assert-BehaviorDiffConformanceRuns @parameters -MinimumMatchedKeys 4 } 'Matched-keys guard failed'
+    Assert-Throws { Assert-RealDiffConformanceRuns @parameters -MinimumMatchedKeys 4 } 'Matched-keys guard failed'
 
     $changedMethod = Copy-Events $firstEvents
     $changedMethod[4].methodFullName = 'Reference.Subject.Four()'
     Write-Run $secondRun $changedMethod
-    Assert-Throws { Assert-BehaviorDiffConformanceRuns @parameters -MinimumMatchedKeys 2 } 'Method-set guard failed'
+    Assert-Throws { Assert-RealDiffConformanceRuns @parameters -MinimumMatchedKeys 2 } 'Method-set guard failed'
 
     Write-Run $secondRun @((Copy-Events $firstEvents)[0..2] + (Copy-Events $firstEvents)[4])
-    Assert-Throws { Assert-BehaviorDiffConformanceRuns @parameters } 'Event-count guard failed'
+    Assert-Throws { Assert-RealDiffConformanceRuns @parameters } 'Event-count guard failed'
 
     $badOrdinal = Copy-Events $firstEvents
     $badOrdinal[3].ordinal = 0
     Write-Run $secondRun $badOrdinal
-    Assert-Throws { Assert-BehaviorDiffConformanceRuns @parameters } 'Ordinal-sequence guard failed'
+    Assert-Throws { Assert-RealDiffConformanceRuns @parameters } 'Ordinal-sequence guard failed'
 
     $badResolution = Copy-Events $firstEvents
     $badResolution[1].filePathResolution = 'unresolved'
     Write-Run $secondRun $badResolution
-    Assert-Throws { Assert-BehaviorDiffConformanceRuns @parameters } 'unusable subject event'
+    Assert-Throws { Assert-RealDiffConformanceRuns @parameters } 'unusable subject event'
 
     $subjectRoot = Copy-Events $firstEvents
     $subjectRoot[1].callDepth = 0
     Write-Run $secondRun $subjectRoot
-    Assert-Throws { Assert-BehaviorDiffConformanceRuns @parameters } 'subject depth-0 event'
+    Assert-Throws { Assert-RealDiffConformanceRuns @parameters } 'subject depth-0 event'
 
     $generatedSource = Copy-Events $firstEvents
     $generatedSource[1].filePath = 'build/generated/Subject.cs'
     Write-Run $secondRun $generatedSource
-    Assert-Throws { Assert-BehaviorDiffConformanceRuns @parameters } 'mapped outside reference sources'
+    Assert-Throws { Assert-RealDiffConformanceRuns @parameters } 'mapped outside reference sources'
 
     Write-Run $secondRun (Copy-Events $firstEvents)
     $failingDigestEvaluator = {
@@ -143,7 +143,7 @@ try {
             $_
         }
     }
-    Assert-Throws { Assert-BehaviorDiffConformanceRuns @parameters -DigestProofEvaluator $failingDigestEvaluator } 'Digest proof failed'
+    Assert-Throws { Assert-RealDiffConformanceRuns @parameters -DigestProofEvaluator $failingDigestEvaluator } 'Digest proof failed'
 
     Write-Host 'Conformance harness guards: PASS' -ForegroundColor Green
     Write-Host '  matched-key threshold, method sets, event counts, ordinal sequences'

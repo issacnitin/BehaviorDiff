@@ -1,5 +1,5 @@
 {
-  "schema": "behaviordiff.comment-policy-measurement/3",
+  "schema": "realdiff.comment-policy-measurement/3",
   "attemptedPrs": 22,
   "analyzedPrs": 20,
   "refusedPrs": 2,

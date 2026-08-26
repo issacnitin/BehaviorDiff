@@ -1,5 +1,5 @@
 [package]
-name = "behaviordiff-rust-sort-demo"
+name = "realdiff-rust-sort-demo"
 version = "0.1.0"
 edition = "2021"
 publish = false

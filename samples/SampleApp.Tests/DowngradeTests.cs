@@ -1,7 +1,7 @@
 using System;
 using System.Reflection;
 using System.Threading;
-using BehaviorDiff.Tracer;
+using RealDiff.Tracer;
 using SampleApp;
 using Xunit;
 

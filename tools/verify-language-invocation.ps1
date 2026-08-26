@@ -7,14 +7,14 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-language-invocation-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-language-invocation-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
-$cliProject = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
-$cli = Join-Path $repo 'src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll'
-$agentProject = Join-Path $repo 'src/BehaviorDiff.Java.Agent/pom.xml'
-$nodeTracer = Join-Path $repo 'src/BehaviorDiff.Node'
-$previousJavaAgent = $env:BEHAVIORDIFF_JAVA_AGENT
-$previousNodeTracer = $env:BEHAVIORDIFF_NODE_TRACER
+$cliProject = Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj'
+$cli = Join-Path $repo 'src/RealDiff.Cli/bin/Release/net8.0/realdiff.dll'
+$agentProject = Join-Path $repo 'src/RealDiff.Java.Agent/pom.xml'
+$nodeTracer = Join-Path $repo 'src/RealDiff.Node'
+$previousJavaAgent = $env:REALDIFF_JAVA_AGENT
+$previousNodeTracer = $env:REALDIFF_NODE_TRACER
 
 function Invoke-Checked([string]$label, [scriptblock]$command) {
     & $command | ForEach-Object { Write-Host $_ }
@@ -42,8 +42,8 @@ function New-ReferenceRepository([string]$name, [string]$sample, [bool]$createNo
     }
 
     Invoke-Checked "$name git init" { & git -C $directory init --initial-branch=main --quiet }
-    Invoke-Checked "$name git identity" { & git -C $directory config user.email 'behaviordiff-proof@example.invalid' }
-    Invoke-Checked "$name git identity" { & git -C $directory config user.name 'BehaviorDiff Proof' }
+    Invoke-Checked "$name git identity" { & git -C $directory config user.email 'realdiff-proof@example.invalid' }
+    Invoke-Checked "$name git identity" { & git -C $directory config user.name 'RealDiff Proof' }
     Invoke-Checked "$name git add" { & git -C $directory add . }
     Invoke-Checked "$name base commit" { & git -C $directory commit --quiet -m 'reference base' }
     $base = (& git -C $directory rev-parse HEAD).Trim()
@@ -138,8 +138,8 @@ try {
     Invoke-Checked 'Java agent build' {
         & mvn --batch-mode --no-transfer-progress -f $agentProject package -DskipTests
     }
-    $agent = Get-ChildItem (Join-Path $repo 'src/BehaviorDiff.Java.Agent/target') `
-        -Filter 'behaviordiff-java-agent-*.jar' |
+    $agent = Get-ChildItem (Join-Path $repo 'src/RealDiff.Java.Agent/target') `
+        -Filter 'realdiff-java-agent-*.jar' |
         Where-Object Name -NotLike 'original-*' |
         Sort-Object LastWriteTimeUtc -Descending |
         Select-Object -First 1
@@ -151,8 +151,8 @@ try {
         Invoke-Checked 'Node tracer install' { & npm ci --no-audit --no-fund }
     } finally { Pop-Location }
 
-    $env:BEHAVIORDIFF_JAVA_AGENT = $agent.FullName
-    $env:BEHAVIORDIFF_NODE_TRACER = $nodeTracer
+    $env:REALDIFF_JAVA_AGENT = $agent.FullName
+    $env:REALDIFF_NODE_TRACER = $nodeTracer
     $java = New-ReferenceRepository 'java' (Join-Path $repo 'samples/JavaReference') $false
     $node = New-ReferenceRepository 'node' (Join-Path $repo 'samples/NodeReference') $true
 
@@ -165,8 +165,8 @@ try {
     Write-Host '  Java Maven and Node npm; identical refs; four runs each; analyzed with zero unexpected findings'
 }
 finally {
-    $env:BEHAVIORDIFF_JAVA_AGENT = $previousJavaAgent
-    $env:BEHAVIORDIFF_NODE_TRACER = $previousNodeTracer
+    $env:REALDIFF_JAVA_AGENT = $previousJavaAgent
+    $env:REALDIFF_NODE_TRACER = $previousNodeTracer
     if ($ownsWork -and -not $KeepWork) {
         Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
     } else {

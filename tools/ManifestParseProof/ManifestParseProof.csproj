@@ -5,11 +5,11 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <AssemblyName>manifest-parse-proof</AssemblyName>
-    <RootNamespace>BehaviorDiff.Tools.ManifestParseProof</RootNamespace>
+    <RootNamespace>RealDiff.Tools.ManifestParseProof</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\BehaviorDiff.Contracts\BehaviorDiff.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\RealDiff.Contracts\RealDiff.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

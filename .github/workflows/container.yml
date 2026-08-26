@@ -1,4 +1,4 @@
-name: BehaviorDiff container
+name: RealDiff container
 
 on:
   pull_request:
@@ -20,7 +20,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/issacnitin/behaviordiff
+  IMAGE: ghcr.io/issacnitin/realdiff
 
 jobs:
   build-test-publish:
@@ -38,7 +38,7 @@ jobs:
         run: |
           bytes=$(docker image inspect "$IMAGE:$GITHUB_SHA" --format '{{.Size}}')
           echo "CONTAINER_IMAGE_SIZE bytes=$bytes"
-          echo "BehaviorDiff image size: $(numfmt --to=iec-i --suffix=B "$bytes") ($bytes bytes)" >> "$GITHUB_STEP_SUMMARY"
+          echo "RealDiff image size: $(numfmt --to=iec-i --suffix=B "$bytes") ($bytes bytes)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'

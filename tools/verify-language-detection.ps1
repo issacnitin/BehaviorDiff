@@ -1,18 +1,18 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([string]$BehaviorDiffCommand)
+param([string]$RealDiffCommand)
 
 $ErrorActionPreference = 'Stop'
 
 $repo = Split-Path -Parent $PSScriptRoot
-$project = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
-$work = Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-language-detection-{0}" -f [Guid]::NewGuid().ToString('N'))
+$project = Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj'
+$work = Join-Path ([IO.Path]::GetTempPath()) ("realdiff-language-detection-{0}" -f [Guid]::NewGuid().ToString('N'))
 
 function Invoke-Detect([string]$directory) {
-    $output = if ([string]::IsNullOrWhiteSpace($BehaviorDiffCommand)) {
+    $output = if ([string]::IsNullOrWhiteSpace($RealDiffCommand)) {
         @(& dotnet run --project $project -c Release --no-build -- detect $directory 2>&1)
     } else {
-        @(& $BehaviorDiffCommand detect $directory 2>&1)
+        @(& $RealDiffCommand detect $directory 2>&1)
     }
     [pscustomobject]@{ Exit = $LASTEXITCODE; Text = $output -join "`n" }
 }
@@ -49,8 +49,8 @@ try {
     Assert-Language 'rust' 'Cargo.toml' 'rust' 'cargo build' 'cargo test -- --test-threads=1'
 
     $monorepo = Join-Path $work 'monorepo'
-    New-Item -ItemType Directory -Path (Join-Path $monorepo 'services/web/.behaviordiff') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $monorepo '.behaviordiff') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $monorepo 'services/web/.realdiff') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $monorepo '.realdiff') -Force | Out-Null
     New-Item -ItemType File -Path (Join-Path $monorepo 'services/web/package.json') -Force | Out-Null
     @'
 language: node
@@ -63,7 +63,7 @@ include_namespaces:
   - src/domain
 exclude_namespaces:
   - src/generated
-'@ | Set-Content (Join-Path $monorepo '.behaviordiff/config.yml')
+'@ | Set-Content (Join-Path $monorepo '.realdiff/config.yml')
     $configured = Invoke-Detect $monorepo
     if ($configured.Exit -ne 0) { throw "configured detection exited $($configured.Exit): $($configured.Text)" }
     foreach ($literal in @(
@@ -74,7 +74,7 @@ exclude_namespaces:
         '- test/behavior/**/*.test.ts',
         '- src/domain',
         '- src/generated',
-        'source: .behaviordiff/config.yml + detection')) {
+        'source: .realdiff/config.yml + detection')) {
         Assert-Contains $configured.Text $literal 'configured detection'
     }
 
@@ -85,8 +85,8 @@ exclude_namespaces:
     $mixedResult = Invoke-Detect $mixed
     if ($mixedResult.Exit -ne 3) { throw "mixed repository exit was $($mixedResult.Exit), expected 3" }
     Assert-Contains $mixedResult.Text 'Repository language is ambiguous' 'mixed refusal'
-    Assert-Contains $mixedResult.Text "behaviordiff detect <repo>" 'mixed refusal'
-    Assert-Contains $mixedResult.Text '.behaviordiff/config.yml' 'mixed refusal'
+    Assert-Contains $mixedResult.Text "realdiff detect <repo>" 'mixed refusal'
+    Assert-Contains $mixedResult.Text '.realdiff/config.yml' 'mixed refusal'
 
     $solutions = Join-Path $work 'multiple-solutions'
     New-Item -ItemType Directory -Path $solutions -Force | Out-Null

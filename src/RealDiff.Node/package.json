@@ -1,0 +1,19 @@
+{
+  "name": "@realdiff/node",
+  "version": "0.2.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test test/*.test.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@babel/generator": "^7.29.8",
+    "@babel/parser": "^7.29.8",
+    "@babel/traverse": "^7.29.8",
+    "@babel/types": "^7.29.8",
+    "@jridgewell/trace-mapping": "^0.3.31"
+  }
+}

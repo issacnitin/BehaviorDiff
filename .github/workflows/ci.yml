@@ -26,9 +26,9 @@ jobs:
       - name: Build, lint, and test
         shell: pwsh
         run: |
-          cargo fmt --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml -- --check
-          cargo clippy --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml --all-targets -- -D warnings
-          cargo test --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml
+          cargo fmt --manifest-path src/RealDiff.Engine.Rust/Cargo.toml -- --check
+          cargo clippy --manifest-path src/RealDiff.Engine.Rust/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path src/RealDiff.Engine.Rust/Cargo.toml
 
   rust-launcher:
     name: Rust launcher
@@ -42,9 +42,9 @@ jobs:
       - name: Build, lint, and test
         shell: pwsh
         run: |
-          cargo fmt --manifest-path src/BehaviorDiff.Launcher.Rust/Cargo.toml -- --check
-          cargo clippy --manifest-path src/BehaviorDiff.Launcher.Rust/Cargo.toml --all-targets -- -D warnings
-          cargo test --manifest-path src/BehaviorDiff.Launcher.Rust/Cargo.toml
+          cargo fmt --manifest-path src/RealDiff.Launcher.Rust/Cargo.toml -- --check
+          cargo clippy --manifest-path src/RealDiff.Launcher.Rust/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path src/RealDiff.Launcher.Rust/Cargo.toml
 
   tracer-builds:
     name: ${{ matrix.tracer }} tracer
@@ -73,13 +73,13 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: src/BehaviorDiff.Node/package-lock.json
+          cache-dependency-path: src/RealDiff.Node/package-lock.json
       - name: Use Go 1.27
         if: matrix.tracer == 'go'
         uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
-          cache-dependency-path: src/BehaviorDiff.Go/go.mod
+          cache-dependency-path: src/RealDiff.Go/go.mod
       - name: Use Rust 1.98
         if: matrix.tracer == 'rust'
         uses: dtolnay/rust-toolchain@1.98.0
@@ -89,34 +89,34 @@ jobs:
         if: matrix.tracer == 'dotnet'
         shell: pwsh
         run: |
-          dotnet build src/BehaviorDiff.Tracer/BehaviorDiff.Tracer.csproj -c Release --nologo
-          dotnet build src/BehaviorDiff.Tracer.Xunit/BehaviorDiff.Tracer.Xunit.csproj -c Release --nologo
+          dotnet build src/RealDiff.Tracer/RealDiff.Tracer.csproj -c Release --nologo
+          dotnet build src/RealDiff.Tracer.Xunit/RealDiff.Tracer.Xunit.csproj -c Release --nologo
           dotnet build tools/Weaver/Weaver.csproj -c Release --nologo
       - name: Build and test Java tracer
         if: matrix.tracer == 'java'
         shell: pwsh
-        run: mvn --batch-mode --no-transfer-progress -f src/BehaviorDiff.Java.Agent/pom.xml test
+        run: mvn --batch-mode --no-transfer-progress -f src/RealDiff.Java.Agent/pom.xml test
       - name: Build and test Node tracer
         if: matrix.tracer == 'node'
         shell: pwsh
-        working-directory: src/BehaviorDiff.Node
+        working-directory: src/RealDiff.Node
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npm test
       - name: Build and test Go tracer
         if: matrix.tracer == 'go'
         shell: pwsh
-        working-directory: src/BehaviorDiff.Go
+        working-directory: src/RealDiff.Go
         run: |
           go test ./...
-          go build ./cmd/behaviordiff-go-rewrite
+          go build ./cmd/realdiff-go-rewrite
       - name: Build, lint, and test Rust tracer
         if: matrix.tracer == 'rust'
         shell: pwsh
         run: |
-          cargo fmt --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml -- --check
-          cargo clippy --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml --all-targets -- -D warnings
-          cargo test --manifest-path src/BehaviorDiff.Rust.Tracer/Cargo.toml
+          cargo fmt --manifest-path src/RealDiff.Rust.Tracer/Cargo.toml -- --check
+          cargo clippy --manifest-path src/RealDiff.Rust.Tracer/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path src/RealDiff.Rust.Tracer/Cargo.toml
           pwsh -NoProfile -File tools/verify-rust-redaction.ps1 -WorkDirectory "$env:RUNNER_TEMP\rust-redaction"
 
   conformance:
@@ -149,7 +149,7 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: |
-            src/BehaviorDiff.Node/package-lock.json
+            src/RealDiff.Node/package-lock.json
             samples/NodeReference.TypeScript/package-lock.json
       - name: Use Go 1.27
         if: matrix.suite == 'go'
@@ -157,7 +157,7 @@ jobs:
         with:
           go-version: '1.27.x'
           cache-dependency-path: |
-            src/BehaviorDiff.Go/go.mod
+            src/RealDiff.Go/go.mod
             samples/GoReference/go.mod
       - name: Run conformance suite
         shell: pwsh
@@ -174,7 +174,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
       - name: Build solution
         shell: pwsh
-        run: dotnet build BehaviorDiff.sln -c Release --nologo
+        run: dotnet build RealDiff.sln -c Release --nologo
       - name: Verify sort, retry, and config fixtures
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-demo-fixtures.ps1
@@ -199,7 +199,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: src/BehaviorDiff.Node/package-lock.json
+          cache-dependency-path: src/RealDiff.Node/package-lock.json
       - name: Use Rust 1.98
         uses: dtolnay/rust-toolchain@1.98.0
       - name: Use Go 1.27
@@ -207,7 +207,7 @@ jobs:
         with:
           go-version: '1.27.x'
           cache-dependency-path: |
-            src/BehaviorDiff.Go/go.mod
+            src/RealDiff.Go/go.mod
             samples/GoReference/go.mod
       - name: Assert removed engine surfaces stay absent
         shell: pwsh
@@ -216,7 +216,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $tracked.Count -eq 0) {
             throw 'Could not enumerate tracked CI and packaging files.'
           }
-          $matches = @(Select-String -Path $tracked -Pattern 'BehaviorDiff\.Engine\.csproj', '--engine(?:=|\s)')
+          $matches = @(Select-String -Path $tracked -Pattern 'RealDiff\.Engine\.csproj', '--engine(?:=|\s)')
           if ($matches.Count -ne 0) {
             $matches | ForEach-Object { Write-Error $_ }
             throw 'CI or packaging still references a removed C# engine surface.'
@@ -224,7 +224,7 @@ jobs:
       - name: Build, install, and execute packaged binaries
         shell: pwsh
         run: |
-          $work = Join-Path $env:RUNNER_TEMP 'behaviordiff-package-proof'
+          $work = Join-Path $env:RUNNER_TEMP 'realdiff-package-proof'
           pwsh -NoProfile -File tools/verify-cli-package.ps1 -WorkDirectory $work -KeepWork
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Path artifacts/packages -Force | Out-Null
@@ -232,5 +232,5 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: behaviordiff-tool
+          name: realdiff-tool
           path: artifacts/packages/*.nupkg

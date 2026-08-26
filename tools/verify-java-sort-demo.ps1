@@ -7,17 +7,17 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-java-sort-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-java-sort-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else {
     [IO.Path]::GetFullPath($WorkDirectory)
 }
 $demoRepo = Join-Path $work 'repo'
 $cliWork = Join-Path $work 'cli-work'
 $findingsPath = Join-Path $cliWork 'findings.json'
-$changedFile = 'src/main/java/io/behaviordiff/demo/sorting/RuleOrdering.java'
-$headline = 'io.behaviordiff.demo.pricing.DiscountEngine.selectDiscount(D)Ljava/lang/String;'
-$totalsMember = 'io.behaviordiff.demo.pricing.CheckoutTotals.compute(D)D'
-$sortingPrefix = 'io.behaviordiff.demo.sorting.RuleOrdering.'
+$changedFile = 'src/main/java/io/realdiff/demo/sorting/RuleOrdering.java'
+$headline = 'io.realdiff.demo.pricing.DiscountEngine.selectDiscount(D)Ljava/lang/String;'
+$totalsMember = 'io.realdiff.demo.pricing.CheckoutTotals.compute(D)D'
+$sortingPrefix = 'io.realdiff.demo.sorting.RuleOrdering.'
 $modelExplainer = 'unavailable (no API key)'
 
 function Assert-True([bool]$condition, [string]$message) {
@@ -63,7 +63,7 @@ function Get-ApiKey {
         return $env:ANTHROPIC_API_KEY
     }
 
-    $keyFile = Join-Path $HOME '.behaviordiff/anthropic.key'
+    $keyFile = Join-Path $HOME '.realdiff/anthropic.key'
     if (-not (Test-Path $keyFile)) { return $null }
     $protectedKey = (Get-Content $keyFile -Raw).Trim()
     try {
@@ -98,8 +98,8 @@ try {
     Write-Host '=== Temporary git history ===' -ForegroundColor Cyan
     & git -C $demoRepo init --quiet
     if ($LASTEXITCODE -ne 0) { throw 'Could not initialize temporary demo repository' }
-    & git -C $demoRepo config user.name 'BehaviorDiff Proof'
-    & git -C $demoRepo config user.email 'proof@behaviordiff.invalid'
+    & git -C $demoRepo config user.name 'RealDiff Proof'
+    & git -C $demoRepo config user.email 'proof@realdiff.invalid'
     & git -C $demoRepo add .
     & git -C $demoRepo commit --quiet -m 'base: stable priority ordering'
     if ($LASTEXITCODE -ne 0) { throw 'Could not commit Java sort demo base' }
@@ -128,30 +128,30 @@ try {
 
     Write-Host '=== Java agent and CLI builds ===' -ForegroundColor Cyan
     Invoke-Maven @(
-        '-f', (Join-Path $repo 'src/BehaviorDiff.Java.Agent/pom.xml'), 'clean', 'package',
+        '-f', (Join-Path $repo 'src/RealDiff.Java.Agent/pom.xml'), 'clean', 'package',
         '--batch-mode', '--no-transfer-progress'
     ) 'Java agent build failed'
-    $agent = Join-Path $repo 'src/BehaviorDiff.Java.Agent/target/behaviordiff-java-agent-0.2.0-SNAPSHOT.jar'
+    $agent = Join-Path $repo 'src/RealDiff.Java.Agent/target/realdiff-java-agent-0.2.0-SNAPSHOT.jar'
     Assert-True (Test-Path $agent) "Built Java agent not found at $agent"
-    $cliProject = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
+    $cliProject = Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj'
     & dotnet build $cliProject -c Release --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "CLI build failed: $LASTEXITCODE" }
-    $cli = Join-Path $repo 'src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll'
+    $cli = Join-Path $repo 'src/RealDiff.Cli/bin/Release/net8.0/realdiff.dll'
     Assert-True (Test-Path $cli) "Built CLI not found at $cli"
 
     Write-Host '=== Real CLI base/PR analysis ===' -ForegroundColor Cyan
-    $oldAgent = [Environment]::GetEnvironmentVariable('BEHAVIORDIFF_JAVA_AGENT', 'Process')
-    $oldExcludes = [Environment]::GetEnvironmentVariable('BEHAVIORDIFF_EXCLUDE_NAMESPACES', 'Process')
+    $oldAgent = [Environment]::GetEnvironmentVariable('REALDIFF_JAVA_AGENT', 'Process')
+    $oldExcludes = [Environment]::GetEnvironmentVariable('REALDIFF_EXCLUDE_NAMESPACES', 'Process')
     try {
-        $env:BEHAVIORDIFF_JAVA_AGENT = $agent
-        $env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = 'io.behaviordiff.demo.sorting'
+        $env:REALDIFF_JAVA_AGENT = $agent
+        $env:REALDIFF_EXCLUDE_NAMESPACES = 'io.realdiff.demo.sorting'
         $cliOutput = @(& dotnet $cli $demoRepo --base $baseSha --pr $prSha `
             --work $cliWork --findings $findingsPath --keep --keep-traces 1d 2>&1)
         $cliExit = $LASTEXITCODE
         $cliOutput | ForEach-Object { Write-Host $_ }
     } finally {
-        [Environment]::SetEnvironmentVariable('BEHAVIORDIFF_JAVA_AGENT', $oldAgent, 'Process')
-        [Environment]::SetEnvironmentVariable('BEHAVIORDIFF_EXCLUDE_NAMESPACES', $oldExcludes, 'Process')
+        [Environment]::SetEnvironmentVariable('REALDIFF_JAVA_AGENT', $oldAgent, 'Process')
+        [Environment]::SetEnvironmentVariable('REALDIFF_EXCLUDE_NAMESPACES', $oldExcludes, 'Process')
     }
     Assert-True ($cliExit -eq 1) "Expected analyzed findings exit 1, got $cliExit"
     Assert-True (Test-Path $findingsPath) 'CLI did not write findings.json'
@@ -260,7 +260,7 @@ try {
 
     Write-Host '=== Production deterministic GitHub comments ===' -ForegroundColor Cyan
     $commentPath = Join-Path $cliWork 'comment.md'
-    $commentOutput = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+    $commentOutput = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/RealDiff.CommentPreview.csproj') `
         -c Release -- $findingsPath)
     if ($LASTEXITCODE -ne 0) { throw "CommentPreview failed: $LASTEXITCODE" }
     $commentText = $commentOutput -join "`n"
@@ -272,7 +272,7 @@ try {
         -and [bool]$finding[0].confidenceFactors.causallyConnected `
         -and @($finding[0].commentSuppressionReasons).Count -eq 0) `
         'Java default comment policy did not include the causally connected known-true finding'
-    Assert-True ($commentText -match 'io\.behaviordiff\.demo\.pricing\.CheckoutTotals\.compute\(D\)D' `
+    Assert-True ($commentText -match 'io\.realdiff\.demo\.pricing\.CheckoutTotals\.compute\(D\)D' `
         -and $commentText -match 'DiscountEngine\.selectDiscount' `
         -and $commentText -match 'Z_CLEARANCE' -and $commentText -match 'A_SEASONAL' `
         -and $commentText -match 'Double:60\.0' -and $commentText -match 'Double:85\.0') `
@@ -290,12 +290,12 @@ try {
     $strict.commentPolicy.suppressedUnexpectedMembers = 0
     $strict.commentPolicy.suppressedUnexpectedCallSites = 0
     $strict | ConvertTo-Json -Depth 100 | Set-Content $strictPath
-    $strictCommentOutput = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+    $strictCommentOutput = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/RealDiff.CommentPreview.csproj') `
         -c Release -- $strictPath)
     if ($LASTEXITCODE -ne 0) { throw "Strict CommentPreview failed: $LASTEXITCODE" }
     $strictCommentText = $strictCommentOutput -join "`n"
     $strictCommentText | Set-Content $strictCommentPath
-    Assert-True ($strictCommentText -match 'io\.behaviordiff\.demo\.pricing\.CheckoutTotals\.compute\(D\)D' `
+    Assert-True ($strictCommentText -match 'io\.realdiff\.demo\.pricing\.CheckoutTotals\.compute\(D\)D' `
         -and $strictCommentText -match 'DiscountEngine\.selectDiscount' `
         -and $strictCommentText -match 'Z_CLEARANCE' -and $strictCommentText -match 'A_SEASONAL' `
         -and $strictCommentText -match 'CheckoutTotals\.compute' `
@@ -311,7 +311,7 @@ try {
         $oldKey = [Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY', 'Process')
         try {
             $env:ANTHROPIC_API_KEY = $apiKey
-            $modelOutput = @(& dotnet run --project (Join-Path $repo 'tools/AnthropicLive/BehaviorDiff.AnthropicLive.csproj') `
+            $modelOutput = @(& dotnet run --project (Join-Path $repo 'tools/AnthropicLive/RealDiff.AnthropicLive.csproj') `
                 -c Release -- $findingsPath $changedFile $patchPath 2>&1)
             $modelExit = $LASTEXITCODE
             $modelOutput | Set-Content $modelOutputPath

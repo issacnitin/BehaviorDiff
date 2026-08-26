@@ -7,9 +7,9 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-java-conformance-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-java-conformance-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
-Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Conformance.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'RealDiff.Conformance.psm1') -Force
 $expectedRunnerCount = 120
 
 function Copy-CleanTree([string]$destination) {
@@ -24,7 +24,7 @@ function Copy-CleanTree([string]$destination) {
 }
 
 function Build-Agent([string]$tree) {
-    & mvn -f (Join-Path $tree 'src/BehaviorDiff.Java.Agent/pom.xml') clean package
+    & mvn -f (Join-Path $tree 'src/RealDiff.Java.Agent/pom.xml') clean package
     if ($LASTEXITCODE -ne 0) { throw "Java agent build failed: $tree" }
 }
 
@@ -32,16 +32,16 @@ function Run-Reference([string]$tree, [string]$agent, [string]$runDirectory) {
     Remove-Item $runDirectory -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $runDirectory | Out-Null
     $trace = Join-Path $runDirectory 'run.ndjson'
-    $argLine = "--add-opens java.base/java.util=ALL-UNNAMED -javaagent:$agent=include=io.behaviordiff.reference;trace=$trace"
-    $previousRepositoryRoot = [Environment]::GetEnvironmentVariable('BEHAVIORDIFF_REPOSITORY_ROOT', 'Process')
+    $argLine = "--add-opens java.base/java.util=ALL-UNNAMED -javaagent:$agent=include=io.realdiff.reference;trace=$trace"
+    $previousRepositoryRoot = [Environment]::GetEnvironmentVariable('REALDIFF_REPOSITORY_ROOT', 'Process')
     try {
-        $env:BEHAVIORDIFF_REPOSITORY_ROOT = $tree
+        $env:REALDIFF_REPOSITORY_ROOT = $tree
         & mvn -f (Join-Path $tree 'samples/JavaReference/pom.xml') test "-DargLine=$argLine" |
             ForEach-Object { Write-Host $_ }
         if ($LASTEXITCODE -ne 0) { throw "Java reference tests failed with $agent" }
     } finally {
         [Environment]::SetEnvironmentVariable(
-            'BEHAVIORDIFF_REPOSITORY_ROOT', $previousRepositoryRoot, 'Process')
+            'REALDIFF_REPOSITORY_ROOT', $previousRepositoryRoot, 'Process')
     }
 
     $runnerCount = (Get-ChildItem (Join-Path $tree 'samples/JavaReference/target/surefire-reports') -Filter 'TEST-*.xml' |
@@ -65,13 +65,13 @@ function Run-Reference([string]$tree, [string]$agent, [string]$runDirectory) {
         $_.filePathResolution -ne 'debugInfo' -or [string]::IsNullOrWhiteSpace([string]$_.filePath)
     })
     $packageOnlyEvents = @($events | Where-Object {
-        [string]$_.filePath -match '^io/behaviordiff/reference/.+\.java$'
+        [string]$_.filePath -match '^io/realdiff/reference/.+\.java$'
     })
     $wrongSubjectPaths = @($subjectEvents | Where-Object {
-        [string]$_.filePath -notmatch '^samples/JavaReference/src/main/java/io/behaviordiff/reference/.+\.java$'
+        [string]$_.filePath -notmatch '^samples/JavaReference/src/main/java/io/realdiff/reference/.+\.java$'
     })
     $wrongHarnessPaths = @($harnessEvents | Where-Object {
-        [string]$_.filePath -notmatch '^samples/JavaReference/src/test/java/io/behaviordiff/reference/.+\.java$'
+        [string]$_.filePath -notmatch '^samples/JavaReference/src/test/java/io/realdiff/reference/.+\.java$'
     })
     if ($unresolvedSourceEvents.Count -ne 0 -or $packageOnlyEvents.Count -ne 0 `
         -or $wrongSubjectPaths.Count -ne 0 -or $wrongHarnessPaths.Count -ne 0) {
@@ -136,16 +136,16 @@ try {
     Copy-CleanTree $tree1; Copy-CleanTree $tree2
     Write-Host '=== independent Java agent build 1 ===' -ForegroundColor Cyan; Build-Agent $tree1
     Write-Host '=== independent Java agent build 2 ===' -ForegroundColor Cyan; Build-Agent $tree2
-    $agent1 = Join-Path $tree1 'src/BehaviorDiff.Java.Agent/target/behaviordiff-java-agent-0.2.0-SNAPSHOT.jar'
-    $agent2 = Join-Path $tree2 'src/BehaviorDiff.Java.Agent/target/behaviordiff-java-agent-0.2.0-SNAPSHOT.jar'
+    $agent1 = Join-Path $tree1 'src/RealDiff.Java.Agent/target/realdiff-java-agent-0.2.0-SNAPSHOT.jar'
+    $agent2 = Join-Path $tree2 'src/RealDiff.Java.Agent/target/realdiff-java-agent-0.2.0-SNAPSHOT.jar'
     Write-Host '=== Java reference run 1 ===' -ForegroundColor Cyan; $count1 = Run-Reference $tree1 $agent1 $run1
     Write-Host '=== Java reference run 2 ===' -ForegroundColor Cyan; $count2 = Run-Reference $tree1 $agent2 $run2
 
-    $guard = Assert-BehaviorDiffConformanceRuns -FirstRun $run1 -SecondRun $run2 -MinimumMatchedKeys 100 `
+    $guard = Assert-RealDiffConformanceRuns -FirstRun $run1 -SecondRun $run2 -MinimumMatchedKeys 100 `
         -UsableSourceResolutions @('debugInfo', 'generatedState', 'declaringType') `
         -ReferenceSourcePathPatterns @('^samples/JavaReference/src/(main|test)/java/.+\.java$') `
         -DigestProofEvaluator $digestEvaluator
-    $engine = Invoke-BehaviorDiffEngineConformance -FirstRun $run1 -SecondRun $run2
+    $engine = Invoke-RealDiffEngineConformance -FirstRun $run1 -SecondRun $run2
 
     Write-Host '=== Java conformance report ===' -ForegroundColor Green
     Write-Host "  runner tests / derived roots: $($count1.Runner) / $($count1.Derived)"
@@ -162,7 +162,7 @@ try {
     Write-Host "  wrong source mappings      : $($guard.WrongSourceEvents)"
     Write-Host "  digest proofs per run      : $($guard.DigestProofsPerRun)"
     Write-Host "  engine raw / divergences   : $($engine.RawDifferences) / $($engine.RemainingDivergences)"
-    foreach ($proof in @(& $digestEvaluator (Read-BehaviorDiffConformanceRun $run1))) {
+    foreach ($proof in @(& $digestEvaluator (Read-RealDiffConformanceRun $run1))) {
         Write-Host "  digest/$($proof.Name): PASS ($($proof.Detail))"
     }
 } finally {

@@ -126,7 +126,7 @@ function Write-Run(
     }
     $skipped = if ($Variant -eq 'pr') { 1 } else { 0 }
     $manifest = @(
-        [ordered]@{ kind = 'run'; schema = 'behaviordiff.trace/1'; language = 'dotnet' }
+        [ordered]@{ kind = 'run'; schema = 'realdiff.trace/1'; language = 'dotnet' }
         [ordered]@{
             kind = 'assembly'
             assembly = 'Fixture.Subject'

@@ -1,3 +1,3 @@
-module github.com/behaviordiff/go-reference
+module github.com/realdiff/go-reference
 
 go 1.23

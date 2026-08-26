@@ -40,7 +40,7 @@ if (-not $githubWorkflow.Contains(
     throw 'GitHub posting is not guarded against fork pull requests'
 }
 
-$program = Get-Content (Join-Path $repo 'src/BehaviorDiff.Cli/Program.cs') -Raw
+$program = Get-Content (Join-Path $repo 'src/RealDiff.Cli/Program.cs') -Raw
 if ((-not $program.Contains('RunTests("base_run3"', [StringComparison]::Ordinal)) -or
     (-not $program.Contains('Base3 = base3', [StringComparison]::Ordinal))) {
     throw 'the generic CLI is not supplying the third base run to the engine'

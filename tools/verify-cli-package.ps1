@@ -7,17 +7,17 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-cli-package-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-cli-package-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
 $tracers = Join-Path $work 'tracers'
 $rustEngine = Join-Path $work 'rust-engine'
 $packages = Join-Path $work 'packages'
 $toolPath = Join-Path $work 'tool'
-$cliProject = Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj'
-$previousJavaAgent = $env:BEHAVIORDIFF_JAVA_AGENT
-$previousNodeTracer = $env:BEHAVIORDIFF_NODE_TRACER
-$previousGoRewriter = $env:BEHAVIORDIFF_GO_REWRITER
-$previousRustTracer = $env:BEHAVIORDIFF_RUST_TRACER
+$cliProject = Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj'
+$previousJavaAgent = $env:REALDIFF_JAVA_AGENT
+$previousNodeTracer = $env:REALDIFF_NODE_TRACER
+$previousGoRewriter = $env:REALDIFF_GO_REWRITER
+$previousRustTracer = $env:REALDIFF_RUST_TRACER
 
 function Invoke-Checked([string]$label, [scriptblock]$command) {
     & $command | ForEach-Object { Write-Host $_ }
@@ -45,8 +45,8 @@ function New-ReferenceRepository([string]$name, [string]$sample) {
     }
 
     Invoke-Checked "$name git init" { & git -C $directory init --initial-branch=main --quiet }
-    Invoke-Checked "$name git identity" { & git -C $directory config user.email 'behaviordiff-proof@example.invalid' }
-    Invoke-Checked "$name git identity" { & git -C $directory config user.name 'BehaviorDiff Proof' }
+    Invoke-Checked "$name git identity" { & git -C $directory config user.email 'realdiff-proof@example.invalid' }
+    Invoke-Checked "$name git identity" { & git -C $directory config user.name 'RealDiff Proof' }
     Invoke-Checked "$name git add" { & git -C $directory add . }
     Invoke-Checked "$name base commit" { & git -C $directory commit --quiet -m 'reference base' }
     $base = (& git -C $directory rev-parse HEAD).Trim()
@@ -131,9 +131,9 @@ try {
         & dotnet pack $cliProject -c Release -o $packages --nologo `
             "-p:CrossLanguageTracerRoot=$tracers" "-p:RustEngineRoot=$rustEngine"
     }
-    $package = Get-ChildItem $packages -Filter 'BehaviorDiff.Tool.*.nupkg' -File |
+    $package = Get-ChildItem $packages -Filter 'RealDiff.Tool.*.nupkg' -File |
         Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-    if ($null -eq $package) { throw 'BehaviorDiff CLI package was not produced' }
+    if ($null -eq $package) { throw 'RealDiff CLI package was not produced' }
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($package.FullName)
@@ -144,14 +144,14 @@ try {
     }
     $rustOs = if ($IsWindows) { 'win' } elseif ($IsLinux) { 'linux' } else { 'osx' }
     $rustArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
-    $rustFile = if ($IsWindows) { 'behaviordiff-engine.exe' } else { 'behaviordiff-engine' }
+    $rustFile = if ($IsWindows) { 'realdiff-engine.exe' } else { 'realdiff-engine' }
     $rustPackageEntry = "tools/net8.0/any/engines/rust/$rustOs-$rustArchitecture/$rustFile"
-    $rustTracerFile = if ($IsWindows) { 'behaviordiff-rust-rewrite.exe' } else { 'behaviordiff-rust-rewrite' }
+    $rustTracerFile = if ($IsWindows) { 'realdiff-rust-rewrite.exe' } else { 'realdiff-rust-rewrite' }
     $rustTracerPackageEntry = "tools/net8.0/any/tracers/rust/$rustOs-$rustArchitecture/$rustTracerFile"
-    $goTracerFile = if ($IsWindows) { 'behaviordiff-go-rewrite.exe' } else { 'behaviordiff-go-rewrite' }
+    $goTracerFile = if ($IsWindows) { 'realdiff-go-rewrite.exe' } else { 'realdiff-go-rewrite' }
     $goTracerPackageEntry = "tools/net8.0/any/tracers/go/$rustOs-$rustArchitecture/$goTracerFile"
     $requiredEntries = @(
-        'tools/net8.0/any/tracers/java/behaviordiff-java-agent.jar',
+        'tools/net8.0/any/tracers/java/realdiff-java-agent.jar',
         'tools/net8.0/any/tracers/node/register.cjs',
         'tools/net8.0/any/tracers/node/loader.mjs',
         'tools/net8.0/any/tracers/node/bootstrap.mjs',
@@ -181,17 +181,17 @@ try {
     $version = $versionNode.InnerText.Trim()
     Write-Host '=== Install packed CLI ===' -ForegroundColor Cyan
     Invoke-Checked 'CLI tool install' {
-        & dotnet tool install BehaviorDiff.Tool --tool-path $toolPath --version $version `
+        & dotnet tool install RealDiff.Tool --tool-path $toolPath --version $version `
             --add-source $packages --ignore-failed-sources
     }
-    $launcher = if ($IsWindows) { 'behaviordiff.exe' } else { 'behaviordiff' }
+    $launcher = if ($IsWindows) { 'realdiff.exe' } else { 'realdiff' }
     $cli = Join-Path $toolPath $launcher
     if (-not (Test-Path $cli -PathType Leaf)) { throw "Installed CLI launcher was not found: $cli" }
 
-    $env:BEHAVIORDIFF_JAVA_AGENT = $null
-    $env:BEHAVIORDIFF_NODE_TRACER = $null
-    $env:BEHAVIORDIFF_GO_REWRITER = $null
-    $env:BEHAVIORDIFF_RUST_TRACER = $null
+    $env:REALDIFF_JAVA_AGENT = $null
+    $env:REALDIFF_NODE_TRACER = $null
+    $env:REALDIFF_GO_REWRITER = $null
+    $env:REALDIFF_RUST_TRACER = $null
     $java = New-ReferenceRepository 'java' (Join-Path $repo 'samples/JavaReference')
     $node = New-ReferenceRepository 'node' (Join-Path $repo 'samples/NodeReference')
     $go = New-ReferenceRepository 'go' (Join-Path $repo 'samples/GoReference')
@@ -215,10 +215,10 @@ try {
     Write-Host ("  Rust : runs={0} events={1}" -f $rustResult.Runs, $rustResult.Events)
 }
 finally {
-    $env:BEHAVIORDIFF_JAVA_AGENT = $previousJavaAgent
-    $env:BEHAVIORDIFF_NODE_TRACER = $previousNodeTracer
-    $env:BEHAVIORDIFF_GO_REWRITER = $previousGoRewriter
-    $env:BEHAVIORDIFF_RUST_TRACER = $previousRustTracer
+    $env:REALDIFF_JAVA_AGENT = $previousJavaAgent
+    $env:REALDIFF_NODE_TRACER = $previousNodeTracer
+    $env:REALDIFF_GO_REWRITER = $previousGoRewriter
+    $env:REALDIFF_RUST_TRACER = $previousRustTracer
     if ($ownsWork -and -not $KeepWork) {
         Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
     } else {

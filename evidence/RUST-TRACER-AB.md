@@ -2,7 +2,7 @@
 
 ## Decision
 
-The stable cached source rewriter is the only prototype that emits runtime records on the shared feature corpus. The pinned-nightly MIR wrapper can discover every requested shape, including the two compiler-generated bodies for each async function, but it does not inject code and emits no runtime events. Neither prototype is a BehaviorDiff-conforming Rust tracer yet.
+The stable cached source rewriter is the only prototype that emits runtime records on the shared feature corpus. The pinned-nightly MIR wrapper can discover every requested shape, including the two compiler-generated bodies for each async function, but it does not inject code and emits no runtime events. Neither prototype is a RealDiff-conforming Rust tracer yet.
 
 Do not continue the `rustc_private` path as the production design. It already incurred one API break, requires an exact nightly plus `rustc-dev`, and this pinned API exposes MIR queries without a supported external MIR-pass registration point. Retain it as a compiler-coverage probe. Continue the stable rewriter only behind an explicit experimental boundary and only after resolving the contract gaps listed below.
 

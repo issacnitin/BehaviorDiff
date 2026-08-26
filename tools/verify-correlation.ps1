@@ -8,19 +8,19 @@ events partition into tests, including for events that cross threads.
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
-$env:BEHAVIORDIFF_NAMESPACES = 'SampleApp'
-$env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics'
-$env:BEHAVIORDIFF_BACKEND = 'cecil'
+$env:REALDIFF_NAMESPACES = 'SampleApp'
+$env:REALDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics'
+$env:REALDIFF_BACKEND = 'cecil'
 
-$staged = Join-Path ([System.IO.Path]::GetTempPath()) 'behaviordiff-corr-bin'
+$staged = Join-Path ([System.IO.Path]::GetTempPath()) 'realdiff-corr-bin'
 & (Join-Path $PSScriptRoot 'Stage-WovenSample.ps1') -TreeRoot (Split-Path -Parent $PSScriptRoot) -OutDir $staged
 
 function Get-Run {
     param([string]$Name, [string]$Correlation)
 
     Remove-Item "$env:TEMP\corr-$Name.*" -Force -ErrorAction SilentlyContinue
-    $env:BEHAVIORDIFF_CORRELATION = $Correlation
-    $env:BEHAVIORDIFF_TRACE = "$env:TEMP\corr-$Name"
+    $env:REALDIFF_CORRELATION = $Correlation
+    $env:REALDIFF_TRACE = "$env:TEMP\corr-$Name"
     dotnet test (Join-Path $staged 'SampleApp.Tests.dll') --nologo 2>&1 |
         Select-String 'Passed!|Failed!' | ForEach-Object { Write-Host "  $Name : $($_.Line.Trim())" }
 
@@ -45,8 +45,8 @@ $runs = @{
     framework = Get-Run -Name 'fw' -Correlation ''
     woven     = Get-Run -Name 'wv' -Correlation 'woven'
 }
-$env:BEHAVIORDIFF_CORRELATION = ''
-$env:BEHAVIORDIFF_TRACE = ''
+$env:REALDIFF_CORRELATION = ''
+$env:REALDIFF_TRACE = ''
 
 $shapes = @{}
 foreach ($name in 'framework', 'woven') {

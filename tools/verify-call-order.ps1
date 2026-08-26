@@ -14,19 +14,19 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
-$env:BEHAVIORDIFF_NAMESPACES = 'SampleApp'
-$env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics'
-$env:BEHAVIORDIFF_BACKEND = 'cecil'
+$env:REALDIFF_NAMESPACES = 'SampleApp'
+$env:REALDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics'
+$env:REALDIFF_BACKEND = 'cecil'
 
-$staged = Join-Path ([System.IO.Path]::GetTempPath()) 'behaviordiff-order-bin'
+$staged = Join-Path ([System.IO.Path]::GetTempPath()) 'realdiff-order-bin'
 & (Join-Path $PSScriptRoot 'Stage-WovenSample.ps1') -TreeRoot (Split-Path -Parent $PSScriptRoot) -OutDir $staged
 
 $runs = @()
 foreach ($i in 1, 2) {
-    $dir = Join-Path ([System.IO.Path]::GetTempPath()) "behaviordiff-order$i"
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) "realdiff-order$i"
     Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $dir | Out-Null
-    $env:BEHAVIORDIFF_TRACE = Join-Path $dir 'run.ndjson'
+    $env:REALDIFF_TRACE = Join-Path $dir 'run.ndjson'
 
     dotnet test (Join-Path $staged 'SampleApp.Tests.dll') --nologo | Out-Null
 

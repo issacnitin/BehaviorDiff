@@ -25,9 +25,9 @@ for ($i = 1; $i -le $Runs; $i++) {
     $dir = Join-Path $sampleRoot "run$i"
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
 
-    $env:BEHAVIORDIFF_BACKEND = 'cecil'
-    $env:BEHAVIORDIFF_NAMESPACES = 'FluentValidation'
-    $env:BEHAVIORDIFF_TRACE = Join-Path $dir 'run.ndjson'
+    $env:REALDIFF_BACKEND = 'cecil'
+    $env:REALDIFF_NAMESPACES = 'FluentValidation'
+    $env:REALDIFF_TRACE = Join-Path $dir 'run.ndjson'
     dotnet test (Join-Path $staged 'FluentValidation.Tests.dll') --nologo 2>&1 | Out-Null
 
     $trace = Get-ChildItem $dir -Filter 'run.*' | Where-Object { $_.Name -notmatch 'manifest|log' } | Select-Object -First 1
@@ -51,8 +51,8 @@ for ($i = 1; $i -le $Runs; $i++) {
     Write-Host ("  run{0}  events={1,8:N0}  methods={2,6:N0}  keys={3,7:N0}" -f $i, $events, $byMethod.Count, $byKey.Count)
     $samples += [pscustomobject]@{ Index = $i; Events = $events; ByMethod = $byMethod; ByKey = $byKey }
 }
-$env:BEHAVIORDIFF_BACKEND = ''
-$env:BEHAVIORDIFF_TRACE = ''
+$env:REALDIFF_BACKEND = ''
+$env:REALDIFF_TRACE = ''
 
 Write-Host ''
 Write-Host '=== event count spread ===' -ForegroundColor Cyan

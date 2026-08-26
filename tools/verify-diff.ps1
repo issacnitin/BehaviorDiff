@@ -22,14 +22,14 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repo = Split-Path -Parent $PSScriptRoot
-Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Engine.psm1') -Force
-$engine = Get-BehaviorDiffEngine
+Import-Module (Join-Path $PSScriptRoot 'RealDiff.Engine.psm1') -Force
+$engine = Get-RealDiffEngine
 $providedPrTree = $PrTreeDirectory
 $runId = [Guid]::NewGuid().ToString('N')
 $ownsPrTree = -not $PrTreeDirectory
 $ownsWork = -not $WorkDirectory
-$prTree = if ($PrTreeDirectory) { $PrTreeDirectory } else { Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-pr-$runId" }
-$work = if ($WorkDirectory) { $WorkDirectory } else { Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-run-$runId" }
+$prTree = if ($PrTreeDirectory) { $PrTreeDirectory } else { Join-Path ([IO.Path]::GetTempPath()) "realdiff-pr-$runId" }
+$work = if ($WorkDirectory) { $WorkDirectory } else { Join-Path ([IO.Path]::GetTempPath()) "realdiff-run-$runId" }
 
 if ($SkipPrRebuild -and (-not $providedPrTree -or -not (Test-Path $providedPrTree))) {
     throw '-SkipPrRebuild requires an existing -PrTreeDirectory.'
@@ -39,10 +39,10 @@ function Invoke-Suite([string]$stagedBin, [string]$outputDir) {
     Remove-Item $outputDir -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $outputDir | Out-Null
 
-    $env:BEHAVIORDIFF_NAMESPACES = 'SampleApp,Commerce.Pricing,Infrastructure.Collections'
-    $env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics,SampleApp.Persistence,Infrastructure.Collections'
-    $env:BEHAVIORDIFF_BACKEND = 'cecil'
-    $env:BEHAVIORDIFF_TRACE = Join-Path $outputDir 'run.ndjson'
+    $env:REALDIFF_NAMESPACES = 'SampleApp,Commerce.Pricing,Infrastructure.Collections'
+    $env:REALDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics,SampleApp.Persistence,Infrastructure.Collections'
+    $env:REALDIFF_BACKEND = 'cecil'
+    $env:REALDIFF_TRACE = Join-Path $outputDir 'run.ndjson'
 
     $testArguments = @('test', (Join-Path $stagedBin 'SampleApp.Tests.dll'), '--nologo')
     if ($Change -in @('config', 'config-high')) {
@@ -57,7 +57,7 @@ function Invoke-Proof {
 Write-Host '=== preparing worktrees ===' -ForegroundColor Cyan
 Push-Location $repo
 try {
-    dotnet build BehaviorDiff.sln -c Release --nologo -v quiet | Out-Null
+    dotnet build RealDiff.sln -c Release --nologo -v quiet | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'base build failed' }
 }
 finally { Pop-Location }
@@ -132,7 +132,7 @@ RetrySettings.MaxAttempts = raw.TryGetValue("max_attempts", out string? value)
 
     Push-Location $prTree
     try {
-        dotnet build BehaviorDiff.sln -c Release --nologo -v quiet | Out-Null
+        dotnet build RealDiff.sln -c Release --nologo -v quiet | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'pr worktree build failed' }
     }
     finally { Pop-Location }
@@ -244,7 +244,7 @@ if ($Mutate -and $Change -eq 'sort') {
 
     $memberParts = ($member.memberName.Split('(')[0]).Split('.')
     $shortMember = $memberParts[-2] + '.' + $memberParts[-1]
-    $preview = Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj'
+    $preview = Join-Path $repo 'tools/CommentPreview/RealDiff.CommentPreview.csproj'
     $defaultGitHub = @(& dotnet run --project $preview -c Release -- $findings 2>&1) -join "`n"
     if ($LASTEXITCODE -ne 0) { throw "default GitHub preview failed: $LASTEXITCODE" }
     $strictGitHub = @(& dotnet run --project $preview -c Release -- $strictFindings 2>&1) -join "`n"
@@ -310,7 +310,7 @@ Write-Host 'findings.json analyzed arm: PASS' -ForegroundColor Green
 return 0
 }
 
-$mutex = [Threading.Mutex]::new($false, 'Local\BehaviorDiffVerifyDiff')
+$mutex = [Threading.Mutex]::new($false, 'Local\RealDiffVerifyDiff')
 $acquired = $false
 try {
     try {

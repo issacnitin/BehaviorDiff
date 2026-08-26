@@ -1,6 +1,6 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-rust-generic-identity-gate'))
+param([string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'realdiff-rust-generic-identity-gate'))
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -11,8 +11,8 @@ $cache = Join-Path $work 'cache'
 $run = Join-Path $work 'run'
 $trace = Join-Path $run 'run.rust.ndjson'
 $traceManifest = Join-Path $run 'run.rust.manifest.ndjson'
-$tracerManifest = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml'
-$binary = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/target/release/behaviordiff-rust-rewrite.exe'
+$tracerManifest = Join-Path $repo 'src/RealDiff.Rust.Tracer/Cargo.toml'
+$binary = Join-Path $repo 'src/RealDiff.Rust.Tracer/target/release/realdiff-rust-rewrite.exe'
 if (-not $IsWindows) { $binary = $binary.Substring(0, $binary.Length - 4) }
 
 if (Test-Path $work) { Remove-Item $work -Recurse -Force }
@@ -23,14 +23,14 @@ $rewrite = (& $binary --source $source --cache-root $cache | ConvertFrom-Json)
 if ($rewrite.sourceFiles -le 0 -or $rewrite.rustFiles -le 0) {
     throw "Rust generic identity inputs are empty: source=$($rewrite.sourceFiles) rust=$($rewrite.rustFiles)"
 }
-$env:BEHAVIORDIFF_RUST_EXIT_TRACE = $trace
+$env:REALDIFF_RUST_EXIT_TRACE = $trace
 try {
     & cargo run --quiet --manifest-path (Join-Path $rewrite.output 'Cargo.toml')
     if ($LASTEXITCODE -ne 0) { throw "Rewritten Rust reference failed: $LASTEXITCODE" }
 } finally {
-    Remove-Item Env:BEHAVIORDIFF_RUST_EXIT_TRACE -ErrorAction SilentlyContinue
+    Remove-Item Env:REALDIFF_RUST_EXIT_TRACE -ErrorAction SilentlyContinue
 }
-& $binary finalize --origin (Join-Path $rewrite.output '.behaviordiff-rust-origin.json') --trace $trace --out $traceManifest | Out-Null
+& $binary finalize --origin (Join-Path $rewrite.output '.realdiff-rust-origin.json') --trace $trace --out $traceManifest | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Rust generic manifest finalization failed: $LASTEXITCODE" }
 
 $events = @(Get-Content $trace | Where-Object { $_.Trim().Length -gt 0 } | ForEach-Object { $_ | ConvertFrom-Json })

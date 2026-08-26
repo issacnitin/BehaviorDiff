@@ -5,17 +5,17 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
-$toolModule = Join-Path $repo 'src/BehaviorDiff.Go'
+$toolModule = Join-Path $repo 'src/RealDiff.Go'
 $fixture = Join-Path $toolModule 'testdata/rewrite'
 
 if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
     $candidates = @(
-        (Join-Path $env:LOCALAPPDATA 'Programs/BehaviorDiffGo/go/bin'),
-        (Join-Path $HOME '.behaviordiff-tools/go/bin')
+        (Join-Path $env:LOCALAPPDATA 'Programs/RealDiffGo/go/bin'),
+        (Join-Path $HOME '.realdiff-tools/go/bin')
     )
     $localGoBin = $candidates | Where-Object { Test-Path (Join-Path $_ 'go.exe') -PathType Leaf } | Select-Object -First 1
     if (-not $localGoBin) {
-        throw 'Go was not found on PATH or in a BehaviorDiff local tool directory.'
+        throw 'Go was not found on PATH or in a RealDiff local tool directory.'
     }
     $env:PATH = "$localGoBin;$env:PATH"
 }
@@ -67,7 +67,7 @@ function Invoke-Go {
     return $output
 }
 
-$tempRoot = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-go-rewriter-$([guid]::NewGuid().ToString('N'))"
+$tempRoot = Join-Path ([IO.Path]::GetTempPath()) "realdiff-go-rewriter-$([guid]::NewGuid().ToString('N'))"
 $source = Join-Path $tempRoot 'source'
 $cache = Join-Path $tempRoot 'cache'
 
@@ -79,7 +79,7 @@ try {
     Push-Location $toolModule
     try {
         Write-Host "Go toolchain: $(& go version)"
-        $rewriteOutput = Invoke-Go @('run', './cmd/behaviordiff-go-rewrite', '--source', $source, '--out', $cache)
+        $rewriteOutput = Invoke-Go @('run', './cmd/realdiff-go-rewrite', '--source', $source, '--out', $cache)
     } finally {
         Pop-Location
     }
@@ -94,7 +94,7 @@ try {
         Pop-Location
     }
 
-    $reportPath = Join-Path $cache 'behaviordiff-rewrite-report.json'
+    $reportPath = Join-Path $cache 'realdiff-rewrite-report.json'
     if (-not (Test-Path $reportPath -PathType Leaf)) {
         throw "Rewrite report was not created: $reportPath"
     }
@@ -132,7 +132,7 @@ try {
         throw "Generic template report mismatch: $($templates | ConvertTo-Json -Compress)"
     }
 
-    $expectedSummary = 'GO_REWRITE_SUMMARY methods=5 companions=34 roots=5 patched=31 skipped=7 templates=3 direct=38 go=8 boundaries=4 report=behaviordiff-rewrite-report.json'
+    $expectedSummary = 'GO_REWRITE_SUMMARY methods=5 companions=34 roots=5 patched=31 skipped=7 templates=3 direct=38 go=8 boundaries=4 report=realdiff-rewrite-report.json'
     if (-not (($rewriteOutput -join "`n").Contains($expectedSummary, [StringComparison]::Ordinal))) {
         throw "Required CLI summary was not found: $expectedSummary"
     }

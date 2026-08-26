@@ -7,8 +7,8 @@
 **/target
 artifacts
 !artifacts/self-contained-proof/
-!artifacts/self-contained-proof/behaviordiff/
-!artifacts/self-contained-proof/behaviordiff/**
+!artifacts/self-contained-proof/realdiff/
+!artifacts/self-contained-proof/realdiff/**
 evidence
 samples
 !samples/NodeSortDemo/

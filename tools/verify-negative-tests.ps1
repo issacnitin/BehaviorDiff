@@ -9,7 +9,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
 Write-Host '=== build ===' -ForegroundColor Cyan
-dotnet build BehaviorDiff.sln -c Release --nologo -v quiet
+dotnet build RealDiff.sln -c Release --nologo -v quiet
 if ($LASTEXITCODE -ne 0) { throw 'build failed' }
 
 $assert = Join-Path $PSScriptRoot 'Assert-RunRefused.ps1'

@@ -1,6 +1,6 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-rust-trace-manifest-gate'))
+param([string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'realdiff-rust-trace-manifest-gate'))
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -12,10 +12,10 @@ $run = Join-Path $work 'run'
 $trace = Join-Path $run 'run.rust.ndjson'
 $traceManifest = Join-Path $run 'run.rust.manifest.ndjson'
 $output = Join-Path $work 'divergence-set.json'
-$tracerManifest = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml'
-$binary = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/target/release/behaviordiff-rust-rewrite.exe'
-$engineManifest = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml'
-$engine = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/target/release/behaviordiff-engine.exe'
+$tracerManifest = Join-Path $repo 'src/RealDiff.Rust.Tracer/Cargo.toml'
+$binary = Join-Path $repo 'src/RealDiff.Rust.Tracer/target/release/realdiff-rust-rewrite.exe'
+$engineManifest = Join-Path $repo 'src/RealDiff.Engine.Rust/Cargo.toml'
+$engine = Join-Path $repo 'src/RealDiff.Engine.Rust/target/release/realdiff-engine.exe'
 if (-not $IsWindows) { $binary = $binary.Substring(0, $binary.Length - 4) }
 if (-not $IsWindows) { $engine = $engine.Substring(0, $engine.Length - 4) }
 
@@ -28,14 +28,14 @@ if ($rewrite.sourceFiles -le 0 -or $rewrite.rustFiles -le 0) {
     throw "Rust manifest inputs are empty: source=$($rewrite.sourceFiles) rust=$($rewrite.rustFiles)"
 }
 
-$env:BEHAVIORDIFF_RUST_EXIT_TRACE = $trace
+$env:REALDIFF_RUST_EXIT_TRACE = $trace
 try {
     & cargo test --quiet --manifest-path (Join-Path $rewrite.output 'Cargo.toml') --lib -- --test-threads=1
     if ($LASTEXITCODE -ne 0) { throw "Rewritten Rust tests failed: $LASTEXITCODE" }
 } finally {
-    Remove-Item Env:BEHAVIORDIFF_RUST_EXIT_TRACE -ErrorAction SilentlyContinue
+    Remove-Item Env:REALDIFF_RUST_EXIT_TRACE -ErrorAction SilentlyContinue
 }
-$origin = Join-Path $rewrite.output '.behaviordiff-rust-origin.json'
+$origin = Join-Path $rewrite.output '.realdiff-rust-origin.json'
 $finalize = (& $binary finalize --origin $origin --trace $trace --out $traceManifest | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0) { throw "Rust manifest finalization failed: $LASTEXITCODE" }
 if ($finalize.events -le 0 -or $finalize.discoveredMembers -le 0 -or $finalize.patchedMembers -le 0) {
@@ -70,9 +70,9 @@ if ([long]$digest.valuesDigested -le 0) {
 }
 
 & cargo build --release --locked --manifest-path $engineManifest
-if ($LASTEXITCODE -ne 0) { throw "BehaviorDiff engine build failed: $LASTEXITCODE" }
+if ($LASTEXITCODE -ne 0) { throw "RealDiff engine build failed: $LASTEXITCODE" }
 & $engine stream-diff --base1 $run --base2 $run --base3 $run --pr $run --base-root $source --pr-root $source --out $output
-if ($LASTEXITCODE -ne 0) { throw "BehaviorDiff engine rejected Rust trace/manifest: $LASTEXITCODE" }
+if ($LASTEXITCODE -ne 0) { throw "RealDiff engine rejected Rust trace/manifest: $LASTEXITCODE" }
 $document = Get-Content $output -Raw | ConvertFrom-Json
 if ([int]$document.counts.matchedKeys -lt 300) {
     throw "Rust engine matched-key input is below floor: $($document.counts.matchedKeys)"

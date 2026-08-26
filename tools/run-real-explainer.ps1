@@ -9,9 +9,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $apiKey = $env:ANTHROPIC_API_KEY
 if ([string]::IsNullOrWhiteSpace($apiKey)) {
-    $keyFile = Join-Path $HOME '.behaviordiff/anthropic.key'
+    $keyFile = Join-Path $HOME '.realdiff/anthropic.key'
     if (-not (Test-Path $keyFile)) {
-        throw 'ANTHROPIC_API_KEY is not set and ~/.behaviordiff/anthropic.key does not exist.'
+        throw 'ANTHROPIC_API_KEY is not set and ~/.realdiff/anthropic.key does not exist.'
     }
 
     $protectedKey = (Get-Content $keyFile -Raw).Trim()
@@ -30,8 +30,8 @@ Remove-Item Env:ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
 
 $repo = Split-Path -Parent $PSScriptRoot
 $runId = [Guid]::NewGuid().ToString('N')
-$prTree = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-live-pr-$runId"
-$work = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-live-$runId"
+$prTree = Join-Path ([IO.Path]::GetTempPath()) "realdiff-live-pr-$runId"
+$work = Join-Path ([IO.Path]::GetTempPath()) "realdiff-live-$runId"
 $case = switch ($Change) {
     'sort' { @{
         File = 'src/Infrastructure.Collections/SortingExtensions.cs'
@@ -84,10 +84,10 @@ try {
 
     $liveOutput = Join-Path $work 'live'
     $liveArtifacts = Join-Path $work 'live-artifacts'
-    & dotnet publish (Join-Path $PSScriptRoot 'AnthropicLive/BehaviorDiff.AnthropicLive.csproj') `
+    & dotnet publish (Join-Path $PSScriptRoot 'AnthropicLive/RealDiff.AnthropicLive.csproj') `
         -c Release --artifacts-path $liveArtifacts -o $liveOutput --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "AnthropicLive publish failed: $LASTEXITCODE" }
-    $liveDll = Join-Path $liveOutput 'BehaviorDiff.AnthropicLive.dll'
+    $liveDll = Join-Path $liveOutput 'RealDiff.AnthropicLive.dll'
 
     $env:ANTHROPIC_API_KEY = $apiKey
     & dotnet $liveDll (Join-Path $work 'findings.json') $case.File $patch

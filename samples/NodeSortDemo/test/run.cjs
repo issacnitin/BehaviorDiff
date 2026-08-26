@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { CheckoutService } = require('../src/pricing/checkout-service.js');
 
-const runtimeSymbol = Symbol.for('behaviordiff.runtime');
+const runtimeSymbol = Symbol.for('realdiff.runtime');
 let executed = 0;
 
 async function runCase(testId, callback) {
@@ -39,8 +39,8 @@ async function main() {
   assert.equal(executed, 3);
   const report = { runnerTests: executed };
   const serialized = `${JSON.stringify(report)}\n`;
-  if (process.env.BEHAVIORDIFF_RUNNER_REPORT) {
-    const reportPath = path.resolve(process.env.BEHAVIORDIFF_RUNNER_REPORT);
+  if (process.env.REALDIFF_RUNNER_REPORT) {
+    const reportPath = path.resolve(process.env.REALDIFF_RUNNER_REPORT);
     fs.mkdirSync(path.dirname(reportPath), { recursive: true });
     fs.writeFileSync(reportPath, serialized, 'utf8');
   }

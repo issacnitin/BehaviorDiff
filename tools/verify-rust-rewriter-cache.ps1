@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$SourceDirectory,
-    [string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-rust-rewriter-cache-gate')
+    [string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'realdiff-rust-rewriter-cache-gate')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,8 +14,8 @@ $source = if ([string]::IsNullOrWhiteSpace($SourceDirectory)) {
     [IO.Path]::GetFullPath($SourceDirectory)
 }
 $work = [IO.Path]::GetFullPath($WorkDirectory)
-$manifest = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml'
-$binary = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/target/release/behaviordiff-rust-rewrite.exe'
+$manifest = Join-Path $repo 'src/RealDiff.Rust.Tracer/Cargo.toml'
+$binary = Join-Path $repo 'src/RealDiff.Rust.Tracer/target/release/realdiff-rust-rewrite.exe'
 if (-not $IsWindows) {
     $binary = $binary.Substring(0, $binary.Length - 4)
 }
@@ -73,7 +73,7 @@ if ($first.sourceFiles -le 0 -or $first.rustFiles -le 0) {
     throw "Rust rewrite reported empty inputs: source=$($first.sourceFiles) rust=$($first.rustFiles)"
 }
 
-$origin = Get-Content (Join-Path $first.output '.behaviordiff-rust-origin.json') -Raw | ConvertFrom-Json
+$origin = Get-Content (Join-Path $first.output '.realdiff-rust-origin.json') -Raw | ConvertFrom-Json
 if (@($origin.rustFiles).Count -ne $first.rustFiles -or @($origin.rustFiles).Count -le 0) {
     throw "Rust origin manifest count mismatch: report=$($first.rustFiles) manifest=$(@($origin.rustFiles).Count)"
 }

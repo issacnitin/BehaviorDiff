@@ -15,7 +15,7 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $work = [IO.Path]::GetFullPath($WorkDirectory)
 $engine = if ([string]::IsNullOrWhiteSpace($RustEngine)) {
-    Join-Path $repo 'src/BehaviorDiff.Engine.Rust/target/release/behaviordiff-engine.exe'
+    Join-Path $repo 'src/RealDiff.Engine.Rust/target/release/realdiff-engine.exe'
 } else {
     [IO.Path]::GetFullPath($RustEngine)
 }

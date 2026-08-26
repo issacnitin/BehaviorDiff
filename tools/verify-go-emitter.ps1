@@ -5,24 +5,24 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
-$toolModule = Join-Path $repo 'src/BehaviorDiff.Go'
-$artifactRoot = Join-Path ([IO.Path]::GetTempPath()) "behaviordiff-go-emitter-$([guid]::NewGuid().ToString('N'))"
+$toolModule = Join-Path $repo 'src/RealDiff.Go'
+$artifactRoot = Join-Path ([IO.Path]::GetTempPath()) "realdiff-go-emitter-$([guid]::NewGuid().ToString('N'))"
 
 if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
     $candidates = @(
-        (Join-Path $env:LOCALAPPDATA 'Programs/BehaviorDiffGo/go/bin'),
-        (Join-Path $HOME '.behaviordiff-tools/go/bin')
+        (Join-Path $env:LOCALAPPDATA 'Programs/RealDiffGo/go/bin'),
+        (Join-Path $HOME '.realdiff-tools/go/bin')
     )
     $localGoBin = $candidates | Where-Object { Test-Path (Join-Path $_ 'go.exe') -PathType Leaf } | Select-Object -First 1
     if (-not $localGoBin) {
-        throw 'Go was not found on PATH or in a BehaviorDiff local tool directory.'
+        throw 'Go was not found on PATH or in a RealDiff local tool directory.'
     }
     $env:PATH = "$localGoBin;$env:PATH"
 }
 
 try {
     New-Item -ItemType Directory -Path $artifactRoot | Out-Null
-    $env:BEHAVIORDIFF_GO_EMITTER_OUTPUT = $artifactRoot
+    $env:REALDIFF_GO_EMITTER_OUTPUT = $artifactRoot
     Push-Location $toolModule
     try {
         Write-Host "Go toolchain: $(& go version)"
@@ -53,6 +53,6 @@ try {
     Write-Host $expected -ForegroundColor Green
     Write-Host 'GO_EMITTER_PROOF returns=true panicNoReturn=true recovered=true roots=true goroutineParent=true source=true ordinals=true reconciliation=true parser=true' -ForegroundColor Green
 } finally {
-    Remove-Item Env:BEHAVIORDIFF_GO_EMITTER_OUTPUT -ErrorAction SilentlyContinue
+    Remove-Item Env:REALDIFF_GO_EMITTER_OUTPUT -ErrorAction SilentlyContinue
     Remove-Item -Path $artifactRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

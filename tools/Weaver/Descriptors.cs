@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using BehaviorDiff.Contracts;
-using BehaviorDiff.Tracer;
+using RealDiff.Contracts;
+using RealDiff.Tracer;
 
-namespace BehaviorDiff.Weaver
+namespace RealDiff.Weaver
 {
     /// <summary>One member the weaver considered, woven or declined.</summary>
     internal sealed class MemberPlan

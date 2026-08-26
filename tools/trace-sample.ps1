@@ -10,21 +10,21 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
-$work = Join-Path ([System.IO.Path]::GetTempPath()) 'behaviordiff-sample'
+$work = Join-Path ([System.IO.Path]::GetTempPath()) 'realdiff-sample'
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $work | Out-Null
 $base = Join-Path $work 'run.ndjson'
 
 # Must be set before the process starts: the runtime reads it during startup.
-$env:BEHAVIORDIFF_TRACE = $base
-$env:BEHAVIORDIFF_NAMESPACES = 'SampleApp'
-$env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics'
-$env:BEHAVIORDIFF_VERBOSE = '1'
-$env:BEHAVIORDIFF_BACKEND = 'cecil'
+$env:REALDIFF_TRACE = $base
+$env:REALDIFF_NAMESPACES = 'SampleApp'
+$env:REALDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics'
+$env:REALDIFF_VERBOSE = '1'
+$env:REALDIFF_BACKEND = 'cecil'
 
 Write-Host ''
 Write-Host '=== build ===' -ForegroundColor Cyan
-dotnet build BehaviorDiff.sln -c Release --nologo -v quiet
+dotnet build RealDiff.sln -c Release --nologo -v quiet
 if ($LASTEXITCODE -ne 0) { throw 'build failed' }
 dotnet build tools/Weaver/Weaver.csproj -c Release --nologo -v quiet
 if ($LASTEXITCODE -ne 0) { throw 'weaver build failed' }
@@ -54,7 +54,7 @@ $assemblies = $records | Where-Object { $_.kind -eq 'assembly' }
 $members = $records | Where-Object { $_.kind -eq 'member' }
 
 if ($runMetadata.Count -ne 1 `
-    -or $runMetadata.schema -ne 'behaviordiff.trace/1' `
+    -or $runMetadata.schema -ne 'realdiff.trace/1' `
     -or $runMetadata.language -ne 'dotnet') {
     throw 'run metadata is missing, duplicated, or invalid'
 }
@@ -383,9 +383,9 @@ $interleaved = $events | Group-Object testId | Where-Object { ($_.Group.threadId
 
 Write-Host ''
 Write-Host '=== engine read ===' -ForegroundColor Cyan
-$engineManifest = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml'
+$engineManifest = Join-Path $repo 'src/RealDiff.Engine.Rust/Cargo.toml'
 & cargo build --release --locked --manifest-path $engineManifest
 if ($LASTEXITCODE -ne 0) { throw 'Rust engine build failed' }
-$engine = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/target/release/behaviordiff-engine.exe'
+$engine = Join-Path $repo 'src/RealDiff.Engine.Rust/target/release/realdiff-engine.exe'
 if (-not $IsWindows) { $engine = $engine.Substring(0, $engine.Length - 4) }
 & $engine read $traceFile.FullName

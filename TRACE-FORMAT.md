@@ -1,8 +1,8 @@
-# BehaviorDiff Trace Format
+# RealDiff Trace Format
 
-Version: `behaviordiff.trace/1`
+Version: `realdiff.trace/1`
 
-This document is the normative contract between a language tracer and the BehaviorDiff engine. A tracer is conforming only when it emits the trace and coverage files described here and passes the conformance procedure below. Language-specific implementation details are non-normative unless this document labels them as requirements.
+This document is the normative contract between a language tracer and the RealDiff engine. A tracer is conforming only when it emits the trace and coverage files described here and passes the conformance procedure below. Language-specific implementation details are non-normative unless this document labels them as requirements.
 
 ## Files and encoding
 
@@ -20,13 +20,13 @@ JSON numbers used for identifiers and counts are signed integers. Producers MUST
 Every process manifest begins with exactly one run record:
 
 ```json
-{"kind":"run","schema":"behaviordiff.trace/1","language":"dotnet"}
+{"kind":"run","schema":"realdiff.trace/1","language":"dotnet"}
 ```
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `kind` | string | yes | Always `run`. |
-| `schema` | string | yes | Exactly `behaviordiff.trace/1`. An unsupported value is refused. |
+| `schema` | string | yes | Exactly `realdiff.trace/1`. An unsupported value is refused. |
 | `language` | string | yes | Digest/canonicalizer domain. Version 1 reserves `dotnet`, `java`, `node`, `go`, `rust`, and `python`. |
 
 All process manifests merged into one run MUST agree on `schema` and `language`. Base samples and the proposed run MUST have the same language. The engine refuses a cross-language comparison because digest equality is defined only within one language.

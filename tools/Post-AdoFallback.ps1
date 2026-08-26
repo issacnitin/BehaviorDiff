@@ -1,7 +1,7 @@
 #requires -Version 7.0
 <#
-  Emergency summary-only poster used when behaviordiff.dll itself is unavailable.
-  Normal posting belongs to `behaviordiff post`; this script exists solely to preserve the invariant
+  Emergency summary-only poster used when realdiff.dll itself is unavailable.
+  Normal posting belongs to `realdiff post`; this script exists solely to preserve the invariant
   that a broken tool build still leaves a visible non-verdict on the pull request.
 #>
 [CmdletBinding()]
@@ -20,9 +20,9 @@ if (-not (Test-Path $Findings)) { throw "findings file does not exist: $Findings
 $document = Get-Content $Findings -Raw | ConvertFrom-Json
 $reason = if ($document.refusal.reason) { $document.refusal.reason } else { 'No reason was recorded.' }
 $prId = $env:SYSTEM_PULLREQUEST_PULLREQUESTID
-$marker = "<!-- behaviordiff:pr:${prId}:summary -->"
+$marker = "<!-- realdiff:pr:${prId}:summary -->"
 $content = @"
-## BehaviorDiff: analysis could not complete
+## RealDiff: analysis could not complete
 
 **No safety verdict was produced.** This is not a clean result.
 

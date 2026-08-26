@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-redaction-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-redaction-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
 $fixture = Join-Path $work 'repo'
 $runWork = Join-Path $work 'analysis'
@@ -29,7 +29,7 @@ try {
     New-Item -ItemType Directory -Path $expiredRun -Force | Out-Null
     [IO.File]::WriteAllText((Join-Path $expiredRun 'run.1.ndjson'), "sensitive trace")
     [IO.File]::WriteAllText((Join-Path $expiredWork 'trace-retention.json'),
-        '{"schema":"behaviordiff.trace-retention/1","expiresUtc":"2000-01-01T00:00:00.0000000+00:00"}')
+        '{"schema":"realdiff.trace-retention/1","expiresUtc":"2000-01-01T00:00:00.0000000+00:00"}')
     [IO.File]::WriteAllText((Join-Path $fixture 'App/App.csproj'), @'
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net8.0</TargetFramework><RootNamespace>App</RootNamespace></PropertyGroup>
@@ -86,8 +86,8 @@ $tests
     } finally { Pop-Location }
 
     Invoke-Checked 'git init' { & git -C $fixture init --initial-branch=main --quiet }
-    Invoke-Checked 'git identity' { & git -C $fixture config user.email 'redaction-proof@behaviordiff.invalid' }
-    Invoke-Checked 'git identity' { & git -C $fixture config user.name 'BehaviorDiff Redaction Proof' }
+    Invoke-Checked 'git identity' { & git -C $fixture config user.email 'redaction-proof@realdiff.invalid' }
+    Invoke-Checked 'git identity' { & git -C $fixture config user.name 'RealDiff Redaction Proof' }
     Invoke-Checked 'git add' { & git -C $fixture add . }
     Invoke-Checked 'base commit' { & git -C $fixture commit --quiet -m 'base secret' }
     $base = (& git -C $fixture rev-parse HEAD).Trim()
@@ -98,8 +98,8 @@ $tests
     Invoke-Checked 'PR commit' { & git -C $fixture commit --quiet -m 'rotate token' }
     $pr = (& git -C $fixture rev-parse HEAD).Trim()
 
-    Invoke-Checked 'solution build' { & dotnet build (Join-Path $repo 'BehaviorDiff.sln') -c Release --nologo -v quiet }
-    $cli = Join-Path $repo 'src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll'
+    Invoke-Checked 'solution build' { & dotnet build (Join-Path $repo 'RealDiff.sln') -c Release --nologo -v quiet }
+    $cli = Join-Path $repo 'src/RealDiff.Cli/bin/Release/net8.0/realdiff.dll'
     $output = @(& dotnet $cli $fixture --base $base --pr $pr --work $runWork --findings $findingsPath --no-cache 2>&1)
     $exitCode = $LASTEXITCODE
     $output | ForEach-Object { Write-Host $_ }
@@ -107,7 +107,7 @@ $tests
 
     $divergence = Get-Content (Join-Path $runWork 'divergence-set.json') -Raw
     $findings = Get-Content $findingsPath -Raw
-    $comment = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+    $comment = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/RealDiff.CommentPreview.csproj') `
         -c Release -- $findingsPath)
     if ($LASTEXITCODE -ne 0) { throw 'Comment rendering failed' }
     $commentText = $comment -join "`n"

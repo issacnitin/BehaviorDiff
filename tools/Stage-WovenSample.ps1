@@ -25,9 +25,9 @@ New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 Copy-Item "$built\*" $OutDir -Recurse -Force
 
 foreach ($instrumentation in @(
-    'src/BehaviorDiff.Contracts/bin/Release/netstandard2.0/BehaviorDiff.Contracts',
-    'src/BehaviorDiff.Tracer/bin/Release/netstandard2.0/BehaviorDiff.Tracer',
-    'src/BehaviorDiff.Tracer.Xunit/bin/Release/netstandard2.0/BehaviorDiff.Tracer.Xunit')) {
+    'src/RealDiff.Contracts/bin/Release/netstandard2.0/RealDiff.Contracts',
+    'src/RealDiff.Tracer/bin/Release/netstandard2.0/RealDiff.Tracer',
+    'src/RealDiff.Tracer.Xunit/bin/Release/netstandard2.0/RealDiff.Tracer.Xunit')) {
     foreach ($extension in @('.dll', '.pdb')) {
         $source = Join-Path $InstrumentationTreeRoot ($instrumentation + $extension)
         if (Test-Path $source) { Copy-Item $source $OutDir -Force }

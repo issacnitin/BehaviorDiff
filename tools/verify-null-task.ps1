@@ -7,14 +7,14 @@ call would appear twice, which would read as the method having been called twice
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
-$env:BEHAVIORDIFF_NAMESPACES = 'SampleApp'
-$env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics'
-$env:BEHAVIORDIFF_BACKEND = 'cecil'
+$env:REALDIFF_NAMESPACES = 'SampleApp'
+$env:REALDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics'
+$env:REALDIFF_BACKEND = 'cecil'
 
-$work = Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-nulltask'
+$work = Join-Path ([IO.Path]::GetTempPath()) 'realdiff-nulltask'
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $work | Out-Null
-$env:BEHAVIORDIFF_TRACE = Join-Path $work 'run.ndjson'
+$env:REALDIFF_TRACE = Join-Path $work 'run.ndjson'
 
 $staged = Join-Path $work 'bin'
 & (Join-Path $PSScriptRoot 'Stage-WovenSample.ps1') -TreeRoot (Split-Path -Parent $PSScriptRoot) -OutDir $staged

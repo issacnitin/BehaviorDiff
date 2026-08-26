@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$SourceDirectory,
-    [string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-rust-exit-hook-gate')
+    [string]$WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'realdiff-rust-exit-hook-gate')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,8 +16,8 @@ $source = if ([string]::IsNullOrWhiteSpace($SourceDirectory)) {
 $work = [IO.Path]::GetFullPath($WorkDirectory)
 $cache = Join-Path $work 'cache'
 $trace = Join-Path $work 'exit-hooks.ndjson'
-$manifest = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml'
-$binary = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/target/release/behaviordiff-rust-rewrite.exe'
+$manifest = Join-Path $repo 'src/RealDiff.Rust.Tracer/Cargo.toml'
+$binary = Join-Path $repo 'src/RealDiff.Rust.Tracer/target/release/realdiff-rust-rewrite.exe'
 if (-not $IsWindows) { $binary = $binary.Substring(0, $binary.Length - 4) }
 
 function Get-SourceHashes([string]$Root) {
@@ -45,13 +45,13 @@ if ($rewrite.sourceFiles -le 0 -or $rewrite.rustFiles -le 0) {
     throw "Rust exit-hook rewrite input is empty: source=$($rewrite.sourceFiles) rust=$($rewrite.rustFiles)"
 }
 
-$previousTrace = $env:BEHAVIORDIFF_RUST_EXIT_TRACE
-$env:BEHAVIORDIFF_RUST_EXIT_TRACE = $trace
+$previousTrace = $env:REALDIFF_RUST_EXIT_TRACE
+$env:REALDIFF_RUST_EXIT_TRACE = $trace
 try {
     & cargo run --quiet --manifest-path (Join-Path $rewrite.output 'Cargo.toml')
     if ($LASTEXITCODE -ne 0) { throw "Rewritten Rust reference failed: $LASTEXITCODE" }
 } finally {
-    $env:BEHAVIORDIFF_RUST_EXIT_TRACE = $previousTrace
+    $env:REALDIFF_RUST_EXIT_TRACE = $previousTrace
 }
 
 $after = @(Get-SourceHashes $source)

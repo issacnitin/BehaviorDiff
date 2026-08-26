@@ -5,7 +5,7 @@ import * as subject from '../src/subject';
 
 type TestCallback = () => void | Promise<void>;
 
-interface BehaviorDiffRuntime {
+interface RealDiffRuntime {
   withTestRoot(testId: string, callback: TestCallback): void | Promise<void>;
 }
 
@@ -19,11 +19,11 @@ interface DeepNode {
   next?: DeepNode;
 }
 
-const runtimeSymbol = Symbol.for('behaviordiff.runtime');
+const runtimeSymbol = Symbol.for('realdiff.runtime');
 let executed = 0;
 
 async function runCase(testId: string, callback: TestCallback): Promise<void> {
-  const runtime = (globalThis as { [key: symbol]: BehaviorDiffRuntime | undefined })[runtimeSymbol];
+  const runtime = (globalThis as { [key: symbol]: RealDiffRuntime | undefined })[runtimeSymbol];
   const result = runtime && typeof runtime.withTestRoot === 'function'
     ? runtime.withTestRoot(testId, callback)
     : callback();
@@ -192,8 +192,8 @@ async function main(): Promise<void> {
   assert.equal(executed, 120);
   const report = { runnerTests: executed };
   const serialized = `${JSON.stringify(report)}\n`;
-  if (process.env.BEHAVIORDIFF_RUNNER_REPORT) {
-    const reportPath = path.resolve(process.env.BEHAVIORDIFF_RUNNER_REPORT);
+  if (process.env.REALDIFF_RUNNER_REPORT) {
+    const reportPath = path.resolve(process.env.REALDIFF_RUNNER_REPORT);
     fs.mkdirSync(path.dirname(reportPath), { recursive: true });
     fs.writeFileSync(reportPath, serialized, 'utf8');
   }

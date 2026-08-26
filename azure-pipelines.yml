@@ -6,17 +6,17 @@ pool:
   vmImage: ubuntu-24.04
 
 variables:
-  behaviorDiffImage: ghcr.io/issacnitin/behaviordiff:main
+  behaviorDiffImage: ghcr.io/issacnitin/realdiff:main
   behaviorDiffGate: warn-only
   behaviorDiffStrict: 'false'
-  behaviorDiffWork: $(Agent.TempDirectory)/behaviordiff-work
-  behaviorDiffCache: $(Pipeline.Workspace)/behaviordiff-cache
-  behaviorDiffFindings: $(Build.ArtifactStagingDirectory)/behaviordiff/findings.json
+  behaviorDiffWork: $(Agent.TempDirectory)/realdiff-work
+  behaviorDiffCache: $(Pipeline.Workspace)/realdiff-cache
+  behaviorDiffFindings: $(Build.ArtifactStagingDirectory)/realdiff/findings.json
   behaviorDiffExcludeNamespaces: SampleApp.Diagnostics,SampleApp.Persistence,Infrastructure.Collections
 
 jobs:
-  - job: behaviordiff
-    displayName: BehaviorDiff blast radius
+  - job: realdiff
+    displayName: RealDiff blast radius
     container:
       image: $(behaviorDiffImage)
       options: --entrypoint ""
@@ -42,28 +42,28 @@ jobs:
           fi
 
           set +e
-          BEHAVIORDIFF_EXCLUDE_NAMESPACES='$(behaviorDiffExcludeNamespaces)' \
-            behaviordiff "${args[@]}"
+          REALDIFF_EXCLUDE_NAMESPACES='$(behaviorDiffExcludeNamespaces)' \
+            realdiff "${args[@]}"
           analysis_exit=$?
           set -e
 
           echo "##vso[task.setvariable variable=behaviorDiffAnalysisExit]$analysis_exit"
           if [[ ! -f '$(behaviorDiffFindings)' ]]; then
-            echo "##vso[task.logissue type=error]BehaviorDiff exited $analysis_exit without findings.json."
+            echo "##vso[task.logissue type=error]RealDiff exited $analysis_exit without findings.json."
             exit "$analysis_exit"
           fi
 
           if (( analysis_exit != 0 && analysis_exit != 1 )); then
-            echo "##vso[task.logissue type=warning]BehaviorDiff produced a non-verdict (exit $analysis_exit)."
+            echo "##vso[task.logissue type=warning]RealDiff produced a non-verdict (exit $analysis_exit)."
           fi
         displayName: Analyze runtime behavior
 
       - bash: |
           set -euo pipefail
-          behaviordiff post --provider=azuredevops \
+          realdiff post --provider=azuredevops \
             --findings '$(behaviorDiffFindings)' \
             --gate '$(behaviorDiffGate)'
-        displayName: Post BehaviorDiff findings to PR
+        displayName: Post RealDiff findings to PR
         condition: always()
         env:
           SYSTEM_ACCESSTOKEN: $(System.AccessToken)
@@ -72,13 +72,13 @@ jobs:
         displayName: Publish machine-readable findings
         condition: always()
         inputs:
-          targetPath: $(Build.ArtifactStagingDirectory)/behaviordiff
-          artifact: behaviordiff-findings
+          targetPath: $(Build.ArtifactStagingDirectory)/realdiff
+          artifact: realdiff-findings
 
       - bash: |
           set -euo pipefail
           before=$(du -sb '$(behaviorDiffWork)' 2>/dev/null | cut -f1 || echo 0)
           rm -rf '$(behaviorDiffWork)'
-          echo "BehaviorDiff cleanup removed $before bytes; findings.json was retained."
+          echo "RealDiff cleanup removed $before bytes; findings.json was retained."
         displayName: Delete traces and worktrees
         condition: always()

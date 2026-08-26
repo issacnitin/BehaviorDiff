@@ -14,7 +14,7 @@ Set-StrictMode -Version Latest
 $subject = [IO.Path]::GetFullPath($Repository)
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 $nugetFeed = Join-Path $output 'nuget-feed'
-$proofVolume = "behaviordiff-fv-proof-$([Guid]::NewGuid().ToString('N').Substring(0, 10))"
+$proofVolume = "realdiff-fv-proof-$([Guid]::NewGuid().ToString('N').Substring(0, 10))"
 $nugetPackages = if ([string]::IsNullOrWhiteSpace($env:NUGET_PACKAGES)) {
     Join-Path $HOME '.nuget/packages'
 } else {
@@ -118,10 +118,10 @@ function Measure-Container([string]$Temperature) {
     Remove-Item $findings, $stdout, $stderr -Force -ErrorAction SilentlyContinue
     New-Item $work -ItemType Directory -Force | Out-Null
 
-    $name = "behaviordiff-fv-$Temperature-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+    $name = "realdiff-fv-$Temperature-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
     $arguments = @(
         'run', '--name', $name,
-        '--entrypoint', '/usr/local/bin/behaviordiff',
+        '--entrypoint', '/usr/local/bin/realdiff',
         '--volume', "$(Docker-Path $subject):/subject",
         '--volume', "${proofVolume}:/proof",
         '--volume', "$(Docker-Path $nugetFeed):/nuget-feed:ro",
@@ -257,7 +257,7 @@ try {
 }
 & docker volume rm $proofVolume | Out-Null
 $report = [pscustomobject][ordered]@{
-    schema = 'behaviordiff.container-pipeline-cost/2'
+    schema = 'realdiff.container-pipeline-cost/2'
     generatedUtc = [DateTimeOffset]::UtcNow
     image = $Image
     repository = $subject

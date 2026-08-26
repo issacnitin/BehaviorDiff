@@ -7,7 +7,7 @@
     <Deterministic>true</Deterministic>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <ImplicitUsings>disable</ImplicitUsings>
-    <Product>BehaviorDiff</Product>
+    <Product>RealDiff</Product>
   </PropertyGroup>
 
 </Project>

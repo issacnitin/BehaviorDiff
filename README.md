@@ -1,13 +1,13 @@
-# BehaviorDiff
+# RealDiff
 
-[![CI](https://github.com/issacnitin/BehaviorDiff/actions/workflows/ci.yml/badge.svg)](https://github.com/issacnitin/BehaviorDiff/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/issacnitin/BehaviorDiff)](https://github.com/issacnitin/BehaviorDiff/releases/tag/v0.3.0)
+[![CI](https://github.com/issacnitin/RealDiff/actions/workflows/ci.yml/badge.svg)](https://github.com/issacnitin/RealDiff/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/issacnitin/RealDiff)](https://github.com/issacnitin/RealDiff/releases/tag/v0.3.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
 
-BehaviorDiff finds **runtime behavior changes that ordinary source review misses**.
+RealDiff finds **runtime behavior changes that ordinary source review misses**.
 
-It builds two Git revisions, observes their tests, learns a noise baseline from three base runs, and reports the first changed behavior in each call tree. A source diff tells you what was edited. BehaviorDiff tells you what the edit did, including effects in files the pull request never touched.
+It builds two Git revisions, observes their tests, learns a noise baseline from three base runs, and reports the first changed behavior in each call tree. A source diff tells you what was edited. RealDiff tells you what the edit did, including effects in files the pull request never touched.
 
 The public executable is a thin Rust launcher that owns argument routing, repository config loading, and `detect`. It starts a sibling self-contained managed component for ref resolution, builds, caches, instrumentation, and posting. The architecture then has one language-neutral trace contract, one tracer per runtime, and a single-pass streaming Rust diff, frontier, and findings engine:
 
@@ -19,7 +19,7 @@ flowchart LR
   O --> N
   O --> G
   O --> R
-  D[.NET / Cecil] --> T[behaviordiff.trace/1]
+  D[.NET / Cecil] --> T[realdiff.trace/1]
   J[Java / javaagent + ASM] --> T
   N[Node / CJS + ESM + Babel] --> T
   G[Go / stable AST rewrite] --> T
@@ -64,7 +64,7 @@ A harmless-looking refactor can change behavior far from the edited file:
 `List.Sort` is not stable; `OrderBy` is. In the included demo, that one-line infrastructure change alters an unedited pricing engine:
 
 ```text
-BehaviorDiff: 1 behavior gap outside this diff
+RealDiff: 1 behavior gap outside this diff
 
 DiscountEngine.SelectDiscount returned "CLEARANCE_40",
 now returns "SEASONAL_15".
@@ -73,16 +73,16 @@ CheckoutTotals.Compute returned 60, now returns 85.
 2 of the 3 tests that executed this did not assert on the change.
 ```
 
-The edited helper is in `Infrastructure.Collections`; the observed effect is in `Commerce.Pricing`. See the live [demo pull request](https://github.com/issacnitin/behaviordiff-live-verification/pull/4) and its [successful hosted run](https://github.com/issacnitin/behaviordiff-live-verification/actions/runs/32369192452).
+The edited helper is in `Infrastructure.Collections`; the observed effect is in `Commerce.Pricing`. See the live [demo pull request](https://github.com/issacnitin/realdiff-live-verification/pull/4) and its [successful hosted run](https://github.com/issacnitin/realdiff-live-verification/actions/runs/32369192452).
 
 ## Five-minute .NET demo
 
 Prerequisites for this .NET demo: Git, .NET 8 SDK, and PowerShell 7. Java analysis additionally requires a JDK and Maven; Node analysis requires Node.js and npm.
 
 ```powershell
-git clone https://github.com/issacnitin/BehaviorDiff.git
-cd BehaviorDiff
-dotnet build BehaviorDiff.sln -c Release
+git clone https://github.com/issacnitin/RealDiff.git
+cd RealDiff
+dotnet build RealDiff.sln -c Release
 pwsh -File tools/verify-diff.ps1 -Mutate -Change sort
 ```
 
@@ -108,66 +108,66 @@ The `v0.3.0` release is exercised by five public sort-stability pull requests. E
 
 | Language | Matched keys | Frontier collapse | Pull request | Hosted run |
 | --- | ---: | ---: | --- | --- |
-| .NET | 319 | 9 to 3 (3.0x) | [behaviordiff-sort-dotnet#1](https://github.com/issacnitin/behaviordiff-sort-dotnet/pull/1) | [successful run](https://github.com/issacnitin/behaviordiff-sort-dotnet/actions/runs/32996384741) |
-| Node | 129 | 117 to 3 (39.0x) | [behaviordiff-sort-node#1](https://github.com/issacnitin/behaviordiff-sort-node/pull/1) | [successful run](https://github.com/issacnitin/behaviordiff-sort-node/actions/runs/32996450162) |
-| Java | 132 | 117 to 3 (39.0x) | [behaviordiff-sort-java#1](https://github.com/issacnitin/behaviordiff-sort-java/pull/1) | [successful run](https://github.com/issacnitin/behaviordiff-sort-java/actions/runs/32996460852) |
-| Go | 315 | 9 to 3 (3.0x) | [behaviordiff-sort-go#1](https://github.com/issacnitin/behaviordiff-sort-go/pull/1) | [successful run](https://github.com/issacnitin/behaviordiff-sort-go/actions/runs/32996478489) |
-| Rust | 312 | 9 to 3 (3.0x) | [behaviordiff-sort-rust#1](https://github.com/issacnitin/behaviordiff-sort-rust/pull/1) | [successful run](https://github.com/issacnitin/behaviordiff-sort-rust/actions/runs/32996497931) |
+| .NET | 319 | 9 to 3 (3.0x) | [realdiff-sort-dotnet#1](https://github.com/issacnitin/realdiff-sort-dotnet/pull/1) | [successful run](https://github.com/issacnitin/realdiff-sort-dotnet/actions/runs/32996384741) |
+| Node | 129 | 117 to 3 (39.0x) | [realdiff-sort-node#1](https://github.com/issacnitin/realdiff-sort-node/pull/1) | [successful run](https://github.com/issacnitin/realdiff-sort-node/actions/runs/32996450162) |
+| Java | 132 | 117 to 3 (39.0x) | [realdiff-sort-java#1](https://github.com/issacnitin/realdiff-sort-java/pull/1) | [successful run](https://github.com/issacnitin/realdiff-sort-java/actions/runs/32996460852) |
+| Go | 315 | 9 to 3 (3.0x) | [realdiff-sort-go#1](https://github.com/issacnitin/realdiff-sort-go/pull/1) | [successful run](https://github.com/issacnitin/realdiff-sort-go/actions/runs/32996478489) |
+| Rust | 312 | 9 to 3 (3.0x) | [realdiff-sort-rust#1](https://github.com/issacnitin/realdiff-sort-rust/pull/1) | [successful run](https://github.com/issacnitin/realdiff-sort-rust/actions/runs/32996497931) |
 
-Two fresh packaged runs per language produced identical normalized behavioral artifacts. Each hosted workflow also posted exactly one BehaviorDiff PR comment.
+Two fresh packaged runs per language produced identical normalized behavioral artifacts. Each hosted workflow also posted exactly one RealDiff PR comment.
 
 ## Install the CLI
 
 ### Use the all-language container
 
-The published Linux image contains the BehaviorDiff CLI, default Rust diff engine, .NET 8 SDK/tracer, Java 17 agent, Node 24 tracer, Go rewriter, and stable Rust toolchain/tracer. The host needs only Docker:
+The published Linux image contains the RealDiff CLI, default Rust diff engine, .NET 8 SDK/tracer, Java 17 agent, Node 24 tracer, Go rewriter, and stable Rust toolchain/tracer. The host needs only Docker:
 
 ```bash
-docker pull ghcr.io/issacnitin/behaviordiff:v0.3.0
+docker pull ghcr.io/issacnitin/realdiff:v0.3.0
 docker run --rm \
   --volume "$PWD:/workspace" \
-  ghcr.io/issacnitin/behaviordiff:v0.3.0 \
+  ghcr.io/issacnitin/realdiff:v0.3.0 \
   /workspace --base origin/main --pr HEAD \
-  --findings /workspace/.behaviordiff/artifacts/findings.json
+  --findings /workspace/.realdiff/artifacts/findings.json
 ```
 
-The normal image entrypoint is `behaviordiff`; no PowerShell wrapper is involved. The unified CLI orchestrates .NET, Java, Node/TypeScript, Go, and Rust repositories.
+The normal image entrypoint is `realdiff`; no PowerShell wrapper is involved. The unified CLI orchestrates .NET, Java, Node/TypeScript, Go, and Rust repositories.
 
 The current locally verified Linux/amd64 image is 898,678,469 bytes by Docker image inspection and includes stable Rust 1.98 plus a native linker. The container workflow reports the exact size for every published build.
 
 ### Install the GitHub release
 
-Download the archive for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, or `win-x64` from the [v0.3.0 release](https://github.com/issacnitin/BehaviorDiff/releases/tag/v0.3.0). Verify it against `SHA256SUMS`, extract it, and place the extracted directory on `PATH`. The executable is self-contained; the host does not need a .NET runtime.
+Download the archive for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, or `win-x64` from the [v0.3.0 release](https://github.com/issacnitin/RealDiff/releases/tag/v0.3.0). Verify it against `SHA256SUMS`, extract it, and place the extracted directory on `PATH`. The executable is self-contained; the host does not need a .NET runtime.
 
 ```bash
 sha256sum --check SHA256SUMS --ignore-missing
-tar -xzf behaviordiff-v0.3.0-linux-x64.tar.gz -C "$HOME/.local/lib/behaviordiff"
-ln -s "$HOME/.local/lib/behaviordiff/behaviordiff" "$HOME/.local/bin/behaviordiff"
-behaviordiff --help
+tar -xzf realdiff-v0.3.0-linux-x64.tar.gz -C "$HOME/.local/lib/realdiff"
+ln -s "$HOME/.local/lib/realdiff/realdiff" "$HOME/.local/bin/realdiff"
+realdiff --help
 ```
 
 ```powershell
-Get-FileHash .\behaviordiff-v0.3.0-win-x64.zip -Algorithm SHA256
-Expand-Archive .\behaviordiff-v0.3.0-win-x64.zip "$env:LOCALAPPDATA\BehaviorDiff"
-& "$env:LOCALAPPDATA\BehaviorDiff\behaviordiff.exe" --help
+Get-FileHash .\realdiff-v0.3.0-win-x64.zip -Algorithm SHA256
+Expand-Archive .\realdiff-v0.3.0-win-x64.zip "$env:LOCALAPPDATA\RealDiff"
+& "$env:LOCALAPPDATA\RealDiff\realdiff.exe" --help
 ```
 
-The complete extracted directory must remain together because the Rust `behaviordiff` launcher starts `behaviordiff-managed` beside it and the directory also contains the native engine, language tracers, and separately launched .NET Weaver. The NuGet tool package remains available as a framework-dependent managed compatibility distribution:
+The complete extracted directory must remain together because the Rust `realdiff` launcher starts `realdiff-managed` beside it and the directory also contains the native engine, language tracers, and separately launched .NET Weaver. The NuGet tool package remains available as a framework-dependent managed compatibility distribution:
 
 ```powershell
-dotnet tool install --global BehaviorDiff.Tool --version 0.3.0 --add-source .
-behaviordiff --help
+dotnet tool install --global RealDiff.Tool --version 0.3.0 --add-source .
+realdiff --help
 ```
 
 ### Build and install from source
 
 ```powershell
-git clone https://github.com/issacnitin/BehaviorDiff.git
-cd BehaviorDiff
+git clone https://github.com/issacnitin/RealDiff.git
+cd RealDiff
 pwsh -File tools/package-cli.ps1
-dotnet tool install --global BehaviorDiff.Tool `
+dotnet tool install --global RealDiff.Tool `
   --add-source ./artifacts/packages
-behaviordiff --help
+realdiff --help
 ```
 
 The packaging wrapper builds and stages the shaded Java agent, Node tracer with production dependencies, stable Rust tracer for the current RID, and current host's Rust diff engine before packing the tool. An ordinary `dotnet build` remains independent of Maven, npm, and Cargo.
@@ -175,26 +175,26 @@ The packaging wrapper builds and stages the shaded Java agent, Node tracer with 
 To update an existing source installation:
 
 ```powershell
-dotnet tool update --global BehaviorDiff.Tool `
+dotnet tool update --global RealDiff.Tool `
   --add-source ./artifacts/packages
 ```
 
 You can also run the built DLL directly:
 
 ```powershell
-dotnet build src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj -c Release
-dotnet src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll --help
+dotnet build src/RealDiff.Cli/RealDiff.Cli.csproj -c Release
+dotnet src/RealDiff.Cli/bin/Release/net8.0/realdiff.dll --help
 ```
 
 ## Run an analysis
 
-BehaviorDiff needs a repository path and two Git refs. The target repository must build in the current environment.
+RealDiff needs a repository path and two Git refs. The target repository must build in the current environment.
 
 ```powershell
-behaviordiff C:\src\my-service `
+realdiff C:\src\my-service `
   --base origin/main `
   --pr HEAD `
-  --findings C:\temp\behaviordiff\findings.json
+  --findings C:\temp\realdiff\findings.json
 ```
 
 Useful options:
@@ -210,7 +210,7 @@ Useful options:
 --ci=azuredevops        Resolve refs from Azure Pipelines variables
 ```
 
-The streaming Rust engine implements trace loading, matching, noise filtering, divergence construction, frontier detection, attribution, baseline suppression, and findings generation. `BEHAVIORDIFF_RUST_ENGINE` can override the packaged native executable for development diagnostics.
+The streaming Rust engine implements trace loading, matching, noise filtering, divergence construction, frontier detection, attribution, baseline suppression, and findings generation. `REALDIFF_RUST_ENGINE` can override the packaged native executable for development diagnostics.
 
 PR comments use a high-confidence policy by default. A finding is high-confidence only when its frontier is verified, every compared digest is exact, an ancestor or descendant divergence connects it to the change through the call tree, and the same member showed no baseline-run or manifest nondeterminism. An edited file contributing zero traced members does not by itself disqualify the finding. Every finding remains in `findings.json` with `confidence`, `confidenceFactors`, `nondeterminism`, and `commentSuppressionReasons`; comments show how many lower-confidence findings were retained only in the artifact. Pass `--strict` to include all unsuppressed findings in comments. The GitHub Action exposes the same behavior through `strict: 'true'`, and Azure Pipelines through `behaviorDiffStrict: 'true'`.
 
@@ -221,17 +221,17 @@ Exit codes:
 | 0 | Analysis completed; no unexpected behavior changes |
 | 1 | Analysis completed; behavior findings exist |
 | 3 | Analysis refused because the evidence could not support a verdict |
-| 4 | BehaviorDiff could not instrument the repository |
+| 4 | RealDiff could not instrument the repository |
 | 5 | The unmodified repository did not build in this environment |
 
-Exit `3` is deliberately different from clean. BehaviorDiff refuses when path attribution, source information, call-tree integrity, or coverage is insufficient.
+Exit `3` is deliberately different from clean. RealDiff refuses when path attribution, source information, call-tree integrity, or coverage is insufficient.
 
 ### .NET
 
 Prerequisites: .NET 8 SDK. The repository must contain an SDK-style solution/project and xUnit tests using `Microsoft.NET.Test.Sdk`.
 
 ```powershell
-behaviordiff C:\src\dotnet-service --base origin/main --pr HEAD
+realdiff C:\src\dotnet-service --base origin/main --pr HEAD
 ```
 
 ### Java
@@ -239,7 +239,7 @@ behaviordiff C:\src\dotnet-service --base origin/main --pr HEAD
 Prerequisites: a JDK and Maven (or a Maven wrapper). The CLI derives package scope, attaches the packaged Java agent, and maps class output to conventional Maven source roots.
 
 ```powershell
-behaviordiff C:\src\java-service --base origin/main --pr HEAD
+realdiff C:\src\java-service --base origin/main --pr HEAD
 ```
 
 ### Node and TypeScript
@@ -247,7 +247,7 @@ behaviordiff C:\src\java-service --base origin/main --pr HEAD
 Prerequisites: Node.js, npm, `package-lock.json`, and a test script. TypeScript must emit usable source maps. Jest/Vitest callbacks must use the included adapters so the tracer can open structural test roots; an insufficiently correlated run is refused.
 
 ```powershell
-behaviordiff C:\src\node-service --base origin/main --pr HEAD
+realdiff C:\src\node-service --base origin/main --pr HEAD
 ```
 
 ### Go
@@ -255,7 +255,7 @@ behaviordiff C:\src\node-service --base origin/main --pr HEAD
 Prerequisites: stable Go and standard `go test` tests. The CLI rewrites source only into an external cache, runs the configured tests there, and maps events back to the original `.go` files. The checkout is never mutated.
 
 ```powershell
-behaviordiff C:\src\go-service --base origin/main --pr HEAD
+realdiff C:\src\go-service --base origin/main --pr HEAD
 ```
 
 ### Rust
@@ -263,14 +263,14 @@ behaviordiff C:\src\go-service --base origin/main --pr HEAD
 Prerequisites: stable Rust/Cargo and standard `#[test]` tests. The CLI rewrites only into an external content-addressed cache, runs tests there, and maps events back to original `.rs` files. The checkout is never mutated.
 
 ```powershell
-behaviordiff C:\src\rust-service --base origin/main --pr HEAD
+realdiff C:\src\rust-service --base origin/main --pr HEAD
 ```
 
-The command is intentionally the same for every language. `behaviordiff detect <repo>` prints the effective language, work directory, entry point, commands, test projects, and scope. The legacy `detect-language` spelling remains an alias.
+The command is intentionally the same for every language. `realdiff detect <repo>` prints the effective language, work directory, entry point, commands, test projects, and scope. The legacy `detect-language` spelling remains an alias.
 
 ### Repository configuration
 
-Add `.behaviordiff/config.yml` when inference is incomplete or the repository uses custom commands:
+Add `.realdiff/config.yml` when inference is incomplete or the repository uses custom commands:
 
 ```yaml
 language: node
@@ -291,13 +291,13 @@ redaction:
   paths:
     - generated
 baseline:
-  schema: behaviordiff.baseline/2
+  schema: realdiff.baseline/2
   acknowledgements: []
   ignorePaths: []
   ignoreMembers: []
 ```
 
-Configuration overrides inference field by field; detection fills fields left unset. `workdir` must remain inside the repository. `test_projects` selects .NET test projects by repository-relative glob. Include/exclude values augment tracing scope, redaction values augment the corresponding environment rules, and the nested baseline uses the same schema as `.behaviordiff/baseline.yml`.
+Configuration overrides inference field by field; detection fills fields left unset. `workdir` must remain inside the repository. `test_projects` selects .NET test projects by repository-relative glob. Include/exclude values augment tracing scope, redaction values augment the corresponding environment rules, and the nested baseline uses the same schema as `.realdiff/baseline.yml`.
 
 The effective build and test commands run unchanged for both base and PR revisions. Custom tests do not replace instrumentation: .NET receives the woven/injected environment, Java receives the javaagent through `JAVA_TOOL_OPTIONS`, Node receives the loader/hooks through `NODE_OPTIONS`, and Go/Rust tests execute in their rewritten caches. A command that exits successfully but produces zero trace events is refused with exit `3` and reports the command and trace/manifest counts.
 
@@ -305,7 +305,7 @@ Automatic detection recognizes conventional root or unambiguous nested `.sln`/`.
 
 ### Base trace cache
 
-BehaviorDiff caches the three validated noise-baseline traces when `--cache-dir` is supplied. Persistence is opt-in. The key contains the target SHA, language, a content fingerprint of the installed tracer, and the effective scope/redaction configuration. A tracer, scope, or redaction change therefore cannot reuse stale evidence. The storage boundary is pluggable; this release includes the local-directory backend, which can be placed on a CI-native or S3-compatible mounted cache. Entries expire after one day by default; use `--cache-retention` to state a different window.
+RealDiff caches the three validated noise-baseline traces when `--cache-dir` is supplied. Persistence is opt-in. The key contains the target SHA, language, a content fingerprint of the installed tracer, and the effective scope/redaction configuration. A tracer, scope, or redaction change therefore cannot reuse stale evidence. The storage boundary is pluggable; this release includes the local-directory backend, which can be placed on a CI-native or S3-compatible mounted cache. Entries expire after one day by default; use `--cache-retention` to state a different window.
 
 On a hit, PR analysis restores the three baseline samples and performs only the PR instrumented run. A missing, malformed, or unavailable cache entry is reported as a miss and falls back to the existing four-run path. The console and `findings.json.baseTraceCache` report `hit`, `miss`, or `disabled`, the cache key/backend, and measured baseline wall-clock time saved.
 
@@ -320,23 +320,23 @@ The like-for-like container proof separately sampled descendant process RSS and 
 Warm a target branch from a nightly job without running a synthetic PR comparison:
 
 ```powershell
-behaviordiff warm C:\src\my-service --target origin/main --cache-dir C:\ci-cache\behaviordiff
+realdiff warm C:\src\my-service --target origin/main --cache-dir C:\ci-cache\realdiff
 ```
 
 ### Suppression baseline
 
-BehaviorDiff automatically applies `.behaviordiff/baseline.yml` from the analyzed repository. Suppression is a policy projection: every raw member and the original `unexpectedMembers` count remain in `findings.json`, while matched members receive `suppression` metadata and additive actionable/suppressed counts control process and posting gates. Use `--no-baseline` to inspect the raw result or `--baseline <file>` for a nonstandard path.
+RealDiff automatically applies `.realdiff/baseline.yml` from the analyzed repository. Suppression is a policy projection: every raw member and the original `unexpectedMembers` count remain in `findings.json`, while matched members receive `suppression` metadata and additive actionable/suppressed counts control process and posting gates. Use `--no-baseline` to inspect the raw result or `--baseline <file>` for a nonstandard path.
 
 Write or merge 30-day acknowledgements for every currently actionable member in one command:
 
 ```bash
-behaviordiff baseline write --findings .behaviordiff/artifacts/findings.json
+realdiff baseline write --findings .realdiff/artifacts/findings.json
 ```
 
 Use `--expires 90d` to choose another window or `--no-expiry` for permanent policy. Re-running the command is idempotent and adds only actionable members not already acknowledged.
 
 ```yaml
-schema: behaviordiff.baseline/2
+schema: realdiff.baseline/2
 acknowledgements:
   - id: accepted-pricing-change
     member: Commerce.Pricing.DiscountEngine.SelectDiscount(System.Decimal)
@@ -361,7 +361,7 @@ Rule IDs must be unique. Acknowledgements match an exact member, path, and base/
 
 Trace events contain method identities, source locations, test identities, call topology, and canonicalized argument and return values. Those values can include credentials, personal data, and business-sensitive state. Treat an unredacted trace as sensitive build output.
 
-Redaction is on by default. Names matching `password`, `token`, `secret`, `key`, `ssn`, `email`, `auth`, or `credential` render as `<redacted>`. Credential-shaped strings such as JWTs, AWS access-key IDs, PEM headers, and long base64 runs are also redacted. Add name patterns with `BEHAVIORDIFF_REDACT_NAMES`, whole runtime types with `BEHAVIORDIFF_REDACT_TYPES`, and repository directory prefixes with `BEHAVIORDIFF_REDACT_PATHS`; lists use commas or semicolons. Types and paths are still digested but never rendered.
+Redaction is on by default. Names matching `password`, `token`, `secret`, `key`, `ssn`, `email`, `auth`, or `credential` render as `<redacted>`. Credential-shaped strings such as JWTs, AWS access-key IDs, PEM headers, and long base64 runs are also redacted. Add name patterns with `REALDIFF_REDACT_NAMES`, whole runtime types with `REALDIFF_REDACT_TYPES`, and repository directory prefixes with `REALDIFF_REDACT_PATHS`; lists use commas or semicolons. Types and paths are still digested but never rendered.
 
 Redaction does not weaken comparison: SHA-256 digests are computed from the complete real canonical value before display redaction. Consequently, two different secrets still produce a behavior divergence even when both sides display `<redacted>`. Redaction does not hide method names, source paths, test names, object shape, non-matching values, exception types, digest equality, or the fact that a sensitive value changed. Name rules also depend on names retained by source/compiler metadata, so content, type, and path rules should protect contexts where names may be stripped.
 
@@ -415,32 +415,32 @@ steps:
   - uses: actions/checkout@v4
     with:
       fetch-depth: 0
-  - uses: issacnitin/BehaviorDiff@v0.3.0
+  - uses: issacnitin/RealDiff@v0.3.0
     env:
       GITHUB_TOKEN: ${{ github.token }}
 ```
 
-It writes `.behaviordiff/artifacts/findings.json`, restores or updates `.behaviordiff/cache`, and posts with the `warn-only` gate by default. Inputs expose the work, findings, cache, retention, gate, and posting settings.
+It writes `.realdiff/artifacts/findings.json`, restores or updates `.realdiff/cache`, and posts with the `warn-only` gate by default. Inputs expose the work, findings, cache, retention, gate, and posting settings.
 
 This repository includes three workflows:
 
 - [CI](.github/workflows/ci.yml) builds, runs executable proofs, and packs the CLI.
 - [Container](.github/workflows/container.yml) builds the single image, proves full Node and Java analysis on Linux with Docker as the only host prerequisite, reports image size, and publishes commit and channel tags to GHCR.
-- [BehaviorDiff blast radius](.github/workflows/blastradius.yml) analyzes pull requests, uploads `findings.json`, and posts comments for same-repository PRs.
+- [RealDiff blast radius](.github/workflows/blastradius.yml) analyzes pull requests, uploads `findings.json`, and posts comments for same-repository PRs.
 
 For your own repository, copy `blastradius.yml` and adjust namespace exclusions if needed. The workflow uses immutable pull-request SHAs and full Git history.
 
-BehaviorDiff anchors a cause comment on the changed hunk and links to the affected unedited source. GitHub does not allow a review comment directly on a file absent from the PR diff.
+RealDiff anchors a cause comment on the changed hunk and links to the affected unedited source. GitHub does not allow a review comment directly on a file absent from the PR diff.
 
 Fork pull requests are analyzed without posting because GitHub supplies a read-only token. The machine-readable artifact remains available.
 
 ## Azure Pipelines
 
-[azure-pipelines.yml](azure-pipelines.yml) provides the equivalent Azure Repos container job. It pulls the same all-language image and runs only Bash and native commands; the hosted agent does not install .NET, Java, Node, Go, Maven, npm, or PowerShell for BehaviorDiff. Add it as a **Build validation** branch policy; Azure Repos does not honor YAML `pr` triggers.
+[azure-pipelines.yml](azure-pipelines.yml) provides the equivalent Azure Repos container job. It pulls the same all-language image and runs only Bash and native commands; the hosted agent does not install .NET, Java, Node, Go, Maven, npm, or PowerShell for RealDiff. Add it as a **Build validation** branch policy; Azure Repos does not honor YAML `pr` triggers.
 
 ```text
-behaviordiff <repo> --ci=azuredevops --findings findings.json
-behaviordiff post --provider=azuredevops --findings findings.json
+realdiff <repo> --ci=azuredevops --findings findings.json
+realdiff post --provider=azuredevops --findings findings.json
 ```
 
 The default posting gate is `warn-only`. Switch to `fail-on-findings` only after validating the signal on your repository.
@@ -476,7 +476,7 @@ flowchart LR
 
 ## Honest limitations
 
-BehaviorDiff analyzes executed behavior, not all possible behavior. It complements static analysis and review; it does not replace either.
+RealDiff analyzes executed behavior, not all possible behavior. It complements static analysis and review; it does not replace either.
 
 - unexecuted methods have no runtime evidence;
 - .NET type initializers are skipped to avoid CLR initialization-lock deadlocks;
@@ -489,7 +489,7 @@ BehaviorDiff analyzes executed behavior, not all possible behavior. It complemen
 - three base runs sample nondeterminism; they do not characterize every possible schedule or external dependency;
 - identical partial digests do not prove equality inside skipped, depth-limited, errored, or truncated regions;
 - traces can contain application values and should be handled as sensitive build artifacts;
-- target tests execute with the permissions of the CI agent; BehaviorDiff is not a sandbox.
+- target tests execute with the permissions of the CI agent; RealDiff is not a sandbox.
 
 See [evidence/FINDINGS.md](evidence/FINDINGS.md) for measured instrumentation and scale results.
 
@@ -497,16 +497,16 @@ See [evidence/FINDINGS.md](evidence/FINDINGS.md) for measured instrumentation an
 
 | Path | Purpose |
 | --- | --- |
-| `src/BehaviorDiff.Launcher.Rust` | Public argv/config/detect launcher and managed-process boundary |
-| `src/BehaviorDiff.Engine.Rust` | Single-pass streaming Rust diff, frontier, baseline policy, and findings engine |
-| `src/BehaviorDiff.Cli` | Managed refs, builds, caches, instrumentation orchestration, and PR providers |
-| `src/BehaviorDiff.Tracer` | .NET runtime hooks, value rendering, coverage manifests |
-| `src/BehaviorDiff.Java.Agent` | Java agent, ASM rewriting, JVM canonicalizer |
-| `src/BehaviorDiff.Node` | CommonJS/ESM hooks, Babel rewriting, Node canonicalizer and test adapters |
-| `src/BehaviorDiff.Go` | Stable Go source rewriter and runtime |
-| `src/BehaviorDiff.Rust.Tracer` | Stable Rust rewrite cache, generated canonicalizer, runtime, and manifest finalizer |
-| `src/BehaviorDiff.Contracts` | Trace and manifest wire formats |
-| `src/BehaviorDiff.Mcp` | Optional MCP server over completed runs |
+| `src/RealDiff.Launcher.Rust` | Public argv/config/detect launcher and managed-process boundary |
+| `src/RealDiff.Engine.Rust` | Single-pass streaming Rust diff, frontier, baseline policy, and findings engine |
+| `src/RealDiff.Cli` | Managed refs, builds, caches, instrumentation orchestration, and PR providers |
+| `src/RealDiff.Tracer` | .NET runtime hooks, value rendering, coverage manifests |
+| `src/RealDiff.Java.Agent` | Java agent, ASM rewriting, JVM canonicalizer |
+| `src/RealDiff.Node` | CommonJS/ESM hooks, Babel rewriting, Node canonicalizer and test adapters |
+| `src/RealDiff.Go` | Stable Go source rewriter and runtime |
+| `src/RealDiff.Rust.Tracer` | Stable Rust rewrite cache, generated canonicalizer, runtime, and manifest finalizer |
+| `src/RealDiff.Contracts` | Trace and manifest wire formats |
+| `src/RealDiff.Mcp` | Optional MCP server over completed runs |
 | `tools/Weaver` | Mono.Cecil build-time instrumentation |
 | `samples/` and `src/Commerce.Pricing` | Executable behavior-diff fixtures |
 | `tools/verify-*.ps1` | End-to-end executable proofs |
@@ -515,4 +515,4 @@ See [evidence/FINDINGS.md](evidence/FINDINGS.md) for measured instrumentation an
 
 Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and report vulnerabilities according to [SECURITY.md](SECURITY.md).
 
-See [CHANGELOG.md](CHANGELOG.md) for release history. BehaviorDiff is licensed under the [MIT License](LICENSE).
+See [CHANGELOG.md](CHANGELOG.md) for release history. RealDiff is licensed under the [MIT License](LICENSE).

@@ -12,11 +12,11 @@ $output = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
 } else {
     [IO.Path]::GetFullPath((Join-Path $repo $OutputDirectory))
 }
-$javaProject = Join-Path $repo 'src/BehaviorDiff.Java.Agent/pom.xml'
-$javaTarget = Join-Path $repo 'src/BehaviorDiff.Java.Agent/target'
-$nodeSource = Join-Path $repo 'src/BehaviorDiff.Node'
-$goModule = Join-Path $repo 'src/BehaviorDiff.Go'
-$rustManifest = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml'
+$javaProject = Join-Path $repo 'src/RealDiff.Java.Agent/pom.xml'
+$javaTarget = Join-Path $repo 'src/RealDiff.Java.Agent/target'
+$nodeSource = Join-Path $repo 'src/RealDiff.Node'
+$goModule = Join-Path $repo 'src/RealDiff.Go'
+$rustManifest = Join-Path $repo 'src/RealDiff.Rust.Tracer/Cargo.toml'
 
 function Invoke-Checked([string]$label, [scriptblock]$command) {
     & $command
@@ -36,7 +36,7 @@ Write-Host '=== Build Java agent ===' -ForegroundColor Cyan
 Invoke-Checked 'Java agent build' {
     & mvn --batch-mode --no-transfer-progress -f $javaProject package -DskipTests
 }
-$javaAgent = Get-ChildItem $javaTarget -Filter 'behaviordiff-java-agent-*.jar' -File |
+$javaAgent = Get-ChildItem $javaTarget -Filter 'realdiff-java-agent-*.jar' -File |
     Where-Object Name -NotLike 'original-*' |
     Sort-Object LastWriteTimeUtc -Descending |
     Select-Object -First 1
@@ -56,7 +56,7 @@ if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [Runtime.In
 $rustOutput = Join-Path $output "rust/$rustRid"
 $goOutput = Join-Path $output "go/$rustRid"
 New-Item -ItemType Directory -Path $javaOutput, $nodeOutput, $goOutput, $rustOutput -Force | Out-Null
-Copy-Item $javaAgent.FullName (Join-Path $javaOutput 'behaviordiff-java-agent.jar') -Force
+Copy-Item $javaAgent.FullName (Join-Path $javaOutput 'realdiff-java-agent.jar') -Force
 
 Write-Host '=== Stage Node tracer ===' -ForegroundColor Cyan
 $nodeFiles = @('register.cjs', 'loader.mjs', 'bootstrap.mjs', 'package.json', 'package-lock.json')
@@ -85,7 +85,7 @@ if (Test-Path $nodeCommandShims) {
 }
 
 $required = @(
-    'java/behaviordiff-java-agent.jar',
+    'java/realdiff-java-agent.jar',
     'node/register.cjs',
     'node/loader.mjs',
     'node/bootstrap.mjs',
@@ -107,12 +107,12 @@ if (Test-Path (Join-Path $nodeOutput 'test')) {
 }
 
 Write-Host '=== Build Go tracer ===' -ForegroundColor Cyan
-$goName = if ($IsWindows) { 'behaviordiff-go-rewrite.exe' } else { 'behaviordiff-go-rewrite' }
+$goName = if ($IsWindows) { 'realdiff-go-rewrite.exe' } else { 'realdiff-go-rewrite' }
 $goBinary = Join-Path $goOutput $goName
 Push-Location $goModule
 try {
     Invoke-Checked 'Go tracer build' {
-        & go build -trimpath -o $goBinary ./cmd/behaviordiff-go-rewrite
+        & go build -trimpath -o $goBinary ./cmd/realdiff-go-rewrite
     }
 }
 finally {
@@ -122,8 +122,8 @@ Assert-Path $goBinary 'Staged Go tracer binary'
 
 Write-Host '=== Build Rust tracer ===' -ForegroundColor Cyan
 Invoke-Checked 'Rust tracer build' { & cargo build --release --locked --manifest-path $rustManifest }
-$rustName = if ($IsWindows) { 'behaviordiff-rust-rewrite.exe' } else { 'behaviordiff-rust-rewrite' }
-$rustBinary = Join-Path $repo "src/BehaviorDiff.Rust.Tracer/target/release/$rustName"
+$rustName = if ($IsWindows) { 'realdiff-rust-rewrite.exe' } else { 'realdiff-rust-rewrite' }
+$rustBinary = Join-Path $repo "src/RealDiff.Rust.Tracer/target/release/$rustName"
 Assert-Path $rustBinary 'Rust tracer binary'
 Copy-Item $rustBinary (Join-Path $rustOutput $rustName) -Force
 Assert-Path (Join-Path $rustOutput $rustName) 'Staged Rust tracer binary'

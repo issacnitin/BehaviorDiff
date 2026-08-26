@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$WorkDirectory,
-    [string]$BehaviorDiffCommand,
+    [string]$RealDiffCommand,
     [switch]$KeepWork
 )
 
@@ -11,7 +11,7 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-rust-redaction-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-rust-redaction-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
 $fixture = Join-Path $work 'repository'
 $analysis = Join-Path $work 'analysis'
@@ -22,8 +22,8 @@ $prToken = 'AKIAFEDCBA0987654321'
 $password = 'correct-horse-battery-staple'
 $typeSecret = 'type-only-value-4381'
 $pathSecret = 'path-only-value-7294'
-$tracerName = if ($IsWindows) { 'behaviordiff-rust-rewrite.exe' } else { 'behaviordiff-rust-rewrite' }
-$tracer = Join-Path $repo "src/BehaviorDiff.Rust.Tracer/target/release/$tracerName"
+$tracerName = if ($IsWindows) { 'realdiff-rust-rewrite.exe' } else { 'realdiff-rust-rewrite' }
+$tracer = Join-Path $repo "src/RealDiff.Rust.Tracer/target/release/$tracerName"
 
 function Invoke-Checked([string]$label, [scriptblock]$command) {
     & $command | ForEach-Object { Write-Host $_ }
@@ -32,7 +32,7 @@ function Invoke-Checked([string]$label, [scriptblock]$command) {
 
 try {
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Path (Join-Path $fixture 'src'), (Join-Path $fixture '.behaviordiff') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $fixture 'src'), (Join-Path $fixture '.realdiff') -Force | Out-Null
     [IO.File]::WriteAllText((Join-Path $fixture 'Cargo.toml'), @'
 [package]
 name = "rust-redaction-fixture"
@@ -40,7 +40,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 '@)
-    [IO.File]::WriteAllText((Join-Path $fixture '.behaviordiff/config.yml'), @'
+    [IO.File]::WriteAllText((Join-Path $fixture '.realdiff/config.yml'), @'
 language: rust
 redaction:
   types:
@@ -97,8 +97,8 @@ $testCases
 "@)
 
     Invoke-Checked 'git init' { & git -C $fixture init --initial-branch=main --quiet }
-    Invoke-Checked 'git identity' { & git -C $fixture config user.email 'rust-redaction-proof@behaviordiff.invalid' }
-    Invoke-Checked 'git identity' { & git -C $fixture config user.name 'BehaviorDiff Rust Redaction Proof' }
+    Invoke-Checked 'git identity' { & git -C $fixture config user.email 'rust-redaction-proof@realdiff.invalid' }
+    Invoke-Checked 'git identity' { & git -C $fixture config user.name 'RealDiff Rust Redaction Proof' }
     Invoke-Checked 'git add' { & git -C $fixture add . }
     Invoke-Checked 'base commit' { & git -C $fixture commit --quiet -m 'base secret' }
     $base = (& git -C $fixture rev-parse HEAD).Trim()
@@ -108,28 +108,28 @@ $testCases
     Invoke-Checked 'PR commit' { & git -C $fixture commit --quiet -m 'rotate token' }
     $pr = (& git -C $fixture rev-parse HEAD).Trim()
 
-    if ([string]::IsNullOrWhiteSpace($BehaviorDiffCommand)) {
+    if ([string]::IsNullOrWhiteSpace($RealDiffCommand)) {
         Invoke-Checked 'Rust tracer build' {
-            & cargo build --release --locked --manifest-path (Join-Path $repo 'src/BehaviorDiff.Rust.Tracer/Cargo.toml')
+            & cargo build --release --locked --manifest-path (Join-Path $repo 'src/RealDiff.Rust.Tracer/Cargo.toml')
         }
         Invoke-Checked 'Rust engine build' {
-            & cargo build --release --locked --manifest-path (Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml')
+            & cargo build --release --locked --manifest-path (Join-Path $repo 'src/RealDiff.Engine.Rust/Cargo.toml')
         }
         Invoke-Checked 'CLI build' {
-            & dotnet build (Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj') -c Release --nologo -v quiet
+            & dotnet build (Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj') -c Release --nologo -v quiet
         }
-        $previousTracer = $env:BEHAVIORDIFF_RUST_TRACER
-        $env:BEHAVIORDIFF_RUST_TRACER = $tracer
+        $previousTracer = $env:REALDIFF_RUST_TRACER
+        $env:REALDIFF_RUST_TRACER = $tracer
         try {
-            $output = @(& dotnet run --project (Join-Path $repo 'src/BehaviorDiff.Cli') -c Release --no-build -- `
+            $output = @(& dotnet run --project (Join-Path $repo 'src/RealDiff.Cli') -c Release --no-build -- `
                 $fixture --base $base --pr $pr --work $analysis --findings $findingsPath `
                 --no-baseline --strict --keep --keep-traces 1d 2>&1)
             $exitCode = $LASTEXITCODE
         } finally {
-            $env:BEHAVIORDIFF_RUST_TRACER = $previousTracer
+            $env:REALDIFF_RUST_TRACER = $previousTracer
         }
     } else {
-        $output = @(& $BehaviorDiffCommand $fixture --base $base --pr $pr --work $analysis `
+        $output = @(& $RealDiffCommand $fixture --base $base --pr $pr --work $analysis `
             --findings $findingsPath --no-baseline --strict --keep --keep-traces 1d 2>&1)
         $exitCode = $LASTEXITCODE
     }
@@ -141,7 +141,7 @@ $testCases
     $traceText = ($traceFiles | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
     $divergenceText = Get-Content (Join-Path $analysis 'divergence-set.json') -Raw
     $findingsText = Get-Content $findingsPath -Raw
-    $comment = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj') `
+    $comment = @(& dotnet run --project (Join-Path $repo 'tools/CommentPreview/RealDiff.CommentPreview.csproj') `
         -c Release -- $findingsPath 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "Rust redaction comment rendering failed: $LASTEXITCODE" }
     $commentText = $comment -join "`n"

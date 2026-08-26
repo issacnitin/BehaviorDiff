@@ -1,9 +1,9 @@
 using System.Text.Json;
-using BehaviorDiff.Cli;
+using RealDiff.Cli;
 
 if (args.Length != 3)
 {
-    Console.Error.WriteLine("usage: BehaviorDiff.AnthropicLive <findings.json> <changed-file> <patch-file>");
+    Console.Error.WriteLine("usage: RealDiff.AnthropicLive <findings.json> <changed-file> <patch-file>");
     return 2;
 }
 
@@ -44,7 +44,7 @@ if (attempt.Explanation is not null)
 
 Console.WriteLine(GitHubPoster.RenderSummary(
     findings.RootElement,
-    "<!-- behaviordiff:real-anthropic-preview -->",
+    "<!-- realdiff:real-anthropic-preview -->",
     new[] { (member.GetProperty("filePath").GetString() ?? "unresolved") + ":" + member.GetProperty("line").GetInt32() },
     explanations));
 return attempt.Explanation is null ? 1 : 0;

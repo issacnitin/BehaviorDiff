@@ -7,10 +7,10 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $root = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-baseline-fixture-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-baseline-fixture-{0}" -f [Guid]::NewGuid().ToString('N'))
 } else { [IO.Path]::GetFullPath($WorkDirectory) }
-$cli = Join-Path $repo 'src/BehaviorDiff.Cli/bin/Release/net8.0/behaviordiff.dll'
-$preview = Join-Path $repo 'tools/CommentPreview/BehaviorDiff.CommentPreview.csproj'
+$cli = Join-Path $repo 'src/RealDiff.Cli/bin/Release/net8.0/realdiff.dll'
+$preview = Join-Path $repo 'tools/CommentPreview/RealDiff.CommentPreview.csproj'
 
 function Assert-True([bool]$condition, [string]$message) {
     if (-not $condition) { throw $message }
@@ -61,7 +61,7 @@ try {
     $firstPairs = @(Behavior-Pairs $first.members[0])
     Assert-True ($firstPairs.Count -gt 0) 'First fixture produced no behavior digest pairs'
 
-    $baseline = Join-Path $root '.behaviordiff/baseline.yml'
+    $baseline = Join-Path $root '.realdiff/baseline.yml'
     Invoke-Cli @('baseline', 'write', '--findings', $firstFindings, '--output', $baseline, '--no-expiry') 0 | Out-Null
     $acknowledgedFindings = Join-Path $root 'acknowledged-findings.json'
     Copy-Item $firstFindings $acknowledgedFindings

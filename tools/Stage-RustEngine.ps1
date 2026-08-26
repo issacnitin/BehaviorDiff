@@ -12,7 +12,7 @@ $output = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
 } else {
     [IO.Path]::GetFullPath((Join-Path $repo $OutputDirectory))
 }
-$manifest = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml'
+$manifest = Join-Path $repo 'src/RealDiff.Engine.Rust/Cargo.toml'
 
 & cargo build --release --locked --manifest-path $manifest
 if ($LASTEXITCODE -ne 0) {
@@ -28,8 +28,8 @@ $architecture = switch ($architectureName) {
     'arm64' { 'arm64' }
     default { throw "The Rust engine cannot be staged for architecture $([Runtime.InteropServices.RuntimeInformation]::OSArchitecture)." }
 }
-$fileName = if ($IsWindows) { 'behaviordiff-engine.exe' } else { 'behaviordiff-engine' }
-$source = Join-Path $repo "src/BehaviorDiff.Engine.Rust/target/release/$fileName"
+$fileName = if ($IsWindows) { 'realdiff-engine.exe' } else { 'realdiff-engine' }
+$source = Join-Path $repo "src/RealDiff.Engine.Rust/target/release/$fileName"
 if (-not (Test-Path $source -PathType Leaf)) {
     throw "The Rust engine binary was not found: $source"
 }

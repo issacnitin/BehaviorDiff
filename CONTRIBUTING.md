@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve BehaviorDiff.
+Thanks for helping improve RealDiff.
 
 ## Development setup
 
@@ -12,10 +12,10 @@ Prerequisites:
 - Rust stable for changes to the Rust diff engine
 
 ```powershell
-git clone https://github.com/issacnitin/BehaviorDiff.git
-cd BehaviorDiff
+git clone https://github.com/issacnitin/RealDiff.git
+cd RealDiff
 dotnet restore
-dotnet build BehaviorDiff.sln -c Release
+dotnet build RealDiff.sln -c Release
 pwsh -File tools/verify-demo-fixtures.ps1
 ```
 
@@ -24,7 +24,7 @@ pwsh -File tools/verify-demo-fixtures.ps1
 Run the checks relevant to your change. For changes to tracing, matching, frontier analysis, or posting, run the complete proof set:
 
 ```powershell
-dotnet build BehaviorDiff.sln -c Release
+dotnet build RealDiff.sln -c Release
 pwsh -File tools/verify-contracts.ps1
 pwsh -File tools/verify-negative-tests.ps1
 pwsh -File tools/verify-coverage.ps1
@@ -36,9 +36,9 @@ pwsh -File tools/verify-pipeline.ps1
 For changes to the Rust diff engine, run its compiler checks and regression proofs:
 
 ```powershell
-cargo fmt --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml -- --check
-cargo clippy --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path src/BehaviorDiff.Engine.Rust/Cargo.toml
+cargo fmt --manifest-path src/RealDiff.Engine.Rust/Cargo.toml -- --check
+cargo clippy --manifest-path src/RealDiff.Engine.Rust/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path src/RealDiff.Engine.Rust/Cargo.toml
 pwsh -File tools/verify-contracts.ps1
 pwsh -File tools/verify-diff.ps1
 pwsh -File tools/verify-cli-package.ps1

@@ -2,10 +2,10 @@
 $ErrorActionPreference = 'Stop'
 
 $repo = Split-Path -Parent $PSScriptRoot
-$project = Join-Path $repo 'src/BehaviorDiff.Java.Agent/pom.xml'
-$target = Join-Path $repo 'src/BehaviorDiff.Java.Agent/target'
-$agent = Join-Path $target 'behaviordiff-java-agent-0.2.0-SNAPSHOT.jar'
-$work = Join-Path ([IO.Path]::GetTempPath()) 'behaviordiff-java-emitter'
+$project = Join-Path $repo 'src/RealDiff.Java.Agent/pom.xml'
+$target = Join-Path $repo 'src/RealDiff.Java.Agent/target'
+$agent = Join-Path $target 'realdiff-java-agent-0.2.0-SNAPSHOT.jar'
+$work = Join-Path ([IO.Path]::GetTempPath()) 'realdiff-java-emitter'
 
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $work | Out-Null
@@ -33,7 +33,7 @@ $modules = @($records | Where-Object kind -eq 'assembly')
 $members = @($records | Where-Object kind -eq 'member')
 $writer = $records | Where-Object kind -eq 'writer' | Select-Object -First 1
 
-if ($run.Count -ne 1 -or $run[0].schema -ne 'behaviordiff.trace/1' -or $run[0].language -ne 'java') {
+if ($run.Count -ne 1 -or $run[0].schema -ne 'realdiff.trace/1' -or $run[0].language -ne 'java') {
     throw 'Java run metadata is invalid'
 }
 foreach ($module in $modules) {
@@ -73,10 +73,10 @@ if (@($events | Where-Object { $_.filePathResolution -ne 'debugInfo' -or $_.line
     throw 'Java source resolution tripwire failed'
 }
 
-$engineManifest = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml'
+$engineManifest = Join-Path $repo 'src/RealDiff.Engine.Rust/Cargo.toml'
 & cargo build --release --locked --manifest-path $engineManifest
 if ($LASTEXITCODE -ne 0) { throw 'Rust engine build failed' }
-$engine = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/target/release/behaviordiff-engine.exe'
+$engine = Join-Path $repo 'src/RealDiff.Engine.Rust/target/release/realdiff-engine.exe'
 if (-not $IsWindows) { $engine = $engine.Substring(0, $engine.Length - 4) }
 & $engine read $traceFile.FullName | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Shared engine could not read Java trace events' }

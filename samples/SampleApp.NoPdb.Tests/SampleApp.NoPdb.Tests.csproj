@@ -7,12 +7,12 @@
     <IsPackable>false</IsPackable>
     <DebugType>portable</DebugType>
     <!-- This intentionally invalid fixture is run only by verify-negative-tests.ps1. -->
-    <BehaviorDiffExclude>true</BehaviorDiffExclude>
+    <RealDiffExclude>true</RealDiffExclude>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SampleApp.NoPdb\SampleApp.NoPdb.csproj" />
-    <ProjectReference Include="..\..\src\BehaviorDiff.Tracer.Xunit\BehaviorDiff.Tracer.Xunit.csproj" />
+    <ProjectReference Include="..\..\src\RealDiff.Tracer.Xunit\RealDiff.Tracer.Xunit.csproj" />
   </ItemGroup>
 
   <ItemGroup>

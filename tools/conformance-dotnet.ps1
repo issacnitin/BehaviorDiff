@@ -11,13 +11,13 @@ Set-StrictMode -Version Latest
 $repo = Split-Path -Parent $PSScriptRoot
 $ownsWork = [string]::IsNullOrWhiteSpace($WorkDirectory)
 $work = if ($ownsWork) {
-    Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-dotnet-conformance-{0}" -f [Guid]::NewGuid().ToString('N'))
+    Join-Path ([IO.Path]::GetTempPath()) ("realdiff-dotnet-conformance-{0}" -f [Guid]::NewGuid().ToString('N'))
 }
 else {
     [IO.Path]::GetFullPath($WorkDirectory)
 }
 
-Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Conformance.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'RealDiff.Conformance.psm1') -Force
 
 function Get-ProofEvents {
     param([object]$Run, [string]$Method)
@@ -104,7 +104,7 @@ function Expand-CleanTree {
 function Build-Tree {
     param([string]$Tree)
 
-    & dotnet build (Join-Path $Tree 'BehaviorDiff.sln') -c Release --nologo -v quiet
+    & dotnet build (Join-Path $Tree 'RealDiff.sln') -c Release --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "solution build failed: $Tree" }
     & dotnet build (Join-Path $Tree 'tools/Weaver/Weaver.csproj') -c Release --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "weaver build failed: $Tree" }
@@ -116,20 +116,20 @@ function Invoke-ReferenceRun {
     Remove-Item $RunDirectory -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $RunDirectory | Out-Null
 
-    $env:BEHAVIORDIFF_TRACE = Join-Path $RunDirectory 'run.ndjson'
-    $env:BEHAVIORDIFF_NAMESPACES = 'SampleApp,Commerce.Pricing,Infrastructure.Collections'
-    $env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics,SampleApp.Persistence,Infrastructure.Collections'
-    $env:BEHAVIORDIFF_BACKEND = 'cecil'
+    $env:REALDIFF_TRACE = Join-Path $RunDirectory 'run.ndjson'
+    $env:REALDIFF_NAMESPACES = 'SampleApp,Commerce.Pricing,Infrastructure.Collections'
+    $env:REALDIFF_EXCLUDE_NAMESPACES = 'SampleApp.Diagnostics,SampleApp.Persistence,Infrastructure.Collections'
+    $env:REALDIFF_BACKEND = 'cecil'
 
     & dotnet test (Join-Path $StagedBin 'SampleApp.Tests.dll') --nologo
     if ($LASTEXITCODE -ne 0) { throw "reference tests failed: $StagedBin" }
 }
 
 $originalEnvironment = @{
-    BEHAVIORDIFF_TRACE = $env:BEHAVIORDIFF_TRACE
-    BEHAVIORDIFF_NAMESPACES = $env:BEHAVIORDIFF_NAMESPACES
-    BEHAVIORDIFF_EXCLUDE_NAMESPACES = $env:BEHAVIORDIFF_EXCLUDE_NAMESPACES
-    BEHAVIORDIFF_BACKEND = $env:BEHAVIORDIFF_BACKEND
+    REALDIFF_TRACE = $env:REALDIFF_TRACE
+    REALDIFF_NAMESPACES = $env:REALDIFF_NAMESPACES
+    REALDIFF_EXCLUDE_NAMESPACES = $env:REALDIFF_EXCLUDE_NAMESPACES
+    REALDIFF_BACKEND = $env:REALDIFF_BACKEND
 }
 
 try {
@@ -162,7 +162,7 @@ try {
     Write-Host '=== reference run 2 ===' -ForegroundColor Cyan
     Invoke-ReferenceRun $secondBin $secondRun
 
-    $guardReport = Assert-BehaviorDiffConformanceRuns `
+    $guardReport = Assert-RealDiffConformanceRuns `
         -FirstRun $firstRun `
         -SecondRun $secondRun `
         -MinimumMatchedKeys 100 `
@@ -174,7 +174,7 @@ try {
         -DigestProofEvaluator $digestProofEvaluator
 
     Write-Host '=== engine base1/base2 conformance ===' -ForegroundColor Cyan
-    $engineReport = Invoke-BehaviorDiffEngineConformance `
+    $engineReport = Invoke-RealDiffEngineConformance `
         -FirstRun $firstRun `
         -SecondRun $secondRun `
         -BaseRoot $firstTree `
@@ -192,7 +192,7 @@ try {
     Write-Host "  engine raw differences    : $($engineReport.RawDifferences)"
     Write-Host "  engine divergences        : $($engineReport.RemainingDivergences)"
 
-    foreach ($proof in @(& $digestProofEvaluator (Read-BehaviorDiffConformanceRun $firstRun))) {
+    foreach ($proof in @(& $digestProofEvaluator (Read-RealDiffConformanceRun $firstRun))) {
         Write-Host "  digest/$($proof.Name): PASS ($($proof.Detail))"
     }
 }

@@ -7,7 +7,7 @@ param(
     [Parameter(Mandatory)]
     [string]$OutputDirectory,
 
-    [string]$BehaviorDiffCommand = 'behaviordiff',
+    [string]$RealDiffCommand = 'realdiff',
 
     [int]$Limit = 0,
 
@@ -114,9 +114,9 @@ foreach ($case in $cases) {
         Invoke-Git $repository fetch origin --prune
     }
 
-    Invoke-Git $repository fetch origin "refs/pull/$($case.pr)/head:refs/behaviordiff/pr-$($case.pr)" --force
+    Invoke-Git $repository fetch origin "refs/pull/$($case.pr)/head:refs/realdiff/pr-$($case.pr)" --force
     $actualBase = (& git -C $repository rev-parse "$($case.baseSha)^{commit}").Trim()
-    $actualHead = (& git -C $repository rev-parse "refs/behaviordiff/pr-$($case.pr)^{commit}").Trim()
+    $actualHead = (& git -C $repository rev-parse "refs/realdiff/pr-$($case.pr)^{commit}").Trim()
     if ($LASTEXITCODE -ne 0 -or $actualBase -ne $case.baseSha -or $actualHead -ne $case.headSha) {
         throw "$($case.repository)#$($case.pr) did not resolve to the pinned base/head SHAs"
     }
@@ -147,7 +147,7 @@ foreach ($case in $cases) {
     if ($null -eq $findings) {
         Write-Host "RUN  $($case.repository)#$($case.pr) ($($case.language))" -ForegroundColor Cyan
         $stopwatch = [Diagnostics.Stopwatch]::StartNew()
-        & $BehaviorDiffCommand $repository --base $case.baseSha --pr $case.headSha `
+        & $RealDiffCommand $repository --base $case.baseSha --pr $case.headSha `
             --work $work --findings $findingsPath --no-baseline *> $logPath
         $processExitCode = $LASTEXITCODE
         $stopwatch.Stop()
@@ -211,7 +211,7 @@ $defaultComments = @($analyzed | Where-Object { $_.wouldComment -eq 'True' -or $
 $rawFindings = @($analyzed | Where-Object { [int]$_.unexpectedMembers -gt 0 })
 $summaryPath = Join-Path $outputRoot 'summary.json'
 $measurementSummary = [pscustomobject][ordered]@{
-    schema = 'behaviordiff.comment-policy-measurement/1'
+    schema = 'realdiff.comment-policy-measurement/1'
     sampledPrs = $results.Count
     analyzedPrs = $analyzed.Count
     refusedPrs = @($results | Where-Object status -eq 'refused').Count

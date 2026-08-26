@@ -1,6 +1,6 @@
 # Linux container proof
 
-Final functional image: `behaviordiff:rust-tracer-final`, image ID `91e420b1e171`, reported Docker size `898,678,469` bytes. The runtime image contains stable `rustc 1.98.0`, `cargo 1.98.0`, a native linker toolchain, the default Rust diff engine, and the packaged stable Rust tracer.
+Final functional image: `realdiff:rust-tracer-final`, image ID `91e420b1e171`, reported Docker size `898,678,469` bytes. The runtime image contains stable `rustc 1.98.0`, `cargo 1.98.0`, a native linker toolchain, the default Rust diff engine, and the packaged stable Rust tracer.
 
 ## Functional proof
 
@@ -8,7 +8,7 @@ The full proof ran each phase in a fresh container while preserving only explici
 
 ### Rendered comment
 
-The cold Node Action path emitted 138 events per run and posted a captured GitHub comment of 4,216 bytes. The proof required a BehaviorDiff heading, deterministic comment marker, and the actual unexpected member token `selectDiscount`; a successful process exit alone was insufficient.
+The cold Node Action path emitted 138 events per run and posted a captured GitHub comment of 4,216 bytes. The proof required a RealDiff heading, deterministic comment marker, and the actual unexpected member token `selectDiscount`; a successful process exit alone was insufficient.
 
 ### Cache and baseline mounts
 
@@ -17,13 +17,13 @@ The cold Node Action path emitted 138 events per run and posted a captured GitHu
 | Node cold | 16,962 ms | 7,085 ms | 9,877 ms | miss | 0 ms |
 | Node warm | 8,139 ms | 3,060 ms | 5,079 ms | hit | 3,811 ms |
 
-The cold container persisted 1 trace-cache metadata entry. A fresh warm container reused that mounted entry and a mounted `behaviordiff.baseline/2` file. The baseline changed actionable unexpected members to 0 and suppressed 1 member. The proof fails if cache status is not `hit`, saved time is not positive, the baseline schema is wrong, or suppression is absent.
+The cold container persisted 1 trace-cache metadata entry. A fresh warm container reused that mounted entry and a mounted `realdiff.baseline/2` file. The baseline changed actionable unexpected members to 0 and suppressed 1 member. The proof fails if cache status is not `hit`, saved time is not positive, the baseline schema is wrong, or suppression is absent.
 
 ### Java and Rust image contents
 
-The Java phase emitted 135 events per run and completed analyzed findings using `/opt/behaviordiff/tracers/java/behaviordiff-java-agent.jar`.
+The Java phase emitted 135 events per run and completed analyzed findings using `/opt/realdiff/tracers/java/realdiff-java-agent.jar`.
 
-The Rust phase omitted `--engine`, printed `engine: rust`, and selected `/opt/behaviordiff/tracers/rust/linux-x64/behaviordiff-rust-rewrite`. Each of its four runs emitted 111 events with 100% test IDs. It matched 104 keys, retained 9 occurrence divergences across 3 method keys, collapsed them to 1 frontier, and produced the unedited `src/service.rs::biased_priority` headline. `VERIFY_CONTAINER_FIXTURES: PASS` and `VERIFY_CONTAINER: PASS` both completed.
+The Rust phase omitted `--engine`, printed `engine: rust`, and selected `/opt/realdiff/tracers/rust/linux-x64/realdiff-rust-rewrite`. Each of its four runs emitted 111 events with 100% test IDs. It matched 104 keys, retained 9 occurrence divergences across 3 method keys, collapsed them to 1 frontier, and produced the unedited `src/service.rs::biased_priority` headline. `VERIFY_CONTAINER_FIXTURES: PASS` and `VERIFY_CONTAINER: PASS` both completed.
 
 The first Rust image proof selected the packaged tracer but failed before events because linker `cc` was absent. Adding `build-essential` closed that image dependency; no result from the failed empty Rust run was reported as a passing zero.
 
@@ -34,7 +34,7 @@ The benchmark used retained FluentValidation #2136:
 - base `ef50516decf652fd9f97090a4a4a9e114d458ce8`;
 - PR `6eac0afe0f7c406a5ac3e9830fa4d9d7b03c25dc`.
 
-The FluentValidation timing image was `behaviordiff:rust-tracer-proof`, image ID `43c631fdcc76`. The subsequent current-HEAD image changes only Rust tracer conformance coverage and documentation; the default Rust diff engine and .NET FluentValidation tracing path measured here are unchanged.
+The FluentValidation timing image was `realdiff:rust-tracer-proof`, image ID `43c631fdcc76`. The subsequent current-HEAD image changes only Rust tracer conformance coverage and documentation; the default Rust diff engine and .NET FluentValidation tracing path measured here are unchanged.
 
 Large traces and the persistent trace cache lived on a Docker-managed Linux volume. Docker Desktop bind-mounted NTFS traces repeatedly tore their final event and manifest records at about 142 MB; those refused runs were discarded. Dependencies used the host's non-empty `C:\Nuget` global package cache read-only plus a local feed for FluentValidation's floating `Microsoft.SourceLink.GitHub` `1.*` reference.
 

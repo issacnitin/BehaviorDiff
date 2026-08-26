@@ -8,15 +8,15 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $repo
 
-$work = Join-Path ([System.IO.Path]::GetTempPath()) 'behaviordiff-nopdb'
+$work = Join-Path ([System.IO.Path]::GetTempPath()) 'realdiff-nopdb'
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $work | Out-Null
 
 $env:DOTNET_JITMinOpts = '1'
-$env:BEHAVIORDIFF_TRACE = Join-Path $work 'run.ndjson'
-$env:BEHAVIORDIFF_NAMESPACES = 'SampleApp.NoPdb'
-$env:BEHAVIORDIFF_EXCLUDE_NAMESPACES = ''
-$env:BEHAVIORDIFF_BACKEND = 'cecil'
+$env:REALDIFF_TRACE = Join-Path $work 'run.ndjson'
+$env:REALDIFF_NAMESPACES = 'SampleApp.NoPdb'
+$env:REALDIFF_EXCLUDE_NAMESPACES = ''
+$env:REALDIFF_BACKEND = 'cecil'
 
 # The gate is about an assembly with no PDB, so it has to be woven like any other subject.
 $staged = Join-Path $work 'bin'

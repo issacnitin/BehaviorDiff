@@ -1,6 +1,6 @@
 #requires -Version 7.0
 <#
-    Proof harness for the BehaviorDiff wire format.
+    Proof harness for the RealDiff wire format.
 
     PowerShell acts as an independent producer: it hand-writes an NDJSON trace containing
     adversarial payloads, then the Engine reads it back through the real Contracts types.
@@ -13,10 +13,10 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
-$engineManifest = Join-Path $repo 'src\BehaviorDiff.Engine.Rust\Cargo.toml'
-$engine = Join-Path $repo 'src\BehaviorDiff.Engine.Rust\target\release\behaviordiff-engine.exe'
+$engineManifest = Join-Path $repo 'src\RealDiff.Engine.Rust\Cargo.toml'
+$engine = Join-Path $repo 'src\RealDiff.Engine.Rust\target\release\realdiff-engine.exe'
 if (-not $IsWindows) { $engine = $engine.Substring(0, $engine.Length - 4) }
-$work = Join-Path ([System.IO.Path]::GetTempPath()) 'behaviordiff-verify'
+$work = Join-Path ([System.IO.Path]::GetTempPath()) 'realdiff-verify'
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $work | Out-Null
 
@@ -43,7 +43,7 @@ $lines = @(
 
 Write-Host ''
 Write-Host '=== build ===' -ForegroundColor Cyan
-dotnet build BehaviorDiff.sln -c Release --nologo -v quiet
+dotnet build RealDiff.sln -c Release --nologo -v quiet
 if ($LASTEXITCODE -ne 0) { throw 'build failed' }
 & cargo build --release --locked --manifest-path $engineManifest
 if ($LASTEXITCODE -ne 0) { throw 'Rust engine build failed' }

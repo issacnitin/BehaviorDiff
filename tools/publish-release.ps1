@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)]
     [ValidateSet('linux-x64', 'linux-arm64', 'osx-x64', 'osx-arm64', 'win-x64')]
     [string]$RuntimeIdentifier,
-    [string]$Version = '0.3.0',
+    [string]$Version = '0.4.0',
     [string]$OutputDirectory = 'artifacts/release',
     [switch]$Trimmed
 )
@@ -46,7 +46,7 @@ if ($LASTEXITCODE -ne 0) { throw "Rust engine staging failed with exit code $LAS
 if ($LASTEXITCODE -ne 0) { throw "Rust launcher staging failed with exit code $LASTEXITCODE" }
 
 $trim = if ($Trimmed) { 'true' } else { 'false' }
-& dotnet publish (Join-Path $repo 'src/BehaviorDiff.Cli/BehaviorDiff.Cli.csproj') `
+& dotnet publish (Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj') `
     -c Release -r $RuntimeIdentifier --self-contained true -o $layout --nologo `
     '-p:SelfContainedRelease=true' "-p:PublishTrimmed=$trim"
 if ($LASTEXITCODE -ne 0) { throw "CLI publish failed with exit code $LASTEXITCODE" }
@@ -54,26 +54,26 @@ if ($LASTEXITCODE -ne 0) { throw "CLI publish failed with exit code $LASTEXITCOD
 Copy-Item $tracers (Join-Path $layout 'tracers') -Recurse -Force
 Copy-Item $engines (Join-Path $layout 'engines/rust') -Recurse -Force
 
-$executable = Join-Path $layout $(if ($IsWindows) { 'behaviordiff.exe' } else { 'behaviordiff' })
-$managed = Join-Path $layout $(if ($IsWindows) { 'behaviordiff-managed.exe' } else { 'behaviordiff-managed' })
+$executable = Join-Path $layout $(if ($IsWindows) { 'realdiff.exe' } else { 'realdiff' })
+$managed = Join-Path $layout $(if ($IsWindows) { 'realdiff-managed.exe' } else { 'realdiff-managed' })
 Move-Item $executable $managed -Force
 Copy-Item (Join-Path $launcher "$RuntimeIdentifier/$(Split-Path -Leaf $executable)") $executable -Force
 & $executable --help | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Published CLI --help failed with exit code $LASTEXITCODE" }
 
 $required = @(
-    'behaviordiff-weaver.dll',
-    'behaviordiff-weaver.deps.json',
-    'behaviordiff-weaver.runtimeconfig.json',
+    'realdiff-weaver.dll',
+    'realdiff-weaver.deps.json',
+    'realdiff-weaver.runtimeconfig.json',
     $(Split-Path -Leaf $managed),
-    'BehaviorDiff.Contracts.dll',
-    'BehaviorDiff.Tracer.dll',
+    'RealDiff.Contracts.dll',
+    'RealDiff.Tracer.dll',
     'Mono.Cecil.dll',
-    'tracers/java/behaviordiff-java-agent.jar',
+    'tracers/java/realdiff-java-agent.jar',
     'tracers/node/register.cjs',
-    "tracers/go/$RuntimeIdentifier/$(if ($IsWindows) { 'behaviordiff-go-rewrite.exe' } else { 'behaviordiff-go-rewrite' })",
-    "tracers/rust/$RuntimeIdentifier/$(if ($IsWindows) { 'behaviordiff-rust-rewrite.exe' } else { 'behaviordiff-rust-rewrite' })",
-    "engines/rust/$RuntimeIdentifier/$(if ($IsWindows) { 'behaviordiff-engine.exe' } else { 'behaviordiff-engine' })"
+    "tracers/go/$RuntimeIdentifier/$(if ($IsWindows) { 'realdiff-go-rewrite.exe' } else { 'realdiff-go-rewrite' })",
+    "tracers/rust/$RuntimeIdentifier/$(if ($IsWindows) { 'realdiff-rust-rewrite.exe' } else { 'realdiff-rust-rewrite' })",
+    "engines/rust/$RuntimeIdentifier/$(if ($IsWindows) { 'realdiff-engine.exe' } else { 'realdiff-engine' })"
 )
 foreach ($relative in $required) {
     if (-not (Test-Path (Join-Path $layout $relative) -PathType Leaf)) {
@@ -82,7 +82,7 @@ foreach ($relative in $required) {
 }
 
 $publicRid = $RuntimeIdentifier.Replace('osx-', 'darwin-')
-$baseName = "behaviordiff-v$Version-$publicRid"
+$baseName = "realdiff-v$Version-$publicRid"
 $archive = if ($IsWindows) { Join-Path $output "$baseName.zip" } else { Join-Path $output "$baseName.tar.gz" }
 Remove-Item $archive, "$archive.sha256" -Force -ErrorAction SilentlyContinue
 if ($IsWindows) {
@@ -110,7 +110,7 @@ $metrics = [ordered]@{
     sha256 = $hash
 }
 $metrics | ConvertTo-Json | Set-Content (Join-Path $output "$baseName.metrics.json") -Encoding utf8
-Write-Host 'BehaviorDiff self-contained release: PASS' -ForegroundColor Green
+Write-Host 'RealDiff self-contained release: PASS' -ForegroundColor Green
 Write-Host "  rid=$RuntimeIdentifier trimmed=$($Trimmed.IsPresent.ToString().ToLowerInvariant())"
 Write-Host "  executableBytes=$((Get-Item $executable).Length) layoutBytes=$layoutBytes files=$($files.Count)"
 Write-Host "  archive=$archive bytes=$((Get-Item $archive).Length) sha256=$hash"
