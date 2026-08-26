@@ -35,6 +35,8 @@ pub(crate) struct MemberEntry {
     pub(crate) assembly: String,
     #[serde(rename = "method")]
     pub(crate) method_full_name: Option<String>,
+    pub(crate) file_path: Option<String>,
+    pub(crate) line: Option<i32>,
     pub(crate) status: String,
     pub(crate) skip_reason: Option<String>,
     #[serde(default)]

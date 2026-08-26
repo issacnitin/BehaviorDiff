@@ -571,6 +571,8 @@ fn describe_member(member: &MemberEntry) -> Value {
     json!({
         "methodFullName": member.method_full_name,
         "assembly": member.assembly,
+        "filePath": member.file_path,
+        "line": member.line,
         "status": member.status,
         "skipReason": member.skip_reason,
         "detail": member.detail,

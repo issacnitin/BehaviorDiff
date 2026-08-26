@@ -76,6 +76,7 @@ struct Coverage {
 struct CoverageMember {
     method_full_name: Option<String>,
     assembly: String,
+    file_path: Option<String>,
     status: String,
     skip_reason: Option<String>,
     source_resolution: Option<String>,
@@ -768,7 +769,8 @@ fn members_for_changed_file<'a>(
     members
         .iter()
         .filter(|member| {
-            member.assembly == file
+            member.file_path.as_deref() == Some(file)
+                || member.assembly == file
                 || (!stem.is_empty()
                     && member
                         .method_full_name
@@ -838,5 +840,23 @@ mod tests {
         assert_eq!(index.children_of(&nodes[0]), [1]);
         assert_eq!(index.children_of(&nodes[2]), [3]);
         assert_eq!(index.orphans, [4]);
+    }
+
+    #[test]
+    fn recognizes_unobservable_members_by_exact_source_path() {
+        let members = vec![CoverageMember {
+            method_full_name: Some("example.configurationBoundary(T) T".to_owned()),
+            assembly: "example".to_owned(),
+            file_path: Some("src/config.go".to_owned()),
+            status: "Skipped".to_owned(),
+            skip_reason: Some("Unobservable".to_owned()),
+            source_resolution: Some("debugInfo".to_owned()),
+            is_test_root: false,
+        }];
+
+        assert!(changed_files_intentionally_untraced(
+            &members,
+            &["src/config.go".to_owned()]
+        ));
     }
 }
