@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import CodeType, FrameType
 
+from .canonical import Canonicalizer, DigestStatistics, MISSING
 from .monitor import Scope
 
 
@@ -22,6 +23,8 @@ class CallState:
     file_path: str
     line: int
     thread_id: int
+    args_digest: str
+    args_rendered: str
     test_id: str = "(no-test)"
     pending_exception: BaseException | None = None
     suspended: bool = False
@@ -51,6 +54,8 @@ class Runtime:
         self._ordinals: dict[tuple[str, str], int] = defaultdict(int)
         self._members: dict[str, Member] = {}
         self._module_calls: dict[str, int] = defaultdict(int)
+        self._digest_statistics = DigestStatistics()
+        self._canonicalizer = Canonicalizer(statistics=self._digest_statistics)
         self._written = 0
         self._closed = False
         trace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,7 +114,13 @@ class Runtime:
             file_path=file_path,
             line=max(1, code.co_firstlineno),
             thread_id=thread_id,
+            args_digest="",
+            args_rendered="",
         )
+        arguments = _capture_arguments(code, frame)
+        canonical_arguments = self._canonicalizer.digest(arguments, source_path=file_path)
+        state.args_digest = canonical_arguments.digest
+        state.args_rendered = canonical_arguments.rendered
         self._states[id(frame)] = state
         stack.append(call_id)
         self._members.setdefault(
@@ -136,7 +147,7 @@ class Runtime:
 
     def _raised(self, frame: FrameType, value: object | None) -> None:
         state = self._states.get(id(frame))
-        if state is not None and isinstance(value, BaseException):
+        if state is not None and value is not None:
             state.pending_exception = value
 
     def _complete(
@@ -158,12 +169,18 @@ class Runtime:
             "callDepth": state.depth,
             "callId": state.call_id,
             "ordinal": state.ordinal,
+            "argsDigest": state.args_digest,
+            "argsRendered": state.args_rendered,
             "threadId": state.thread_id,
         }
         if state.parent_call_id is not None:
             record["parentCallId"] = state.parent_call_id
-        if isinstance(exception, BaseException):
+        if exception is not None:
             record["exceptionType"] = _exception_name(exception)
+        else:
+            canonical_return = self._canonicalizer.digest(return_value, source_path=state.file_path)
+            record["returnDigest"] = canonical_return.digest
+            record["returnRendered"] = canonical_return.rendered
         self._write(record)
         self._module_calls[_module_name(state.file_path)] += 1
 
@@ -234,11 +251,13 @@ class Runtime:
                 stream,
                 {
                     "kind": "digest",
-                    "valuesDigested": 0,
-                    "depthLimited": 0,
-                    "blocklisted": 0,
-                    "errored": 0,
-                    "renderedTruncated": 0,
+                    "valuesDigested": self._digest_statistics.values_digested,
+                    "depthLimited": self._digest_statistics.depth_limited,
+                    "blocklisted": self._digest_statistics.blocklisted,
+                    "errored": self._digest_statistics.errored,
+                    "renderedTruncated": self._digest_statistics.rendered_truncated,
+                    "unreadableFields": self._digest_statistics.unreadable_fields,
+                    "ambiguousMapEntries": self._digest_statistics.ambiguous_map_entries,
                 },
             )
             _write_line(
@@ -273,3 +292,16 @@ def _return_kind(code: CodeType) -> str:
 def _exception_name(exception: BaseException) -> str:
     type_ = type(exception)
     return f"{type_.__module__}.{type_.__qualname__}"
+
+
+def _capture_arguments(code: CodeType, frame: FrameType) -> dict[str, object]:
+    count = code.co_argcount + code.co_kwonlyargcount
+    names = list(code.co_varnames[:count])
+    next_index = count
+    if code.co_flags & 0x04:
+        names.append(code.co_varnames[next_index])
+        next_index += 1
+    if code.co_flags & 0x08:
+        names.append(code.co_varnames[next_index])
+    locals_ = frame.f_locals
+    return {name: dict.get(locals_, name, MISSING) for name in names}

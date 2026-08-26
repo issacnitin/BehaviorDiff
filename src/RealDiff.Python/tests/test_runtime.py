@@ -35,6 +35,8 @@ class RuntimeTests(unittest.TestCase):
             events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(2, len(events))
             self.assertNotIn("exceptionType", events[0])
+            self.assertIn("argsDigest", events[0])
+            self.assertIn("returnDigest", events[0])
             self.assertEqual("builtins.ValueError", events[1]["exceptionType"])
             self.assertNotIn("returnDigest", events[1])
             self.assertEqual([0, 0], [event["ordinal"] for event in events])
@@ -48,6 +50,8 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(writer["written"], writer["enqueued"])
             module = next(record for record in manifest if record["kind"] == "assembly")
             self.assertEqual(module["discoveredMembers"], module["patchedMembers"] + module["skippedMembers"])
+            digest = next(record for record in manifest if record["kind"] == "digest")
+            self.assertGreater(digest["valuesDigested"], 0)
 
 
 if __name__ == "__main__":
