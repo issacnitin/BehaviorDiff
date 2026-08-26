@@ -15,15 +15,17 @@ flowchart LR
   D[.NET / Cecil] --> T[behaviordiff.trace/1]
   J[Java / javaagent + ASM] --> T
   N[Node / CJS + ESM + Babel] --> T
+  G[Go / stable AST rewrite] --> T
+  R[Rust / stable syn rewrite cache] --> T
   T --> E[C# or Rust matching and noise]
   E --> A[Shared C# frontier and attribution]
   A --> F[findings.json]
   F --> P[GitHub, Azure DevOps, MCP]
 ```
 
-[`TRACE-FORMAT.md`](TRACE-FORMAT.md) is the contract between tracers and the engine. Java and Node were implemented independently from that contract and pass the same conformance harness: identical method sets, per-key event counts and entry ordinals, source tripwires, digest proofs, and zero engine divergences.
+[`TRACE-FORMAT.md`](TRACE-FORMAT.md) is the contract between tracers and the engine. The maintained .NET, Java, Node, Go, and Rust gates apply the same conformance rules: identical method sets, per-key event counts and entry ordinals, source tripwires, digest proofs, and zero engine divergences from non-empty runs.
 
-> Status: early preview. The CLI detects .NET, Maven Java, and npm Node repositories from their root build entry points.
+> Status: early preview. The unified CLI detects .NET, Maven Java, npm Node, and Cargo Rust repositories from their root build entry points. Go remains available through its source rewriter and conformance tooling.
 
 ## Supported languages
 
@@ -32,6 +34,8 @@ flowchart LR
 | .NET 8 | Mono.Cecil build-time IL weaving | xUnit and portable PDBs | Properties, events, operators, and type initializers are skipped by policy. |
 | Java | `java.lang.instrument` agent with ASM | Maven, JUnit/TestNG annotations, `src/main/java` and `src/test/java` | Conventional Maven roots are required; static initializers are skipped; collection shape rules require `java.util` module access. |
 | Node / TypeScript | CommonJS require hook and ESM loader with Babel | npm, direct JavaScript locations, TypeScript source maps, Jest/Vitest adapters | npm/package-lock only; workers are out of scope; generators and unsupported callables are skipped; source maps must resolve rather than be guessed. |
+| Go | Stable module-aware AST rewriting into a build cache | `go test`, original `.go` parser positions | Dynamic interface/function boundaries and unrewritten goroutine boundaries are explicit skips; unified CLI attachment remains pending. |
+| Rust | Stable `syn`/`quote` rewriting into a SHA-256 build cache | `cargo test`, structural `#[test]` roots, original `.rs` parser positions | Macro expansions, extern/const callables, unions, trait objects, and dependency values are explicit partial/unsupported boundaries; rendered-value redaction is not yet implemented. |
 
 Every tracer emits the same process-scoped NDJSON contract and a reconciled coverage manifest. A member reported instrumented must be capable of emitting, and every module must satisfy `discovered = instrumented + skipped` with zero patch failures.
 
@@ -96,7 +100,7 @@ This covers sort stability, retry policy, and configuration parsing.
 
 ### Use the all-language container
 
-The published Linux image contains the BehaviorDiff CLI and engine, the .NET 8 SDK and tracer, Java 17 and the shaded agent, Node 24 and the production tracer, and Go with `behaviordiff-go-rewrite`. The host needs only Docker:
+The published Linux image contains the BehaviorDiff CLI, default Rust diff engine, .NET 8 SDK/tracer, Java 17 agent, Node 24 tracer, Go rewriter, and stable Rust toolchain/tracer. The host needs only Docker:
 
 ```bash
 docker pull ghcr.io/issacnitin/behaviordiff:main
@@ -107,9 +111,9 @@ docker run --rm \
   --findings /workspace/.behaviordiff/artifacts/findings.json
 ```
 
-The normal image entrypoint is `behaviordiff`; no PowerShell wrapper is involved. The unified CLI currently orchestrates .NET, Java, and Node/TypeScript repositories. The same image exposes the Go source rewriter as `behaviordiff-go-rewrite`; Go is not yet wired into the unified base/PR CLI pipeline.
+The normal image entrypoint is `behaviordiff`; no PowerShell wrapper is involved. The unified CLI orchestrates .NET, Java, Node/TypeScript, and Rust repositories. The same image exposes the Go source rewriter as `behaviordiff-go-rewrite`; Go is not yet wired into the unified base/PR CLI pipeline.
 
-The verified Linux/amd64 image is 588,122,113 bytes (560.9 MiB) and contains .NET SDK 8.0.424, OpenJDK 17.0.17, Maven 3.9.11, Node 24.19.0, npm 11.17.0, Go 1.27.0, and the Rust diff engine. The container workflow reports the exact size for every published build.
+The current locally verified Linux/amd64 image is 898,677,147 bytes by Docker image inspection and includes stable Rust 1.98 plus a native linker. The container workflow reports the exact size for every published build.
 
 ### Install the GitHub release
 
@@ -136,7 +140,7 @@ dotnet tool install --global BehaviorDiff.Tool `
 behaviordiff --help
 ```
 
-The packaging wrapper builds and stages the shaded Java agent, the Node tracer with its production dependencies, and the current host's Rust diff engine before packing the tool. An ordinary `dotnet build` remains independent of Maven, npm, and Cargo.
+The packaging wrapper builds and stages the shaded Java agent, Node tracer with production dependencies, stable Rust tracer for the current RID, and current host's Rust diff engine before packing the tool. An ordinary `dotnet build` remains independent of Maven, npm, and Cargo.
 
 To update an existing source installation:
 
@@ -218,6 +222,14 @@ Prerequisites: Node.js, npm, `package-lock.json`, and a test script. TypeScript 
 behaviordiff C:\src\node-service --base origin/main --pr HEAD
 ```
 
+### Rust
+
+Prerequisites: stable Rust/Cargo and standard `#[test]` tests. The CLI rewrites only into an external content-addressed cache, runs tests there, and maps events back to original `.rs` files. The checkout is never mutated. Do not use the Rust tracer for sensitive values yet: digest capture is qualified, but rendering-only secret redaction remains incomplete.
+
+```powershell
+behaviordiff C:\src\rust-service --base origin/main --pr HEAD
+```
+
 The command is intentionally the same for every language. `behaviordiff detect-language <repo>` shows the selected language and build entry point.
 
 ### Base trace cache
@@ -230,16 +242,7 @@ On the 99,000-event-per-run FluentValidation scale case, a cold four-run analysi
 
 Every analyzed `findings.json` includes `timings` for build, weave, instrumented runs, cache restore/store, engine diff, engine frontier, and their measured total. This makes CI cost visible without parsing console output.
 
-The qualified Rust prototype is not a memory optimization yet. On the retained FluentValidation #2136 corpus (602,256,055 event-trace bytes plus 5,853,647 manifest bytes, 53,245 matched keys), three direct-process repetitions measured:
-
-| Stage | Median wall | Peak RSS | RSS / trace bytes |
-| --- | ---: | ---: | ---: |
-| C# diff | 11.932 s | 1,962.8 MiB | 3.4174x |
-| Rust diff | 17.517 s | 2,050.6 MiB | 3.5702x |
-| Shared frontier over C# output | 9.351 s | 704.3 MiB | 1.2263x |
-| Shared frontier over Rust output | 8.961 s | 690.3 MiB | 1.2019x |
-
-Rust used 4.5% more peak RSS and took 46.8% longer in diff. Both implementations retain the whole comparison in memory. The frontier rows are not separate C# and Rust implementations; they measure the same C# frontier against byte-equivalent divergence sets. Reproduce the measurement with `tools/measure-engine-cost.ps1`.
+On retained FluentValidation #2136, the default Rust path measured 6.626 seconds cold and 7.331 seconds warm across diff plus shared frontier, with 321.410/314.102 MiB host process-tree peaks. C# measured 13.685/14.037 seconds and 2,130.137/2,155.504 MiB. Full methodology, byte-equivalence gates, and container measurements are in [evidence/RUST-STREAMING-KILL-GATE.md](evidence/RUST-STREAMING-KILL-GATE.md) and [evidence/CONTAINER-PROOF.md](evidence/CONTAINER-PROOF.md).
 
 Warm a target branch from a nightly job without running a synthetic PR comparison:
 
@@ -391,7 +394,7 @@ flowchart LR
     I --> J[findings.json and PR comments]
 ```
 
-1. **Language instrumentation**: Mono.Cecil weaves .NET IL, a `java.lang.instrument` agent rewrites JVM bytecode with ASM, and Node load hooks transform CommonJS/ESM functions with Babel.
+1. **Language instrumentation**: Mono.Cecil weaves .NET IL; Java uses an ASM agent; Node uses Babel load hooks; Go and Rust use stable source rewriting into external build caches.
 2. **Runtime capture**: arguments, return values, exceptions, call order, source locations, and test roots are recorded as NDJSON.
 3. **Noise baseline**: differences found among base runs are excluded from proposed-change evidence.
 4. **Frontier analysis**: changed callers are collapsed onto the first changed behavior in each call tree.
@@ -408,6 +411,8 @@ BehaviorDiff analyzes executed behavior, not all possible behavior. It complemen
 - Java static initializers and Node generators or unsupported callable shapes are recorded as skipped coverage boundaries;
 - Node worker threads are out of scope in version 1 and are recorded as `UnsupportedShape` boundaries rather than silently omitted;
 - Node `Map` and `Set` internals cannot be read without iteration, so they are represented by explicit partial markers;
+- Rust opaque/generic/trait-object/union regions and unavailable macro expansions are explicit partial or unsupported boundaries;
+- Rust rendered values do not yet apply the TRACE-FORMAT sensitive-name/content redaction rules; use only with non-sensitive test values until that confidentiality blocker is closed;
 - generated members without a real repository source path cannot be attributed through a normal Git diff;
 - three base runs sample nondeterminism; they do not characterize every possible schedule or external dependency;
 - identical partial digests do not prove equality inside skipped, depth-limited, errored, or truncated regions;
@@ -426,6 +431,8 @@ See [evidence/FINDINGS.md](evidence/FINDINGS.md) for measured instrumentation an
 | `src/BehaviorDiff.Tracer` | Runtime hooks, value rendering, coverage manifests |
 | `src/BehaviorDiff.Java.Agent` | Java agent, ASM rewriting, JVM canonicalizer |
 | `src/BehaviorDiff.Node` | CommonJS/ESM hooks, Babel rewriting, Node canonicalizer and test adapters |
+| `src/BehaviorDiff.Go` | Stable Go source rewriter and runtime |
+| `src/BehaviorDiff.Rust.Tracer` | Stable Rust rewrite cache, generated canonicalizer, runtime, and manifest finalizer |
 | `src/BehaviorDiff.Contracts` | Trace and manifest wire formats |
 | `src/BehaviorDiff.Mcp` | Optional MCP server over completed runs |
 | `tools/Weaver` | Mono.Cecil build-time instrumentation |
