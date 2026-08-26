@@ -57,7 +57,6 @@ namespace BehaviorDiff.Cli
             if (operation == "apply")
             {
                 BaselineResult result = EngineDispatch.ApplyBaseline(
-                    AnalysisEngine.Rust,
                     Path.GetFullPath(findings),
                     baselinePath);
                 Report(result, baselinePath);

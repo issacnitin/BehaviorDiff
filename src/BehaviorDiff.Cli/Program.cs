@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using BehaviorDiff.Engine;
 
 namespace BehaviorDiff.Cli
 {
@@ -75,7 +74,6 @@ namespace BehaviorDiff.Cli
             bool keep = false;
             bool noBaseline = false;
             bool strict = false;
-            AnalysisEngine engine = AnalysisEngine.Rust;
             var positional = new List<string>();
 
             for (int i = firstOption; i < args.Length; i++)
@@ -97,13 +95,8 @@ namespace BehaviorDiff.Cli
                     case "--keep": keep = true; break;
                     case "--strict": strict = true; break;
                     case "--engine":
-                        if (!EngineDispatch.TryParse(Next(args, ref i), out engine))
-                        {
-                            Console.Error.WriteLine("Engine must be 'csharp' or 'rust'.");
-                            return ExitCodes.BuildOrTestFailure;
-                        }
-
-                        break;
+                        Console.Error.WriteLine("--engine was removed; BehaviorDiff uses the Rust engine.");
+                        return ExitCodes.BuildOrTestFailure;
                     case "-h":
                     case "--help":
                         Usage();
@@ -115,11 +108,8 @@ namespace BehaviorDiff.Cli
                         }
                         else if (args[i].StartsWith("--engine=", StringComparison.Ordinal))
                         {
-                            if (!EngineDispatch.TryParse(args[i].Substring("--engine=".Length), out engine))
-                            {
-                                Console.Error.WriteLine("Engine must be 'csharp' or 'rust'.");
-                                return ExitCodes.BuildOrTestFailure;
-                            }
+                            Console.Error.WriteLine("--engine was removed; BehaviorDiff uses the Rust engine.");
+                            return ExitCodes.BuildOrTestFailure;
                         }
                         else
                         {
@@ -163,7 +153,7 @@ namespace BehaviorDiff.Cli
 
                 if (baselinePath is not null)
                 {
-                    EngineDispatch.ValidateBaseline(engine, baselinePath);
+                    EngineDispatch.ValidateBaseline(baselinePath);
                 }
 
                 pipeline = new Pipeline(
@@ -179,8 +169,7 @@ namespace BehaviorDiff.Cli
                     cacheRetention,
                     traceRetention,
                     warmOnly,
-                    strict,
-                    engine);
+                    strict);
                 return pipeline.Run();
             }
             catch (CliException ex)
@@ -189,7 +178,6 @@ namespace BehaviorDiff.Cli
                 Console.Error.WriteLine("FAILED: " + ex.Message);
                 ResolvedRefs? refs = pipeline?.ResolvedRefs;
                 EngineDispatch.WriteInvalidFindings(
-                    engine,
                     findingsPath,
                     ex.ExitCode == ExitCodes.RunInvalid ? "refused" : "failed",
                     ex.ExitCode,
@@ -206,7 +194,6 @@ namespace BehaviorDiff.Cli
                 Console.Error.WriteLine("REFUSED: " + reason);
                 ResolvedRefs? refs = pipeline?.ResolvedRefs;
                 EngineDispatch.WriteInvalidFindings(
-                    engine,
                     findingsPath,
                     "refused",
                     ExitCodes.RunInvalid,
@@ -223,7 +210,6 @@ namespace BehaviorDiff.Cli
                 Console.Error.WriteLine("FAILED: " + reason);
                 ResolvedRefs? refs = pipeline?.ResolvedRefs;
                 EngineDispatch.WriteInvalidFindings(
-                    engine,
                     findingsPath,
                     "failed",
                     ExitCodes.BuildOrTestFailure,
@@ -264,7 +250,7 @@ namespace BehaviorDiff.Cli
 
         private static void Usage()
         {
-            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--engine=csharp|rust] [--work <dir>] [--findings <file>] [--baseline <file>|--no-baseline] [--strict] [--cache-dir <dir>] [--cache-retention <12h|7d>] [--keep-traces <12h|7d>] [--keep]");
+            Console.WriteLine("usage: behaviordiff <repo> --base <ref> --pr <ref> [--work <dir>] [--findings <file>] [--baseline <file>|--no-baseline] [--strict] [--cache-dir <dir>] [--cache-retention <12h|7d>] [--keep-traces <12h|7d>] [--keep]");
             Console.WriteLine("       behaviordiff warm <repo> --target <ref> --cache-dir <dir> [--cache-retention <12h|7d>] [--work <dir>] [--keep]");
             Console.WriteLine("       behaviordiff detect-language <repo>");
             Console.WriteLine("       behaviordiff [<repo>] --ci=azuredevops [--work <dir>] [--findings <file>] [--keep]");
@@ -295,7 +281,6 @@ namespace BehaviorDiff.Cli
         private readonly bool _warmOnly;
         private readonly TimeSpan? _traceRetention;
         private readonly bool _strict;
-        private readonly AnalysisEngine _engine;
         private readonly PipelineTimings _timings = new PipelineTimings();
 
         internal ResolvedRefs? ResolvedRefs { get; private set; }
@@ -313,8 +298,7 @@ namespace BehaviorDiff.Cli
             TimeSpan cacheRetention,
             TimeSpan? traceRetention,
             bool warmOnly,
-            bool strict,
-            AnalysisEngine engine)
+            bool strict)
         {
             _repo = repo;
             _baseRef = baseRef;
@@ -331,7 +315,6 @@ namespace BehaviorDiff.Cli
             _traceRetention = traceRetention;
             _warmOnly = warmOnly;
             _strict = strict;
-            _engine = engine;
         }
 
         internal int Run()
@@ -342,7 +325,7 @@ namespace BehaviorDiff.Cli
             Console.WriteLine("  repo : " + _repo);
             Console.WriteLine("  work : " + _work);
             Console.WriteLine("  mode : " + (_warmOnly ? "warm base trace cache" : "analyze PR"));
-            Console.WriteLine("  engine: " + EngineDispatch.Name(_engine));
+            Console.WriteLine("  engine: rust");
 
             if (!Directory.Exists(Path.Combine(_repo, ".git")) && !File.Exists(Path.Combine(_repo, ".git")))
             {
@@ -733,14 +716,13 @@ namespace BehaviorDiff.Cli
                 ChangedFiles = changedList,
                 Output = divergenceSet,
             };
-            int diffExit = EngineDispatch.RunDiff(_engine, diffOptions);
+            int diffExit = EngineDispatch.RunDiff(diffOptions);
             diffStopwatch.Stop();
             _timings.DiffMilliseconds += diffStopwatch.ElapsedMilliseconds;
             if (diffExit != 0)
             {
                 string reason = diffOptions.RefusalReason ?? "The comparison was refused before a DivergenceSet was produced.";
                 EngineDispatch.WriteInvalidFindings(
-                    _engine,
                     _findings,
                     "refused",
                     ExitCodes.RunInvalid,
@@ -764,14 +746,13 @@ namespace BehaviorDiff.Cli
                 ChangedFiles = changedList,
                 Output = report,
             };
-            int frontierExit = EngineDispatch.RunFrontier(_engine, frontierOptions);
+            int frontierExit = EngineDispatch.RunFrontier(frontierOptions);
             frontierStopwatch.Stop();
             _timings.FrontierMilliseconds += frontierStopwatch.ElapsedMilliseconds;
             if (frontierExit != 0)
             {
                 string reason = frontierOptions.RefusalReason ?? "Frontier detection was refused before a report was produced.";
                 EngineDispatch.WriteInvalidFindings(
-                    _engine,
                     _findings,
                     "refused",
                     ExitCodes.RunInvalid,
@@ -786,7 +767,6 @@ namespace BehaviorDiff.Cli
 
             int exitCode = Summarize(report);
             EngineDispatch.WriteFindings(
-                _engine,
                 divergenceSet,
                 report,
                 _findings,
@@ -811,7 +791,7 @@ namespace BehaviorDiff.Cli
             {
                 Console.WriteLine();
                 Console.WriteLine("=== baseline policy ===");
-                BaselineResult baseline = EngineDispatch.ApplyBaseline(_engine, _findings, _baseline);
+                BaselineResult baseline = EngineDispatch.ApplyBaseline(_findings, _baseline);
                 BaselineCommand.Report(baseline, _baseline);
                 policyExitCode = baseline.ExitCode;
             }

@@ -4,42 +4,13 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using BehaviorDiff.Engine;
 
 namespace BehaviorDiff.Cli
 {
-    internal enum AnalysisEngine
-    {
-        CSharp,
-        Rust,
-    }
-
     internal static class EngineDispatch
     {
-        internal static bool TryParse(string value, out AnalysisEngine engine)
+        internal static int RunDiff(DiffOptions options)
         {
-            switch (value.ToLowerInvariant())
-            {
-                case "csharp": engine = AnalysisEngine.CSharp; return true;
-                case "rust": engine = AnalysisEngine.Rust; return true;
-                default: engine = AnalysisEngine.CSharp; return false;
-            }
-        }
-
-        internal static string Name(AnalysisEngine engine) => engine switch
-        {
-            AnalysisEngine.CSharp => "csharp",
-            AnalysisEngine.Rust => "rust",
-            _ => throw new ArgumentOutOfRangeException(nameof(engine)),
-        };
-
-        internal static int RunDiff(AnalysisEngine engine, DiffOptions options)
-        {
-            if (engine == AnalysisEngine.CSharp)
-            {
-                return DiffCommand.Run(options);
-            }
-
             string executable = ResolveRustEngine();
             ProcessResult result = Shell.Run(
                 executable,
@@ -75,13 +46,8 @@ namespace BehaviorDiff.Cli
             return result.ExitCode;
         }
 
-        internal static int RunFrontier(AnalysisEngine engine, FrontierOptions options)
+        internal static int RunFrontier(FrontierOptions options)
         {
-            if (engine == AnalysisEngine.CSharp)
-            {
-                return FrontierCommand.Run(options);
-            }
-
             ProcessResult result = Shell.Run(
                 ResolveRustEngine(),
                 FrontierArguments(options),
@@ -105,7 +71,6 @@ namespace BehaviorDiff.Cli
         }
 
         internal static void WriteFindings(
-            AnalysisEngine engine,
             string divergenceSet,
             string frontierReport,
             string output,
@@ -126,31 +91,6 @@ namespace BehaviorDiff.Cli
             long frontierMilliseconds,
             bool strict)
         {
-            if (engine == AnalysisEngine.CSharp)
-            {
-                FindingsCommand.WriteAnalyzed(
-                    divergenceSet,
-                    frontierReport,
-                    output,
-                    exitCode,
-                    baseSha,
-                    prSha,
-                    mergeBaseSha,
-                    cacheStatus,
-                    cacheKey,
-                    cacheBackend,
-                    cacheSavedWallClockMilliseconds,
-                    buildMilliseconds,
-                    weaveMilliseconds,
-                    instrumentedRunMilliseconds,
-                    cacheRestoreMilliseconds,
-                    cacheStoreMilliseconds,
-                    diffMilliseconds,
-                    frontierMilliseconds,
-                    strict);
-                return;
-            }
-
             RunRustArtifact(FindingsArguments(
                 divergenceSet,
                 frontierReport,
@@ -174,7 +114,6 @@ namespace BehaviorDiff.Cli
         }
 
         internal static void WriteInvalidFindings(
-            AnalysisEngine engine,
             string output,
             string status,
             int exitCode,
@@ -183,19 +122,6 @@ namespace BehaviorDiff.Cli
             string? prSha = null,
             string? mergeBaseSha = null)
         {
-            if (engine == AnalysisEngine.CSharp)
-            {
-                FindingsCommand.WriteInvalid(
-                    output,
-                    status,
-                    exitCode,
-                    reason,
-                    baseSha,
-                    prSha,
-                    mergeBaseSha);
-                return;
-            }
-
             RunRustArtifact(
                 InvalidFindingsArguments(
                     output,
@@ -208,14 +134,8 @@ namespace BehaviorDiff.Cli
                 "invalid findings");
         }
 
-        internal static void ValidateBaseline(AnalysisEngine engine, string path)
+        internal static void ValidateBaseline(string path)
         {
-            if (engine == AnalysisEngine.CSharp)
-            {
-                BaselinePolicy.Read(path);
-                return;
-            }
-
             ProcessResult result = Shell.Run(
                 ResolveRustEngine(),
                 new[] { "baseline-validate", "--baseline", path },
@@ -230,15 +150,9 @@ namespace BehaviorDiff.Cli
         }
 
         internal static BaselineResult ApplyBaseline(
-            AnalysisEngine engine,
             string findingsPath,
             string baselinePath)
         {
-            if (engine == AnalysisEngine.CSharp)
-            {
-                return BaselinePolicy.Apply(findingsPath, baselinePath);
-            }
-
             ProcessResult result = Shell.Run(
                 ResolveRustEngine(),
                 new[] { "baseline", "--findings", findingsPath, "--baseline", baselinePath },

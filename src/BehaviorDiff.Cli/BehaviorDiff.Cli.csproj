@@ -21,7 +21,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BehaviorDiff.Engine\BehaviorDiff.Engine.csproj" />
     <!-- Referenced so the tracer and its runtime dependencies land in this app's output and can be
          copied into the injection kit; the CLI itself never calls into them. -->
     <ProjectReference Include="..\BehaviorDiff.Tracer.Xunit\BehaviorDiff.Tracer.Xunit.csproj" />
