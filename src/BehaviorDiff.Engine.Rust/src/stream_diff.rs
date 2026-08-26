@@ -1542,6 +1542,8 @@ impl Serialize for HarnessDivergenceView<'_> {
 struct MemberItem<'a> {
     method_full_name: Option<&'a str>,
     assembly: &'a str,
+    file_path: Option<&'a str>,
+    line: Option<i32>,
     status: &'a str,
     skip_reason: Option<&'a str>,
     detail: Option<&'a str>,
@@ -1560,6 +1562,8 @@ impl Serialize for MemberView<'_> {
             sequence.serialize_element(&MemberItem {
                 method_full_name: item.method_full_name.as_deref(),
                 assembly: &item.assembly,
+                file_path: item.file_path.as_deref(),
+                line: item.line,
                 status: &item.status,
                 skip_reason: item.skip_reason.as_deref(),
                 detail: item.detail.as_deref(),
