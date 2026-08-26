@@ -124,7 +124,7 @@ async function main(): Promise<void> {
     assert.equal(cursor.level, 9);
     assert.equal(subject.deep(deepValue), 1);
 
-    const longPrefix = 'a'.repeat(3_100);
+    const longPrefix = 'a-'.repeat(1_550);
     assert.equal(subject.longText(`${longPrefix}x`), 3_101);
     assert.equal(subject.longText(`${longPrefix}y`), 3_101);
 
