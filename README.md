@@ -113,7 +113,7 @@ docker run --rm \
 
 The normal image entrypoint is `behaviordiff`; no PowerShell wrapper is involved. The unified CLI orchestrates .NET, Java, Node/TypeScript, and Rust repositories. The same image exposes the Go source rewriter as `behaviordiff-go-rewrite`; Go is not yet wired into the unified base/PR CLI pipeline.
 
-The current locally verified Linux/amd64 image is 898,677,147 bytes by Docker image inspection and includes stable Rust 1.98 plus a native linker. The container workflow reports the exact size for every published build.
+The current locally verified Linux/amd64 image is 898,678,469 bytes by Docker image inspection and includes stable Rust 1.98 plus a native linker. The container workflow reports the exact size for every published build.
 
 ### Install the GitHub release
 
