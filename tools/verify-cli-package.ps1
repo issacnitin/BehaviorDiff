@@ -174,7 +174,11 @@ try {
     }
 
     [xml]$project = Get-Content $cliProject -Raw
-    $version = [string]$project.Project.PropertyGroup.Version
+    $versionNode = $project.SelectSingleNode('/Project/PropertyGroup/Version')
+    if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerText)) {
+        throw "CLI package version was not found in $cliProject"
+    }
+    $version = $versionNode.InnerText.Trim()
     Write-Host '=== Install packed CLI ===' -ForegroundColor Cyan
     Invoke-Checked 'CLI tool install' {
         & dotnet tool install BehaviorDiff.Tool --tool-path $toolPath --version $version `
