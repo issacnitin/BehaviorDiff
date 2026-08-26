@@ -110,23 +110,33 @@ docker run --rm \
   --findings /workspace/.behaviordiff/artifacts/findings.json
 ```
 
-The normal image entrypoint is `behaviordiff`; no PowerShell wrapper is involved. The unified CLI orchestrates .NET, Java, Node/TypeScript, and Rust repositories. The same image exposes the Go source rewriter as `behaviordiff-go-rewrite`; Go is not yet wired into the unified base/PR CLI pipeline.
+The normal image entrypoint is `behaviordiff`; no PowerShell wrapper is involved. The unified CLI orchestrates .NET, Java, Node/TypeScript, Go, and Rust repositories.
 
 The current locally verified Linux/amd64 image is 898,678,469 bytes by Docker image inspection and includes stable Rust 1.98 plus a native linker. The container workflow reports the exact size for every published build.
 
 ### Install the GitHub release
 
-Download the package from the [latest release](https://github.com/issacnitin/BehaviorDiff/releases/latest), then install it from the download directory:
+Download the archive for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, or `win-x64` from the [latest release](https://github.com/issacnitin/BehaviorDiff/releases/latest). Verify it against `SHA256SUMS`, extract it, and place the extracted directory on `PATH`. The executable is self-contained; the host does not need a .NET runtime.
 
-```powershell
-dotnet tool install --global BehaviorDiff.Tool `
-  --version 0.1.0 `
-  --add-source .
-
+```bash
+sha256sum --check SHA256SUMS --ignore-missing
+tar -xzf behaviordiff-v0.1.0-linux-x64.tar.gz -C "$HOME/.local/lib/behaviordiff"
+ln -s "$HOME/.local/lib/behaviordiff/behaviordiff" "$HOME/.local/bin/behaviordiff"
 behaviordiff --help
 ```
 
-The package is attached as `BehaviorDiff.Tool.0.1.0.nupkg`.
+```powershell
+Get-FileHash .\behaviordiff-v0.1.0-win-x64.zip -Algorithm SHA256
+Expand-Archive .\behaviordiff-v0.1.0-win-x64.zip "$env:LOCALAPPDATA\BehaviorDiff"
+& "$env:LOCALAPPDATA\BehaviorDiff\behaviordiff.exe" --help
+```
+
+The complete extracted directory must remain together because it also contains the native engine, language tracers, and the separately launched .NET Weaver. The NuGet tool package remains available as a framework-dependent compatibility distribution:
+
+```powershell
+dotnet tool install --global BehaviorDiff.Tool --version 0.1.0 --add-source .
+behaviordiff --help
+```
 
 ### Build and install from source
 

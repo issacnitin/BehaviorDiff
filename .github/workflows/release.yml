@@ -1,0 +1,106 @@
+name: Self-contained release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the v prefix
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  publish:
+    name: ${{ matrix.public-rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            dotnet-rid: linux-x64
+            public-rid: linux-x64
+          - runner: ubuntu-24.04-arm
+            dotnet-rid: linux-arm64
+            public-rid: linux-arm64
+          - runner: macos-13
+            dotnet-rid: osx-x64
+            public-rid: darwin-x64
+          - runner: macos-14
+            dotnet-rid: osx-arm64
+            public-rid: darwin-arm64
+          - runner: windows-2022
+            dotnet-rid: win-x64
+            public-rid: win-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: src/BehaviorDiff.Node/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: src/BehaviorDiff.Go/go.mod
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Publish native release archive
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { $env:INPUT_VERSION }
+          pwsh -NoProfile -File tools/publish-release.ps1 `
+            -RuntimeIdentifier '${{ matrix.dotnet-rid }}' `
+            -Version $version `
+            -OutputDirectory artifacts/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: behaviordiff-${{ matrix.public-rid }}
+          path: |
+            artifacts/release/behaviordiff-*.zip
+            artifacts/release/behaviordiff-*.tar.gz
+            artifacts/release/behaviordiff-*.sha256
+            artifacts/release/behaviordiff-*.metrics.json
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: github.ref_type == 'tag'
+    needs: publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: behaviordiff-*
+          path: artifacts
+          merge-multiple: true
+      - name: Build aggregate checksums
+        shell: bash
+        run: cat artifacts/*.sha256 | sort > artifacts/SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*.zip
+            artifacts/*.tar.gz
+            artifacts/*.sha256
+            artifacts/*.metrics.json
+            artifacts/SHA256SUMS
+          generate_release_notes: true

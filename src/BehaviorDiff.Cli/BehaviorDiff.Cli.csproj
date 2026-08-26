@@ -20,11 +20,30 @@
     <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddWeaverRuntimeDependenciesToPackage</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(SelfContainedRelease)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- Referenced so the tracer and its runtime dependencies land in this app's output and can be
          copied into the injection kit; the CLI itself never calls into them. -->
-    <ProjectReference Include="..\BehaviorDiff.Tracer.Xunit\BehaviorDiff.Tracer.Xunit.csproj" />
-    <ProjectReference Include="..\..\tools\Weaver\Weaver.csproj" ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\BehaviorDiff.Tracer.Xunit\BehaviorDiff.Tracer.Xunit.csproj"
+                      Condition="'$(SelfContainedRelease)' != 'true'" />
+        <ProjectReference Include="..\..\tools\Weaver\Weaver.csproj"
+              ReferenceOutputAssembly="false"
+                      Condition="'$(SelfContainedRelease)' != 'true'" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(SelfContainedRelease)' == 'true'">
+    <Content Include="..\..\tools\Weaver\bin\$(Configuration)\net8.0\behaviordiff-weaver.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\behaviordiff-weaver.deps.json;..\..\tools\Weaver\bin\$(Configuration)\net8.0\behaviordiff-weaver.runtimeconfig.json;..\..\tools\Weaver\bin\$(Configuration)\net8.0\BehaviorDiff.Contracts.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\BehaviorDiff.Tracer.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.Mdb.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.Pdb.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.Rocks.dll;..\BehaviorDiff.Tracer.Xunit\bin\$(Configuration)\netstandard2.0\BehaviorDiff.Tracer.Xunit.dll"
+             Link="%(Filename)%(Extension)"
+             CopyToPublishDirectory="PreserveNewest"
+             ExcludeFromSingleFile="true" />
   </ItemGroup>
 
   <ItemGroup>
@@ -33,11 +52,21 @@
 
   <!-- The weaver reflection-loads target assemblies and therefore needs its own runtimeconfig with
        RollForward=LatestMajor. Copying its complete output preserves that separate process boundary. -->
-  <Target Name="CopyBehaviorDiffWeaver" AfterTargets="Build">
+  <Target Name="CopyBehaviorDiffWeaver" AfterTargets="Build" Condition="'$(SelfContainedRelease)' != 'true'">
     <ItemGroup>
       <_BehaviorDiffWeaverFiles Include="$(MSBuildThisFileDirectory)..\..\tools\Weaver\bin\$(Configuration)\net8.0\*.*" />
     </ItemGroup>
     <Copy SourceFiles="@(_BehaviorDiffWeaverFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="BuildSelfContainedReleasePayloads"
+          BeforeTargets="PrepareForPublish"
+          Condition="'$(SelfContainedRelease)' == 'true'">
+    <MSBuild Projects="..\BehaviorDiff.Tracer.Xunit\BehaviorDiff.Tracer.Xunit.csproj;..\..\tools\Weaver\Weaver.csproj"
+             Targets="Build"
+             BuildInParallel="true"
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="RuntimeIdentifier;SelfContained;PublishSingleFile;PublishTrimmed;SelfContainedRelease" />
   </Target>
 
   <ItemGroup>
