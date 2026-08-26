@@ -40,7 +40,7 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(SelfContainedRelease)' == 'true'">
-    <Content Include="..\..\tools\Weaver\bin\$(Configuration)\net8.0\behaviordiff-weaver.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\behaviordiff-weaver.deps.json;..\..\tools\Weaver\bin\$(Configuration)\net8.0\behaviordiff-weaver.runtimeconfig.json;..\..\tools\Weaver\bin\$(Configuration)\net8.0\BehaviorDiff.Contracts.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\BehaviorDiff.Tracer.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.Mdb.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.Pdb.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.Rocks.dll;..\BehaviorDiff.Tracer.Xunit\bin\$(Configuration)\netstandard2.0\BehaviorDiff.Tracer.Xunit.dll"
+    <Content Include="..\..\tools\Weaver\bin\$(Configuration)\net8.0\behaviordiff-weaver.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\behaviordiff-weaver.deps.json;..\..\tools\Weaver\bin\$(Configuration)\net8.0\behaviordiff-weaver.runtimeconfig.json;..\..\tools\Weaver\bin\$(Configuration)\net8.0\BehaviorDiff.Contracts.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\BehaviorDiff.Tracer.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.Mdb.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.Pdb.dll;..\..\tools\Weaver\bin\$(Configuration)\net8.0\Mono.Cecil.Rocks.dll"
              Link="%(Filename)%(Extension)"
              CopyToPublishDirectory="PreserveNewest"
              ExcludeFromSingleFile="true" />
@@ -62,9 +62,9 @@
   <Target Name="BuildSelfContainedReleasePayloads"
           BeforeTargets="PrepareForPublish"
           Condition="'$(SelfContainedRelease)' == 'true'">
-    <MSBuild Projects="..\BehaviorDiff.Tracer.Xunit\BehaviorDiff.Tracer.Xunit.csproj;..\..\tools\Weaver\Weaver.csproj"
-             Targets="Build"
-             BuildInParallel="true"
+    <MSBuild Projects="..\..\tools\Weaver\Weaver.csproj"
+             Targets="Restore;Build"
+             BuildInParallel="false"
              Properties="Configuration=$(Configuration)"
              RemoveProperties="RuntimeIdentifier;SelfContained;PublishSingleFile;PublishTrimmed;SelfContainedRelease" />
   </Target>
