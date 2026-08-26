@@ -145,10 +145,7 @@ try {
         -UsableSourceResolutions @('debugInfo', 'generatedState', 'declaringType') `
         -ReferenceSourcePathPatterns @('^samples/JavaReference/src/(main|test)/java/.+\.java$') `
         -DigestProofEvaluator $digestEvaluator
-    $engineProject = Join-Path $repo 'src/BehaviorDiff.Engine/BehaviorDiff.Engine.csproj'
-    & dotnet build $engineProject -c Release --nologo -v quiet
-    if ($LASTEXITCODE -ne 0) { throw 'Engine build failed' }
-    $engine = Invoke-BehaviorDiffEngineConformance -FirstRun $run1 -SecondRun $run2 -EngineProject $engineProject
+    $engine = Invoke-BehaviorDiffEngineConformance -FirstRun $run1 -SecondRun $run2
 
     Write-Host '=== Java conformance report ===' -ForegroundColor Green
     Write-Host "  runner tests / derived roots: $($count1.Runner) / $($count1.Derived)"

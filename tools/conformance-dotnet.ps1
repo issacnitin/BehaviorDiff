@@ -177,7 +177,6 @@ try {
     $engineReport = Invoke-BehaviorDiffEngineConformance `
         -FirstRun $firstRun `
         -SecondRun $secondRun `
-        -EngineProject (Join-Path $firstTree 'src/BehaviorDiff.Engine/BehaviorDiff.Engine.csproj') `
         -BaseRoot $firstTree `
         -PrRoot $firstTree
 

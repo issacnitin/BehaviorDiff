@@ -293,10 +293,7 @@ try {
         -UsableSourceResolutions @('debugInfo') `
         -ReferenceSourcePathPatterns @($subjectSourcePattern) -DigestProofEvaluator $digestEvaluator
 
-    $engineProject = Join-Path $repo 'src/BehaviorDiff.Engine/BehaviorDiff.Engine.csproj'
-    & dotnet build $engineProject -c Release --nologo -v quiet
-    if ($LASTEXITCODE -ne 0) { throw 'Engine build failed' }
-    $engine = Invoke-BehaviorDiffEngineConformance -FirstRun $run1 -SecondRun $run2 -EngineProject $engineProject
+    $engine = Invoke-BehaviorDiffEngineConformance -FirstRun $run1 -SecondRun $run2
 
     $proofs1 = @(& $digestEvaluator $result1.Run)
     $proofs2 = @(& $digestEvaluator $result2.Run)

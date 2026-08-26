@@ -347,7 +347,6 @@ try {
     & dotnet build (Join-Path $repo 'BehaviorDiff.sln') -c Release --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw 'Solution build failed' }
     $engine = Invoke-BehaviorDiffEngineConformance -FirstRun $run1 -SecondRun $run2 `
-        -EngineProject (Join-Path $repo 'src/BehaviorDiff.Engine/BehaviorDiff.Engine.csproj') `
         -BaseRoot $tree1 -PrRoot $tree2
 
     $proofs1 = @(& $digestEvaluator $integrity1.Run)

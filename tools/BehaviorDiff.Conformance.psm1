@@ -221,21 +221,27 @@ function Invoke-BehaviorDiffEngineConformance {
     param(
         [Parameter(Mandatory)] [string]$FirstRun,
         [Parameter(Mandatory)] [string]$SecondRun,
-        [Parameter(Mandatory)] [string]$EngineProject,
         [string]$BaseRoot,
         [string]$PrRoot
     )
 
     $output = Join-Path ([IO.Path]::GetTempPath()) ("behaviordiff-conformance-{0}.json" -f [Guid]::NewGuid().ToString('N'))
     try {
+        $repo = Split-Path -Parent $PSScriptRoot
+        $manifest = Join-Path $repo 'src/BehaviorDiff.Engine.Rust/Cargo.toml'
+        & cargo build --release --locked --manifest-path $manifest
+        if ($LASTEXITCODE -ne 0) { throw "Rust engine build failed with exit code $LASTEXITCODE" }
+        $fileName = if ($IsWindows) { 'behaviordiff-engine.exe' } else { 'behaviordiff-engine' }
+        $engine = Join-Path $repo "src/BehaviorDiff.Engine.Rust/target/release/$fileName"
+        if (-not (Test-Path $engine -PathType Leaf)) { throw "Rust engine binary was not found: $engine" }
         $arguments = @(
-            'run', '--project', $EngineProject, '-c', 'Release', '--no-build', '--',
-            'diff', '--base1', $FirstRun, '--base2', $SecondRun, '--pr', $SecondRun, '--out', $output
+            'stream-diff', '--base1', $FirstRun, '--base2', $SecondRun, '--base3', $FirstRun,
+            '--pr', $SecondRun, '--out', $output
         )
         if (-not [string]::IsNullOrWhiteSpace($BaseRoot)) { $arguments += @('--base-root', $BaseRoot) }
         if (-not [string]::IsNullOrWhiteSpace($PrRoot)) { $arguments += @('--pr-root', $PrRoot) }
 
-        $engineOutput = @(& dotnet @arguments 2>&1)
+        $engineOutput = @(& $engine @arguments 2>&1)
         $engineOutput | ForEach-Object { Write-Host $_ }
         if ($LASTEXITCODE -ne 0) { throw "Engine conformance comparison failed with exit code $LASTEXITCODE" }
 

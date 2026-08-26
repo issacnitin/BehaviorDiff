@@ -11,7 +11,6 @@ $repo = Split-Path -Parent $PSScriptRoot
 $work = [IO.Path]::GetFullPath($WorkDirectory)
 $source = Join-Path $repo 'samples/RustReference'
 $tracerSource = Join-Path $repo 'src/BehaviorDiff.Rust.Tracer'
-$engine = Join-Path $repo 'src/BehaviorDiff.Engine'
 Import-Module (Join-Path $PSScriptRoot 'BehaviorDiff.Conformance.psm1') -Force
 
 function Copy-CleanTree([string]$From, [string]$To) {
@@ -148,12 +147,9 @@ try {
         throw "Rust completion shape coverage differs: events=$($shapeEvents.Count) methods=$($shapeMethods.Count) generics=$($genericShapes.Count) panic=$($panicShapes.Count) cancel=$($cancelShapes.Count) macros=$($macroBoundaries.Count)"
     }
 
-    & dotnet build $engine -c Release --nologo -v quiet
-    if ($LASTEXITCODE -ne 0) { throw "BehaviorDiff engine build failed: $LASTEXITCODE" }
     $engineMetrics = Invoke-BehaviorDiffEngineConformance `
         -FirstRun (Join-Path $work 'run-1') `
         -SecondRun (Join-Path $work 'run-2') `
-        -EngineProject $engine `
         -BaseRoot $source `
         -PrRoot $source
     if ($engineMetrics.MatchedKeys -lt 300) {
