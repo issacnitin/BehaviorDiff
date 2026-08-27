@@ -5,39 +5,62 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
 
-RealDiff finds **runtime behavior changes that ordinary source review misses**.
+RealDiff finds **runtime behavior changes that ordinary source review misses** by running the same tests on both sides of a pull request and comparing observed method arguments and return values.
 
-It builds two Git revisions, observes their tests, learns a noise baseline from three base runs, and reports the first changed behavior in each call tree. A source diff tells you what was edited. RealDiff tells you what the edit did, including effects in files the pull request never touched.
+## How it works
 
-## Why use it?
+1. Check out both branches of the pull request.
+2. Build each branch with runtime instrumentation woven in.
+3. Run the same test suite on both, recording each observed method call's arguments and return value.
+4. Diff the two execution traces instead of inferring behavior from the source diff.
 
-A harmless-looking refactor can change behavior far from the edited file:
+This is dynamic behavior comparison, not mutation testing, static analysis, or coverage. RealDiff mutates nothing, modifies no test, and does not analyze source to predict behavior. It observes only code that the existing tests execute; source information is used to build, instrument, and map those observations back to the pull request.
+
+## Worked example
+
+Suppose a pull request tries to remove the allocation made by `OrderBy`. In this diff, lines beginning with `-` are the stable base implementation, lines beginning with `+` are the proposed in-place sort, and the highlighted behavioral change is the new `ordered.Sort(...)` call:
 
 ```diff
- public static List<(int Priority, T Value)> ByPriority<T>(
--    this IEnumerable<(int Priority, T Value)> src)
--{
--    var list = src.ToList();
--    list.Sort((a, b) => a.Priority.CompareTo(b.Priority));
--    return list;
--}
-+    this IEnumerable<(int Priority, T Value)> src) =>
-+        src.OrderBy(item => item.Priority).ToList();
+ public static IReadOnlyList<DiscountRule> ByPriority(
+   IEnumerable<DiscountRule> rules)
+-    => rules.OrderBy(rule => rule.Priority).ToArray();
++{
++    List<DiscountRule> ordered = rules.ToList();
++    ordered.Sort((left, right) => left.Priority.CompareTo(right.Priority));
++    return ordered;
++}
 ```
 
-`List.Sort` is not stable; `OrderBy` is. In the included demo, that one-line infrastructure change alters an unedited pricing engine:
+It looks like a local allocation/performance refactor: both versions sort by `Priority`. The missing detail is stability. `OrderBy` preserves declaration order when two rules have the same priority; `List.Sort` does not. The fixture declares `A_SEASONAL` before `Z_CLEARANCE`, gives both priority 10, and selects the first eligible rule. The new sort reverses those equal-priority rules.
+
+RealDiff records the values at runtime. In the block below, `BASE` is the result before the refactor and `PR` is the result after it:
 
 ```text
-RealDiff: 1 behavior gap outside this diff
+BASE  DiscountEngine.SelectDiscount(100) -> A_SEASONAL
+PR    DiscountEngine.SelectDiscount(100) -> Z_CLEARANCE
 
-DiscountEngine.SelectDiscount returned "CLEARANCE_40",
-now returns "SEASONAL_15".
-
-CheckoutTotals.Compute returned 60, now returns 85.
-2 of the 3 tests that executed this did not assert on the change.
+BASE  CheckoutTotals.Compute(100) -> 85
+PR    CheckoutTotals.Compute(100) -> 60
 ```
 
-The edited helper is in `Infrastructure.Collections`; the observed effect is in `Commerce.Pricing`. Run the included demo below, or inspect the maintained public [.NET demo pull request](https://github.com/issacnitin/realdiff-sort-dotnet/pull/1) and its [successful hosted run](https://github.com/issacnitin/realdiff-sort-dotnet/actions/runs/33064892219).
+Neither `DiscountEngine.SelectDiscount` nor `CheckoutTotals.Compute` is in the diff. RealDiff followed the executed calls from the edited ordering helper into that unedited pricing code and reported the changed values there.
+
+All three tests execute this path. Two broad assertions still pass: 60 is below the list price, and 60 does not exceed it. Only the exact assertion that `A_SEASONAL` wins the tie reacts. Assertions check what their author thought to check; the trace also exposes changed behavior nobody asserted on.
+
+Inspect the public [.NET demo pull request](https://github.com/issacnitin/realdiff-sort-dotnet/pull/1) and its [successful hosted run](https://github.com/issacnitin/realdiff-sort-dotnet/actions/runs/33064892219).
+
+## Why the output is not noise
+
+**Self-noise is subtracted.** RealDiff runs the base build more than once before comparing it with the pull request. If the base disagrees with itself, that observation is removed. Timestamps, GUIDs, randomized hash ordering, and other run-to-run variation therefore do not become findings.
+
+**The origin is reported, not the blast radius.** A changed value deep in a call tree can make every caller above it look different. RealDiff collapses that cascade and reports the first changed behavior whose own descendants behaved identically. You see the causal frontier where the difference begins, not every ancestor that carried the different value upward.
+
+## What this is not
+
+- **Not mutation testing.** RealDiff does not alter production code to see whether tests fail.
+- **Does not generate tests.** RealDiff uses the test suite you already have and does not write new tests.
+- **Not a replacement for static analysis.** Static analysis reasons about possible behavior from source; RealDiff observes actual behavior from one test execution path. The two answer different questions.
+- **Not coverage.** Coverage says a line ran. RealDiff says the arguments or return value changed. It can only observe code your tests execute.
 
 ## Five-minute .NET demo
 
