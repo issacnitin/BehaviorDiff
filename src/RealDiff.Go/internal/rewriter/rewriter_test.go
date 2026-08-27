@@ -144,6 +144,7 @@ type emittedEvent struct {
 	Ordinal          int     `json:"ordinal"`
 	ArgsDigest       string  `json:"argsDigest"`
 	ReturnDigest     *string `json:"returnDigest"`
+	ReturnRendered   *string `json:"returnRendered"`
 	ExceptionType    *string `json:"exceptionType"`
 	Harness          bool    `json:"isHarness"`
 }
@@ -212,6 +213,52 @@ func TestEmitterFixture(t *testing.T) {
 	records := readNDJSON[emittedManifestRecord](t, manifestPaths[0])
 	verifyEmittedEvents(t, events)
 	verifyEmittedManifest(t, records, events)
+}
+
+func TestFailedTestRootEmitsFailureState(t *testing.T) {
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "go.mod"), []byte("module example.com/failingtest\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "subject_test.go"), []byte(`package failingtest
+
+import "testing"
+
+func TestAssertionFailure(t *testing.T) {
+	t.Errorf("expected failure")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "rewrite-cache")
+	if _, err := Rewrite(Options{Source: source, Out: out}); err != nil {
+		t.Fatalf("Rewrite failed: %v", err)
+	}
+	traceBase := filepath.Join(t.TempDir(), "run.ndjson")
+	command := exec.Command("go", "test", "-count=1", "./...")
+	command.Dir = out
+	command.Env = append(os.Environ(), "REALDIFF_TRACE="+traceBase)
+	if output, err := command.CombinedOutput(); err == nil {
+		t.Fatalf("failing test unexpectedly passed:\n%s", output)
+	}
+	tracePaths, err := filepath.Glob(strings.TrimSuffix(traceBase, ".ndjson") + ".*.ndjson")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracePaths = filterManifestPaths(tracePaths)
+	if len(tracePaths) != 1 {
+		t.Fatalf("expected one trace, got %v", tracePaths)
+	}
+	events := readNDJSON[emittedEvent](t, tracePaths[0])
+	failure := false
+	for _, event := range events {
+		if event.Harness && strings.Contains(event.Method, ".TestAssertionFailure(") {
+			failure = event.ReturnRendered != nil && *event.ReturnRendered == "bool(true)"
+		}
+	}
+	if !failure {
+		t.Fatalf("failing test root did not emit bool(true): %+v", events)
+	}
 }
 
 func verifyEmittedEvents(t *testing.T, events []emittedEvent) {

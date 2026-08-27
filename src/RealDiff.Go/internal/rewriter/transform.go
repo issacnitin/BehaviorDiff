@@ -906,7 +906,13 @@ func testWrapperBody(wrapper *ast.FuncDecl, companion, alias string, metadata me
 	}}}
 	exit := &ast.DeferStmt{Call: &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{List: []ast.Stmt{
 		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(recovered)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("recover")}}},
-		&ast.ExprStmt{X: &ast.CallExpr{Fun: selector(alias, "Exit"), Args: []ast.Expr{ast.NewIdent(root), ast.NewIdent("nil"), ast.NewIdent(recovered)}}},
+		&ast.ExprStmt{X: &ast.CallExpr{Fun: selector(alias, "Exit"), Args: []ast.Expr{
+			ast.NewIdent(root),
+			&ast.CompositeLit{Type: &ast.ArrayType{Elt: ast.NewIdent("any")}, Elts: []ast.Expr{
+				&ast.CallExpr{Fun: &ast.SelectorExpr{X: arguments[0], Sel: ast.NewIdent("Failed")}},
+			}},
+			ast.NewIdent(recovered),
+		}}},
 		&ast.IfStmt{Cond: &ast.BinaryExpr{X: ast.NewIdent(recovered), Op: token.NEQ, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{
 			&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{ast.NewIdent(recovered)}}},
 		}}},
