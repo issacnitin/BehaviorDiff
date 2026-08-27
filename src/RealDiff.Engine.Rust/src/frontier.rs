@@ -237,27 +237,44 @@ impl SkippedBoundaryIndex {
                     .as_deref()
                     .unwrap_or("no language-specific detail")
             );
-            index
-                .by_declaring_type
-                .entry(declaring_type(method))
-                .or_insert_with(|| description.clone());
-            if let Some(file) = member.file_path.as_deref() {
-                index.by_file.entry(file.to_owned()).or_insert(description);
+            if supports_declaring_type_scope(method) {
+                index
+                    .by_declaring_type
+                    .entry(declaring_type(method))
+                    .or_insert_with(|| description.clone());
+            }
+            if supports_file_scope(method) {
+                if let Some(file) = member.file_path.as_deref() {
+                    index.by_file.entry(file.to_owned()).or_insert(description);
+                }
             }
         }
         index
     }
 
     fn boundary_for(&self, method: &str) -> Option<&str> {
-        self.by_declaring_type
-            .get(&declaring_type(method))
-            .or_else(|| {
-                self.file_by_method
-                    .get(method)
-                    .and_then(|file| self.by_file.get(file))
-            })
+        if supports_declaring_type_scope(method) {
+            return self
+                .by_declaring_type
+                .get(&declaring_type(method))
+                .map(String::as_str);
+        }
+        supports_file_scope(method)
+            .then(|| self.file_by_method.get(method))
+            .flatten()
+            .and_then(|file| self.by_file.get(file))
             .map(String::as_str)
     }
+}
+
+fn supports_declaring_type_scope(method: &str) -> bool {
+    let qualified = method.split_once('(').map_or(method, |(value, _)| value);
+    !qualified.contains('/') && !qualified.contains("::") && !qualified.contains('#')
+}
+
+fn supports_file_scope(method: &str) -> bool {
+    let qualified = method.split_once('(').map_or(method, |(value, _)| value);
+    qualified.contains('#') || qualified.contains(".rs::") || !qualified.contains("::")
 }
 
 fn descendant_skip_reason(index: &SkippedBoundaryIndex, method: &str) -> Option<String> {
@@ -267,6 +284,13 @@ fn descendant_skip_reason(index: &SkippedBoundaryIndex, method: &str) -> Option<
             "DescendantSkipped: {declared} has structural boundary {skipped}, which was never instrumented, so a call to it from this subtree would be invisible"
         )
     })
+}
+
+fn source_resolution_is_usable(resolution: &str) -> bool {
+    matches!(
+        resolution,
+        "sequencePoints" | "stateMachine" | "debugInfo" | "generatedState" | "declaringType"
+    )
 }
 
 impl CallIdentity {
@@ -385,7 +409,7 @@ pub(crate) fn run(options: &FrontierOptions) -> Result<i32, String> {
         };
         member_assembly.entry(method).or_insert(&member.assembly);
         if let Some(resolution) = member.source_resolution.as_deref() {
-            if resolution != "sequencePoints" && resolution != "stateMachine" {
+            if !source_resolution_is_usable(resolution) {
                 unresolved_members.insert(method, resolution);
             }
         }
@@ -995,7 +1019,7 @@ mod tests {
     }
 
     #[test]
-    fn structural_skips_degrade_frontiers_for_all_tracer_method_formats() {
+    fn structural_skips_degrade_frontiers_when_the_boundary_can_belong_to_the_method() {
         let cases = [
             (
                 "Example.Run()",
@@ -1016,22 +1040,10 @@ mod tests {
                 "Node: GeneratorFunction",
             ),
             (
-                "example/src.run",
-                "example/src.genericBoundary",
-                "src/subject.go",
-                "Go: GenericTemplate",
-            ),
-            (
                 "src/lib.rs::run",
                 "src/lib.rs::macro::generated",
                 "src/lib.rs",
                 "Rust: MacroExpansionUnavailable",
-            ),
-            (
-                "src.subject::run",
-                "src.subject::<module>",
-                "src/subject.py",
-                "Python: NativeCallable",
             ),
         ];
 
@@ -1080,6 +1092,163 @@ mod tests {
         assert!(descendant_skip_reason(
             &SkippedBoundaryIndex::build(&excluded),
             "src/subject.js#run"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn unrelated_go_generic_template_does_not_degrade_package_functions() {
+        let members = vec![
+            CoverageMember {
+                method_full_name: Some("example/src.byPriority([]Rule) []Rule".to_owned()),
+                assembly: "example/src".to_owned(),
+                file_path: Some("src/pricing.go".to_owned()),
+                status: "Patched".to_owned(),
+                skip_reason: None,
+                detail: None,
+                line: Some(12),
+                source_resolution: Some("debugInfo".to_owned()),
+                is_test_root: false,
+            },
+            CoverageMember {
+                method_full_name: Some("example/src.configurationBoundary(T) T".to_owned()),
+                assembly: "example/src".to_owned(),
+                file_path: Some("src/config.go".to_owned()),
+                status: "Skipped".to_owned(),
+                skip_reason: Some("Unobservable".to_owned()),
+                detail: Some("Go: GenericTemplate".to_owned()),
+                line: Some(5),
+                source_resolution: Some("debugInfo".to_owned()),
+                is_test_root: false,
+            },
+        ];
+
+        assert!(descendant_skip_reason(
+            &SkippedBoundaryIndex::build(&members),
+            "example/src.byPriority([]example/src.Rule) []example/src.Rule"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn go_skipped_boundary_degrades_functions_in_the_same_source_file() {
+        let members = vec![
+            CoverageMember {
+                method_full_name: Some("example/src.run()".to_owned()),
+                assembly: "example/src".to_owned(),
+                file_path: Some("src/subject.go".to_owned()),
+                status: "Patched".to_owned(),
+                skip_reason: None,
+                detail: None,
+                line: Some(1),
+                source_resolution: Some("debugInfo".to_owned()),
+                is_test_root: false,
+            },
+            CoverageMember {
+                method_full_name: Some("example/src.genericBoundary(T) T".to_owned()),
+                assembly: "example/src".to_owned(),
+                file_path: Some("src/subject.go".to_owned()),
+                status: "Skipped".to_owned(),
+                skip_reason: Some("Unobservable".to_owned()),
+                detail: Some("Go: GenericTemplate".to_owned()),
+                line: Some(2),
+                source_resolution: Some("debugInfo".to_owned()),
+                is_test_root: false,
+            },
+        ];
+
+        assert!(descendant_skip_reason(
+            &SkippedBoundaryIndex::build(&members),
+            "example/src.run()"
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn python_setup_bodies_do_not_degrade_runtime_functions() {
+        let members = vec![CoverageMember {
+            method_full_name: Some("src.pricing::<module>".to_owned()),
+            assembly: "src.pricing".to_owned(),
+            file_path: Some("src/pricing.py".to_owned()),
+            status: "Skipped".to_owned(),
+            skip_reason: Some("UnsupportedShape".to_owned()),
+            detail: Some("Python: ModuleBody".to_owned()),
+            line: Some(1),
+            source_resolution: Some("debugInfo".to_owned()),
+            is_test_root: false,
+        }];
+
+        assert!(descendant_skip_reason(
+            &SkippedBoundaryIndex::build(&members),
+            "src.pricing::select_discount"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn debug_info_is_a_usable_source_resolution() {
+        assert!(source_resolution_is_usable("debugInfo"));
+        assert!(source_resolution_is_usable("sequencePoints"));
+        assert!(source_resolution_is_usable("stateMachine"));
+        assert!(source_resolution_is_usable("generatedState"));
+        assert!(source_resolution_is_usable("declaringType"));
+        assert!(!source_resolution_is_usable("unresolved"));
+        assert!(!source_resolution_is_usable("debugInfoMissing"));
+    }
+
+    #[test]
+    fn unrelated_python_native_callable_does_not_degrade_file_functions() {
+        let members = vec![CoverageMember {
+            method_full_name: Some("src.pricing::native::builtins.__build_class__@7".to_owned()),
+            assembly: "src.pricing".to_owned(),
+            file_path: Some("src/pricing.py".to_owned()),
+            status: "Skipped".to_owned(),
+            skip_reason: Some("UnsupportedShape".to_owned()),
+            detail: Some(
+                "Python: NativeCallable (builtins.__build_class__ has no Python frame)".to_owned(),
+            ),
+            line: Some(7),
+            source_resolution: Some("debugInfo".to_owned()),
+            is_test_root: false,
+        }];
+
+        assert!(descendant_skip_reason(
+            &SkippedBoundaryIndex::build(&members),
+            "src.pricing::select_discount"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn skipped_member_on_another_dotnet_type_does_not_degrade_same_file() {
+        let members = vec![
+            CoverageMember {
+                method_full_name: Some("Example.RuleOrdering.ByPriority()".to_owned()),
+                assembly: "Example".to_owned(),
+                file_path: Some("src/Pricing.cs".to_owned()),
+                status: "Patched".to_owned(),
+                skip_reason: None,
+                detail: None,
+                line: Some(5),
+                source_resolution: Some("sequencePoints".to_owned()),
+                is_test_root: false,
+            },
+            CoverageMember {
+                method_full_name: Some("Example.DiscountEngine..cctor()".to_owned()),
+                assembly: "Example".to_owned(),
+                file_path: Some("src/Pricing.cs".to_owned()),
+                status: "Skipped".to_owned(),
+                skip_reason: Some("Unobservable".to_owned()),
+                detail: Some(".NET: TypeInitializer".to_owned()),
+                line: Some(20),
+                source_resolution: Some("sequencePoints".to_owned()),
+                is_test_root: false,
+            },
+        ];
+
+        assert!(descendant_skip_reason(
+            &SkippedBoundaryIndex::build(&members),
+            "Example.RuleOrdering.ByPriority()"
         )
         .is_none());
     }

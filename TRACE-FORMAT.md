@@ -179,6 +179,8 @@ The member-record count for the module MUST equal `discoveredMembers`. The engin
 
 `DescendantSkipped` and intentional-scope logic key only on `skipReason`; `detail` is explanatory and MUST NOT affect engine semantics.
 
+`DescendantSkipped` also requires an ownership relation supported by the method identity: declaring type for .NET/Java and source file for Node/Go/Rust. A skipped Go function does not degrade functions in another file merely because they share a package, and a skipped Python module function does not degrade unrelated functions merely because they share a module; those formats do not encode a declaring-type relation.
+
 | Neutral value | Meaning |
 | --- | --- |
 | `Unobservable` | Observing the member would violate runtime safety, or the runtime cannot expose an independent callable frame. Structural instances create a hidden descendant candidate and degrade frontier confidence. |
