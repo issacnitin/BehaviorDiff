@@ -145,10 +145,18 @@ foreach ($case in $cases) {
     $comment | Set-Content (Join-Path $work 'comment.md')
     $strictComment = $null
     if ($case.DefaultCommentEligible) {
-        $gapWord = if ($case.UnexpectedMembers -eq 1) { 'gap' } else { 'gaps' }
-        $expectedHeading = '^## RealDiff: {0} behavior {1} outside this diff' -f `
-            $case.UnexpectedMembers, $gapWord
+        $unassertedMembers = @($findings.members | Where-Object {
+            $_.attribution -eq 'unexpected' -and $_.untestedCallSiteCount -gt 0
+        }).Count
+        $memberWord = if ($unassertedMembers -eq 1) { 'member changed' } else { 'members changed' }
+        $expectedHeading = '^## RealDiff: {0} {1} behavior with no assertion reacting' -f `
+            $unassertedMembers, $memberWord
+        $assertedConsequences = @($findings.members | ForEach-Object consequences | Where-Object {
+            $_.evidence.assertionReacted -eq $true
+        }).Count
         if ($comment -notmatch $expectedHeading `
+            -or $comment -notmatch 'These would have merged silently' `
+            -or ($assertedConsequences -gt 0 -and $comment -notmatch 'Caught by existing assertions') `
             -or $comment -notmatch '<details><summary>Why, and the evidence</summary>' `
             -or $comment -match 'Unexpected means' `
             -or $comment -match 'k__BackingField') {
@@ -171,7 +179,9 @@ foreach ($case in $cases) {
         $strict | ConvertTo-Json -Depth 100 | Set-Content $strictPath
         $strictComment = @(& dotnet run --project (Join-Path $PSScriptRoot 'CommentPreview/RealDiff.CommentPreview.csproj') `
             -c Release -- $strictPath 2>&1) -join "`n"
-        if ($LASTEXITCODE -ne 0 -or $strictComment -notmatch '^## RealDiff: 1 behavior gap outside this diff' `
+        if ($LASTEXITCODE -ne 0 `
+            -or $strictComment -notmatch '^## RealDiff: 1 member changed behavior with no assertion reacting' `
+            -or ($assertedConsequences -gt 0 -and $strictComment -notmatch 'Caught by existing assertions') `
             -or $strictComment -notmatch '<details><summary>Why, and the evidence</summary>') {
             throw "$($case.Change): strict confidence comment contract drifted"
         }
@@ -218,8 +228,8 @@ foreach ($case in $cases) {
     if ($case.Change -eq 'sort') {
         if ($finding.assertionReactionSummary -ne '3 tests executed this; 1 test had an assertion react.' `
             -or $evidenceComment -notmatch 'DiscountEngine\.SelectDiscount.*changed, but this PR didn''t edit it' `
-            -or $evidenceComment -notmatch 'SelectDiscount returned "CLEARANCE_40", now returns "SEASONAL_15"' `
-            -or $evidenceComment -notmatch 'CheckoutTotals\.Compute returned 60, now returns 85' `
+            -or $evidenceComment -notmatch 'DiscountEngine\.SelectDiscount changed from.*CLEARANCE_40.*to.*SEASONAL_15' `
+            -or $evidenceComment -match 'Caught by existing assertions.*CheckoutTotals\.Compute' `
             -or $evidenceComment -notmatch '2 of the 3 tests that executed this did not assert on the change' `
             -or $evidenceComment -notmatch '_0 of 1 edited files exercised') {
             throw 'sort: concise consequence-first comment drifted'
