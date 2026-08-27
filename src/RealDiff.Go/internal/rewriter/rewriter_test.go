@@ -96,6 +96,34 @@ func TestRewriteFixture(t *testing.T) {
 	}
 }
 
+func TestExcludedFileRegistersMembersWithoutInstrumentation(t *testing.T) {
+	source := filepath.Join("..", "..", "testdata", "rewrite")
+	out := filepath.Join(t.TempDir(), "rewrite-cache")
+	report, err := Rewrite(Options{Source: source, Out: out, Exclude: []string{"subject.go"}})
+	if err != nil {
+		t.Fatalf("Rewrite failed: %v", err)
+	}
+	transformed, err := os.ReadFile(filepath.Join(out, "subject.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(transformed)
+	if !strings.Contains(text, "func __bd_") {
+		t.Fatal("excluded source omitted passthrough companions required by transformed callers")
+	}
+	if strings.Contains(text, ".Enter(") || strings.Contains(text, ".Exit(") {
+		t.Fatal("excluded source contains entry or exit instrumentation")
+	}
+	if !strings.Contains(text, `"ExcludedByScope"`) || !strings.Contains(text, `"Go: ExcludedByScope"`) {
+		t.Fatal("excluded source did not register explicit skipped-member metadata")
+	}
+	if report.Metrics.Skipped == 0 {
+		t.Fatal("excluded members were not included in skipped metrics")
+	}
+	parseGoTree(t, out)
+	runGoTest(t, out)
+}
+
 func TestRejectsOutputInsideSource(t *testing.T) {
 	source := filepath.Join("..", "..", "testdata", "rewrite")
 	_, err := Rewrite(Options{Source: source, Out: filepath.Join(source, "cache")})

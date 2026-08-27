@@ -12,8 +12,9 @@ import (
 const ReportFileName = "realdiff-rewrite-report.json"
 
 type Options struct {
-	Source string
-	Out    string
+	Source  string
+	Out     string
+	Exclude []string
 }
 
 type Metrics struct {
@@ -93,7 +94,7 @@ func Rewrite(options Options) (report Report, err error) {
 		Boundaries:       make([]Boundary, 0),
 		GenericTemplates: make([]GenericTemplate, 0),
 	}
-	if err := transformModule(model, out, runtimeImport, &report); err != nil {
+	if err := transformModule(model, out, runtimeImport, options.Exclude, &report); err != nil {
 		return Report{}, err
 	}
 	if err := writeRuntime(out); err != nil {

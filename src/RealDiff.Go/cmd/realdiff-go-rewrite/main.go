@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/realdiff/realdiff-go/internal/rewriter"
 )
@@ -11,6 +12,7 @@ import (
 func main() {
 	source := flag.String("source", "", "source Go module")
 	out := flag.String("out", "", "output cache directory")
+	exclude := flag.String("exclude", "", "comma-separated repository-relative source files to exclude")
 	flag.Parse()
 
 	if *source == "" || *out == "" {
@@ -18,7 +20,13 @@ func main() {
 		os.Exit(2)
 	}
 
-	report, err := rewriter.Rewrite(rewriter.Options{Source: *source, Out: *out})
+	report, err := rewriter.Rewrite(rewriter.Options{
+		Source: *source,
+		Out:    *out,
+		Exclude: strings.FieldsFunc(*exclude, func(r rune) bool {
+			return r == ',' || r == ';'
+		}),
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rewrite failed: %v\n", err)
 		os.Exit(1)

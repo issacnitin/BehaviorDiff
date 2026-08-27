@@ -18,6 +18,7 @@ type transformer struct {
 	model   *moduleModel
 	out     string
 	runtime string
+	exclude map[string]bool
 	report  *Report
 }
 
@@ -49,8 +50,15 @@ type memberDefinition struct {
 	ParameterNames   []string
 }
 
-func transformModule(model *moduleModel, out, runtimeImport string, report *Report) error {
-	transformer := &transformer{model: model, out: out, runtime: runtimeImport, report: report}
+func transformModule(model *moduleModel, out, runtimeImport string, exclude []string, report *Report) error {
+	excluded := make(map[string]bool)
+	for _, value := range exclude {
+		path := filepath.ToSlash(filepath.Clean(strings.TrimSpace(value)))
+		if path != "" && path != "." {
+			excluded[path] = true
+		}
+	}
+	transformer := &transformer{model: model, out: out, runtime: runtimeImport, exclude: excluded, report: report}
 	report.Metrics.Packages = len(model.packages)
 	for _, pkg := range model.packages {
 		if err := transformer.validateCompanionNames(pkg); err != nil {
@@ -111,6 +119,9 @@ func (transformer *transformer) transformFile(file *sourceFile) error {
 	if len(originals) == 0 {
 		return nil
 	}
+	if transformer.exclude[file.rel] {
+		return transformer.registerExcludedFile(file, originals)
+	}
 	alias := runtimeAlias(file.file)
 	addImport(file.file, alias, transformer.runtime)
 	newDeclarations := make([]ast.Decl, 0, len(file.file.Decls)+len(originals))
@@ -144,6 +155,78 @@ func (transformer *transformer) transformFile(file *sourceFile) error {
 	}
 	transformer.report.Metrics.Files++
 	return nil
+}
+
+func (transformer *transformer) registerExcludedFile(file *sourceFile, functions []*ast.FuncDecl) error {
+	alias := runtimeAlias(file.file)
+	addImport(file.file, alias, transformer.runtime)
+	newDeclarations := make([]ast.Decl, 0, len(file.file.Decls)+len(functions)+1)
+	for _, declaration := range file.file.Decls {
+		newDeclarations = append(newDeclarations, declaration)
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Body == nil {
+			continue
+		}
+		companion, err := transformer.transformExcludedFunction(file, function, alias)
+		if err != nil {
+			return err
+		}
+		newDeclarations = append(newDeclarations, companion)
+	}
+	newDeclarations = append(newDeclarations, excludedRegistrationDeclaration(
+		file,
+		alias,
+		functions,
+		transformer.model.fset,
+	))
+	file.file.Decls = newDeclarations
+	for _, function := range functions {
+		if function.Recv == nil {
+			transformer.report.Metrics.Functions++
+		} else {
+			transformer.report.Metrics.Methods++
+		}
+		transformer.report.Metrics.Skipped++
+		transformer.report.Metrics.Companions++
+	}
+	var output bytes.Buffer
+	if err := format.Node(&output, transformer.model.fset, file.file); err != nil {
+		return fmt.Errorf("format excluded %s: %w", file.rel, err)
+	}
+	destination := filepath.Join(transformer.out, filepath.FromSlash(file.rel))
+	if err := os.WriteFile(destination, output.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("write excluded %s: %w", file.rel, err)
+	}
+	transformer.report.Metrics.Files++
+	return nil
+}
+
+func (transformer *transformer) transformExcludedFunction(file *sourceFile, wrapper *ast.FuncDecl, alias string) (*ast.FuncDecl, error) {
+	companionType, err := cloneFuncType(wrapper.Type)
+	if err != nil {
+		return nil, fmt.Errorf("clone excluded signature for %s: %w", wrapper.Name.Name, err)
+	}
+	companionReceiver, err := cloneFieldList(wrapper.Recv)
+	if err != nil {
+		return nil, fmt.Errorf("clone excluded receiver for %s: %w", wrapper.Name.Name, err)
+	}
+	companion := &ast.FuncDecl{
+		Recv: companionReceiver,
+		Name: ast.NewIdent(companionName(wrapper.Name.Name)),
+		Type: companionType,
+		Body: wrapper.Body,
+	}
+	usedNames := collectIdentifiers(companion)
+	parentName := uniqueName("__bd_parent", usedNames)
+	prependFrameParameter(companion.Type, alias, parentName)
+	ensureParameterNames(wrapper.Type.Params, companion.Type.Params, usedNames)
+	receiverName := ensureReceiverName(wrapper.Recv, companion.Recv, usedNames)
+	functionTransformer := &functionTransformer{
+		owner: transformer, file: file, alias: alias, usedNames: usedNames, frameName: parentName,
+	}
+	companion.Body = functionTransformer.rewriteBlock(companion.Body, parentName)
+	wrapper.Body = wrapperBody(wrapper, companion.Name.Name, receiverName)
+	return companion, nil
 }
 
 func (transformer *transformer) transformFunction(file *sourceFile, wrapper *ast.FuncDecl, alias string) (*ast.FuncDecl, error) {
@@ -849,6 +932,21 @@ func registrationDeclaration(file *sourceFile, alias string, functions []*ast.Fu
 			File:   boundary.File, Line: boundary.Line, ReturnKind: "Boundary", SourceResolution: "debugInfo",
 			Status: "Skipped", SkipReason: skipReason, Detail: "Go: " + boundary.Kind,
 		}))
+	}
+	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
+		Names:  []*ast.Ident{ast.NewIdent("_")},
+		Values: []ast.Expr{&ast.CallExpr{Fun: selector(alias, "Register"), Args: members}},
+	}}}
+}
+
+func excludedRegistrationDeclaration(file *sourceFile, alias string, functions []*ast.FuncDecl, fset *token.FileSet) ast.Decl {
+	members := make([]ast.Expr, 0, len(functions))
+	for _, function := range functions {
+		member := memberMetadata(fset, file, function, isTestRoot(file, function))
+		member.Status = "Skipped"
+		member.SkipReason = "ExcludedByScope"
+		member.Detail = "Go: ExcludedByScope"
+		members = append(members, metadataExpression(alias, member))
 	}
 	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
 		Names:  []*ast.Ident{ast.NewIdent("_")},

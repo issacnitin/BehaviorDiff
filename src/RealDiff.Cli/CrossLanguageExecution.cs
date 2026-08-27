@@ -316,7 +316,8 @@ namespace RealDiff.Cli
         {
             RunConfiguredBuild("base", detection);
             string rewriter = ResolveGoRewriter();
-            var key = new TraceCacheKey(targetSha, "go", TracerFingerprint.ForFile(rewriter), Pipeline.ScopeConfig(string.Empty));
+            var key = new TraceCacheKey(targetSha, "go", TracerFingerprint.ForFile(rewriter), Pipeline.ScopeConfig(
+                string.Join(";", detection.ExcludeNamespaces)));
             if (_cache.TryRestore(key, out _))
             {
                 return;
@@ -343,7 +344,8 @@ namespace RealDiff.Cli
             RunConfiguredBuild("pr", prDetection);
             string rewriter = ResolveGoRewriter();
             Console.WriteLine("  go rewriter: " + rewriter);
-            var key = new TraceCacheKey(targetSha, "go", TracerFingerprint.ForFile(rewriter), Pipeline.ScopeConfig(string.Empty));
+            var key = new TraceCacheKey(targetSha, "go", TracerFingerprint.ForFile(rewriter), Pipeline.ScopeConfig(
+                string.Join(";", baseDetection.ExcludeNamespaces)));
             bool cacheHit = _cache.TryRestore(key, out TraceCacheEntry? cacheEntry);
             string base1;
             string base2;
@@ -379,10 +381,13 @@ namespace RealDiff.Cli
             string rewritten = Path.Combine(cache, label);
             if (Directory.Exists(rewritten)) Directory.Delete(rewritten, recursive: true);
             Directory.CreateDirectory(cache);
-            ProcessResult rewrite = Shell.Run(
-                rewriter,
-                new[] { "--source", detection.WorkDirectory, "--out", rewritten },
-                detection.WorkDirectory);
+            var rewriteArguments = new List<string> { "--source", detection.WorkDirectory, "--out", rewritten };
+            if (detection.ExcludeNamespaces.Length > 0)
+            {
+                rewriteArguments.Add("--exclude");
+                rewriteArguments.Add(string.Join(",", detection.ExcludeNamespaces));
+            }
+            ProcessResult rewrite = Shell.Run(rewriter, rewriteArguments, detection.WorkDirectory);
             if (!rewrite.Ok)
             {
                 throw new CliException("Go source rewriting failed." + Environment.NewLine + Shell.Tail(rewrite.Output, 25), ExitCodes.RepoDoesNotBuild);
