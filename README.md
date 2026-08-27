@@ -37,7 +37,7 @@ CheckoutTotals.Compute returned 60, now returns 85.
 2 of the 3 tests that executed this did not assert on the change.
 ```
 
-The edited helper is in `Infrastructure.Collections`; the observed effect is in `Commerce.Pricing`. See the live [demo pull request](https://github.com/issacnitin/realdiff-live-verification/pull/4) and its [successful hosted run](https://github.com/issacnitin/realdiff-live-verification/actions/runs/32369192452).
+The edited helper is in `Infrastructure.Collections`; the observed effect is in `Commerce.Pricing`. Run the included demo below, or inspect the maintained public [.NET demo pull request](https://github.com/issacnitin/realdiff-sort-dotnet/pull/1) and its [successful hosted run](https://github.com/issacnitin/realdiff-sort-dotnet/actions/runs/33064892219).
 
 ## Five-minute .NET demo
 
