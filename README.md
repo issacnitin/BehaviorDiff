@@ -9,61 +9,6 @@ RealDiff finds **runtime behavior changes that ordinary source review misses**.
 
 It builds two Git revisions, observes their tests, learns a noise baseline from three base runs, and reports the first changed behavior in each call tree. A source diff tells you what was edited. RealDiff tells you what the edit did, including effects in files the pull request never touched.
 
-The public executable is a thin Rust launcher that owns argument routing, repository config loading, and `detect`. It starts a sibling self-contained managed component for ref resolution, builds, caches, instrumentation, and posting. The architecture then has one language-neutral trace contract, one tracer per runtime, and a single-pass streaming Rust diff, frontier, and findings engine:
-
-```mermaid
-flowchart LR
-  L[Rust argv, config, detect] --> O[Managed orchestration]
-  O --> D
-  O --> J
-  O --> N
-  O --> G
-  O --> R
-  O --> P
-  D[.NET / Cecil] --> T[realdiff.trace/1]
-  J[Java / javaagent + ASM] --> T
-  N[Node / CJS + ESM + Babel] --> T
-  G[Go / stable AST rewrite] --> T
-  R[Rust / stable syn rewrite cache] --> T
-  P[Python / PEP 669 sys.monitoring] --> T
-  T --> E[Rust matching, noise, frontier, and findings]
-  E --> F[findings.json]
-  F --> P[GitHub, Azure DevOps, MCP]
-```
-
-[`TRACE-FORMAT.md`](TRACE-FORMAT.md) is the contract between tracers and the engine. The maintained .NET, Java, Node, Go, Rust, and Python gates apply the same conformance rules: identical method sets, per-key event counts and entry ordinals, source tripwires, digest proofs, and zero engine divergences from non-empty runs.
-
-> Status: early preview. The unified CLI detects .NET, Maven/Gradle Java, npm/pnpm/Yarn/Bun Node, Go modules, Cargo Rust, and Python 3.12+ repositories from conventional root markers.
-
-## Supported languages
-
-| Language | Instrumentation | Test/source integration | Current limits |
-| --- | --- | --- | --- |
-| .NET 8 | Mono.Cecil build-time IL weaving | xUnit and portable PDBs | Properties, events, and operators are policy exclusions. Type initializers are structurally unobservable because hooks run under the CLR type-initialization lock and can deadlock startup. |
-| Java | `java.lang.instrument` agent with ASM | Maven/Gradle, JUnit/TestNG annotations, inferred or configured source roots | Gradle source-set inference covers literal `srcDir`/`srcDirs` declarations; dynamic source-set configuration requires `source_roots`. Collection shape rules require `java.util` module access. Class initializers are structurally unobservable because hooks run under the JVM class-initialization lock and can deadlock startup. |
-| Node / TypeScript | CommonJS require hook and ESM loader with Babel | npm, pnpm, Yarn Classic/Berry, Bun, direct JavaScript locations, TypeScript source maps, Jest/Vitest adapters | Exactly one supported lockfile is required; workers are out of scope; generators and unsupported callables are skipped. |
-| Go | Stable module-aware AST rewriting into a build cache | `go test`, original `.go` parser positions | Dynamic interface/function boundaries and unrewritten goroutine boundaries are explicit skips. |
-| Rust | Stable `syn`/`quote` rewriting into a SHA-256 build cache | `cargo test`, structural `#[test]` roots, original `.rs` parser positions | Macro expansions, extern/const callables, unions, trait objects, and dependency-owned values are structurally unreachable because stable source rewriting cannot enter expanded/compiler-owned code or inject readers into dependency source. The MIR prototype emitted zero runtime events. |
-| Python 3.12+ | PEP 669 `sys.monitoring` attached at process start; no build, bytecode weaving, or AST rewriting | pytest and unittest structural roots; `co_filename`/`co_firstlineno`; source AST inventory | Native/C callables are structurally unobservable because they have no Python frame for `sys.monitoring`; synthetic code without repository source and module/class setup bodies are explicit unsupported boundaries. Python 3.11 and older are refused; there is no `sys.settrace` fallback. |
-
-Unresolved TypeScript source maps are not treated as a tracer limitation: RealDiff refuses to guess an original path, records the source as unresolved, and lowers attribution confidence instead of claiming a potentially wrong file.
-
-Every tracer emits the same process-scoped NDJSON contract and a reconciled coverage manifest. A member reported instrumented must be capable of emitting, and every module must satisfy `discovered = instrumented + skipped` with zero patch failures.
-
-Python differs from the compiled tracers because there is no build command to inject into. RealDiff prepends its staged `sitecustomize.py` to `PYTHONPATH`, attaches `sys.monitoring` before target imports, and runs the repository's tests unchanged. A side-effect-free AST pass inventories source members for the coverage manifest only; runtime events come exclusively from PEP 669. The base-trace cache remains sound: its key includes the staged Python tracer directory fingerprint, Python `major.minor.micro`, effective include/exclude scope, and redaction configuration.
-
-For source resolution, a real `co_filename` beneath the repository plus `co_firstlineno` is `debugInfo`; an absent/synthetic filename is `debugInfoMissing`; and an unnormalizable or external real path is `unresolved`. Python does not need `generatedState` because suspended callables retain their original code object, and it has no safe `declaringType` fallback.
-
-Python value support is explicit:
-
-| Confidence | Shapes |
-| --- | --- |
-| Exact | `None`, missing values, booleans, arbitrary integers, floats including canonical NaN and distinct `-0.0`, strings, bytes, and exact built-in `list`, `tuple`, `dict`, `set`, and `frozenset`; complete instance `__dict__` state when no other state channel exists. |
-| Partial | Properties, `__slots__`, `__getattr__`, overridden `__getattribute__`, container subclasses, unreadable fields, depth/breadth limits, and display truncation. Every unread region emits a counted `<skipped:Python:...>`, `<error:Python:...>`, `<depth:...>`, or `<truncated>` marker. |
-| UnsupportedShape | Native/C callables without Python code objects, dynamic/synthetic code without repository source, and executable module/class setup bodies. |
-
-The canonicalizer never invokes a property, descriptor, user iterator, `repr`, equality, hash, formatting callback, `__getattr__`, or overridden `__getattribute__`. Redaction is applied after the complete canonical value is hashed, matching the other language contracts.
-
 ## Why use it?
 
 A harmless-looking refactor can change behavior far from the edited file:
@@ -120,6 +65,61 @@ pwsh -File tools/verify-demo-fixtures.ps1
 ```
 
 This covers sort stability, retry policy, and configuration parsing.
+
+The public executable is a thin Rust launcher that owns argument routing, repository config loading, and `detect`. It starts a sibling self-contained managed component for ref resolution, builds, caches, instrumentation, and posting. The architecture then has one language-neutral trace contract, one tracer per runtime, and a single-pass streaming Rust diff, frontier, and findings engine:
+
+```mermaid
+flowchart LR
+  L[Rust argv, config, detect] --> O[Managed orchestration]
+  O --> D
+  O --> J
+  O --> N
+  O --> G
+  O --> R
+  O --> P
+  D[.NET / Cecil] --> T[realdiff.trace/1]
+  J[Java / javaagent + ASM] --> T
+  N[Node / CJS + ESM + Babel] --> T
+  G[Go / stable AST rewrite] --> T
+  R[Rust / stable syn rewrite cache] --> T
+  P[Python / PEP 669 sys.monitoring] --> T
+  T --> E[Rust matching, noise, frontier, and findings]
+  E --> F[findings.json]
+  F --> P[GitHub, Azure DevOps, MCP]
+```
+
+[`TRACE-FORMAT.md`](TRACE-FORMAT.md) is the contract between tracers and the engine. The maintained .NET, Java, Node, Go, Rust, and Python gates apply the same conformance rules: identical method sets, per-key event counts and entry ordinals, source tripwires, digest proofs, and zero engine divergences from non-empty runs.
+
+> Status: early preview. The unified CLI detects .NET, Maven/Gradle Java, npm/pnpm/Yarn/Bun Node, Go modules, Cargo Rust, and Python 3.12+ repositories from conventional root markers.
+
+## Supported languages
+
+| Language | Instrumentation | Test/source integration | Current limits |
+| --- | --- | --- | --- |
+| .NET 8 | Mono.Cecil build-time IL weaving | xUnit and portable PDBs | Properties, events, and operators are policy exclusions. Type initializers are structurally unobservable because hooks run under the CLR type-initialization lock and can deadlock startup. |
+| Java | `java.lang.instrument` agent with ASM | Maven/Gradle, JUnit/TestNG annotations, inferred or configured source roots | Gradle source-set inference covers literal `srcDir`/`srcDirs` declarations; dynamic source-set configuration requires `source_roots`. Collection shape rules require `java.util` module access. Class initializers are structurally unobservable because hooks run under the JVM class-initialization lock and can deadlock startup. |
+| Node / TypeScript | CommonJS require hook and ESM loader with Babel | npm, pnpm, Yarn Classic/Berry, Bun, direct JavaScript locations, TypeScript source maps, Jest/Vitest adapters | Exactly one supported lockfile is required; workers are out of scope; generators and unsupported callables are skipped. |
+| Go | Stable module-aware AST rewriting into a build cache | `go test`, original `.go` parser positions | Dynamic interface/function boundaries and unrewritten goroutine boundaries are explicit skips. |
+| Rust | Stable `syn`/`quote` rewriting into a SHA-256 build cache | `cargo test`, structural `#[test]` roots, original `.rs` parser positions | Macro expansions, extern/const callables, unions, trait objects, and dependency-owned values are structurally unreachable because stable source rewriting cannot enter expanded/compiler-owned code or inject readers into dependency source. The MIR prototype emitted zero runtime events. |
+| Python 3.12+ | PEP 669 `sys.monitoring` attached at process start; no build, bytecode weaving, or AST rewriting | pytest and unittest structural roots; `co_filename`/`co_firstlineno`; source AST inventory | Native/C callables are structurally unobservable because they have no Python frame for `sys.monitoring`; synthetic code without repository source and module/class setup bodies are explicit unsupported boundaries. Python 3.11 and older are refused; there is no `sys.settrace` fallback. |
+
+Unresolved TypeScript source maps are not treated as a tracer limitation: RealDiff refuses to guess an original path, records the source as unresolved, and lowers attribution confidence instead of claiming a potentially wrong file.
+
+Every tracer emits the same process-scoped NDJSON contract and a reconciled coverage manifest. A member reported instrumented must be capable of emitting, and every module must satisfy `discovered = instrumented + skipped` with zero patch failures.
+
+Python differs from the compiled tracers because there is no build command to inject into. RealDiff prepends its staged `sitecustomize.py` to `PYTHONPATH`, attaches `sys.monitoring` before target imports, and runs the repository's tests unchanged. A side-effect-free AST pass inventories source members for the coverage manifest only; runtime events come exclusively from PEP 669. The base-trace cache remains sound: its key includes the staged Python tracer directory fingerprint, Python `major.minor.micro`, effective include/exclude scope, and redaction configuration.
+
+For source resolution, a real `co_filename` beneath the repository plus `co_firstlineno` is `debugInfo`; an absent/synthetic filename is `debugInfoMissing`; and an unnormalizable or external real path is `unresolved`. Python does not need `generatedState` because suspended callables retain their original code object, and it has no safe `declaringType` fallback.
+
+Python value support is explicit:
+
+| Confidence | Shapes |
+| --- | --- |
+| Exact | `None`, missing values, booleans, arbitrary integers, floats including canonical NaN and distinct `-0.0`, strings, bytes, and exact built-in `list`, `tuple`, `dict`, `set`, and `frozenset`; complete instance `__dict__` state when no other state channel exists. |
+| Partial | Properties, `__slots__`, `__getattr__`, overridden `__getattribute__`, container subclasses, unreadable fields, depth/breadth limits, and display truncation. Every unread region emits a counted `<skipped:Python:...>`, `<error:Python:...>`, `<depth:...>`, or `<truncated>` marker. |
+| UnsupportedShape | Native/C callables without Python code objects, dynamic/synthetic code without repository source, and executable module/class setup bodies. |
+
+The canonicalizer never invokes a property, descriptor, user iterator, `repr`, equality, hash, formatting callback, `__getattr__`, or overridden `__getattribute__`. Redaction is applied after the complete canonical value is hashed, matching the other language contracts.
 
 ### Cross-language release demos
 
