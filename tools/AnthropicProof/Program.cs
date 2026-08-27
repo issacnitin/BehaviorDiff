@@ -457,7 +457,7 @@ try
     Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", null);
     var multiLinePatch = new ChangedFilePatch(
         patches[0].FilePath,
-        "@@ -10,1 +10,2 @@ namespace SampleApp\n+first changed line\n+second changed line");
+        "@@ -10,1 +10,2 @@ namespace SampleApp\n+import java.util.ArrayList;\n+ordered.sort(comparator);");
     var noKeyHandler = new GitHubHandler(new List<string>(), multiLinePatch);
     bool noKeyModelCalled = false;
     var noKeyPoster = new GitHubPoster(
@@ -469,9 +469,9 @@ try
         });
     await noKeyPoster.PostAsync(findings.RootElement);
     Assert(!noKeyModelCalled, "no-key posting invoked the model client");
-    Assert(noKeyHandler.ReviewLine == 10
+    Assert(noKeyHandler.ReviewLine == 11
         && noKeyHandler.ReviewBody.Contains("several added lines participate", StringComparison.Ordinal),
-        "multi-line cause did not anchor on the first addition and identify the hunk-level cause");
+        "multi-line cause did not anchor on the behavioral addition and identify the hunk-level cause");
     Assert(noKeyHandler.SummaryBody.Contains(
         "https://github.com/example/repo/blob/proof-head/samples/SampleApp/SettingsParser.cs#L10-L11",
         StringComparison.Ordinal),

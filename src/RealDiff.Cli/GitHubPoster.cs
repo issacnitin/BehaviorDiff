@@ -342,6 +342,7 @@ namespace RealDiff.Cli
                             patch.FilePath,
                             newLine.Value,
                             newLine.Value,
+                            newLine.Value,
                             hunkStart ?? newLine.Value,
                             line.Substring(1).Trim(),
                             MultipleCandidates: false));
@@ -359,16 +360,33 @@ namespace RealDiff.Cli
                 return null;
             }
 
-            CauseAnchor first = candidates[0];
+            CauseAnchor first = candidates.FirstOrDefault(candidate => IsBehavioralCauseLine(candidate.AddedLine))
+                ?? candidates[0];
             CauseAnchor[] sameHunk = candidates
                 .Where(candidate => candidate.FilePath == first.FilePath
                     && candidate.HunkStart == first.HunkStart)
                 .ToArray();
             return first with
             {
+                StartLine = sameHunk.Min(candidate => candidate.Line),
                 EndLine = sameHunk.Max(candidate => candidate.Line),
                 MultipleCandidates = candidates.Count > 1,
             };
+        }
+
+        private static bool IsBehavioralCauseLine(string line)
+        {
+            string trimmed = line.TrimStart();
+            if (trimmed.StartsWith("import ", StringComparison.Ordinal)
+                || trimmed.StartsWith("using ", StringComparison.Ordinal)
+                || trimmed.StartsWith("from ", StringComparison.Ordinal))
+            {
+                return false;
+            }
+            return Regex.IsMatch(
+                trimmed,
+                @"\b(sort(?:ed|_unstable)?|Slice(?:Stable)?|OrderBy|quickSort|heapq|heapify|heappop)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
         private static string RenderCauseComment(
@@ -636,7 +654,7 @@ namespace RealDiff.Cli
                         + " changed, but this PR didn't edit it.**"
                     : "**" + causalHeadline + "**");
                 builder.AppendLine(Int(lead, "untestedCallSiteCount") > 0
-                    ? LeadImpact(lead) + " " + UntestedLead(lead)
+                    ? LeadImpact(lead) + (causalHeadline is null ? " " + UntestedLead(lead) : string.Empty)
                     : "Every test that executed this member had an assertion react; this is a test-covered "
                         + "change, not an unasserted behavior gap.");
                 builder.AppendLine();
@@ -902,12 +920,12 @@ namespace RealDiff.Cli
                 return null;
             }
 
-            string causeLabel = cause.EndLine == cause.Line
+            string causeLabel = cause.StartLine == cause.EndLine
                 ? "Line " + cause.Line + " of " + Code(cause.FilePath)
-                : "Lines " + cause.Line + "-" + cause.EndLine + " of " + Code(cause.FilePath);
-            string causeFragment = cause.EndLine == cause.Line
+                : "Lines " + cause.StartLine + "-" + cause.EndLine + " of " + Code(cause.FilePath);
+            string causeFragment = cause.StartLine == cause.EndLine
                 ? "#L" + cause.Line
-                : "#L" + cause.Line + "-L" + cause.EndLine;
+                : "#L" + cause.StartLine + "-L" + cause.EndLine;
             string effectLabel = "line " + effectLine + " of " + Code(effectPath);
             string effectUrl = "https://github.com/" + repository + "/blob/" + headSha
                 + "/" + effectPath + "#L" + effectLine;
@@ -1447,6 +1465,7 @@ namespace RealDiff.Cli
         private sealed record CauseAnchor(
             string FilePath,
             int Line,
+            int StartLine,
             int EndLine,
             int HunkStart,
             string AddedLine,
