@@ -203,7 +203,9 @@ namespace RealDiff.Cli
                 {
                     comments.Add(new ExistingComment(
                         comment.GetProperty("id").GetInt64(),
-                        String(comment, bodyProperty)));
+                        String(comment, bodyProperty),
+                        NullableString(comment, "path"),
+                        NullableInt(comment, "line")));
                 }
 
                 if (pageComments.Length < 100)
@@ -403,7 +405,7 @@ namespace RealDiff.Cli
             builder.AppendLine(LeadImpact(member));
             builder.AppendLine();
             builder.AppendLine(anchor.MultipleCandidates
-                ? "This changed hunk is the likely cause; several added lines participate, so the comment is anchored on the hunk's first added line."
+                ? "This changed hunk is the likely cause; several added lines participate, so the comment is anchored on the most relevant added line."
                 : "This added line is the likely cause.");
             builder.AppendLine(Code(anchor.AddedLine));
 
@@ -474,7 +476,9 @@ namespace RealDiff.Cli
             int line)
         {
             ExistingComment? match = existing.FirstOrDefault(comment => HasMarker(comment.Body, marker));
-            if (match is not null)
+            if (match is not null
+                && string.Equals(match.Path, filePath, StringComparison.Ordinal)
+                && match.Line == line)
             {
                 using JsonDocument _ = await Send(
                     client,
@@ -483,6 +487,15 @@ namespace RealDiff.Cli
                     new { body }).ConfigureAwait(false);
                 Console.WriteLine("  updated GitHub review comment " + match.Id);
                 return;
+            }
+            if (match is not null)
+            {
+                using JsonDocument _ = await Send(
+                    client,
+                    HttpMethod.Delete,
+                    root + "/pulls/comments/" + match.Id,
+                    body: null).ConfigureAwait(false);
+                Console.WriteLine("  deleted stale GitHub review comment " + match.Id);
             }
 
             using JsonDocument created = await Send(
@@ -1458,7 +1471,7 @@ namespace RealDiff.Cli
 
         private static string Truncate(string text, int length) => text.Length <= length ? text : text.Substring(0, length);
 
-        private sealed record ExistingComment(long Id, string Body);
+        private sealed record ExistingComment(long Id, string Body, string? Path = null, int? Line = null);
 
         private sealed record GitHubContext(int PullRequestNumber, string Repository, string HeadSha, bool IsFork);
 

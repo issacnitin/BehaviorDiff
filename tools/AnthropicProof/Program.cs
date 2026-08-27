@@ -476,6 +476,19 @@ try
         "https://github.com/example/repo/blob/proof-head/samples/SampleApp/SettingsParser.cs#L10-L11",
         StringComparison.Ordinal),
         "multi-line cause did not link the changed hunk range");
+
+    using JsonDocument postedReview = JsonDocument.Parse(noKeyHandler.ReviewBody);
+    string existingReview = postedReview.RootElement.GetProperty("body").GetString()
+        ?? throw new InvalidOperationException("posted review body was empty");
+    var movedAnchorHandler = new GitHubHandler(
+        new List<string>(),
+        multiLinePatch,
+        existingReview,
+        multiLinePatch.FilePath,
+        existingReviewLine: 10);
+    await new GitHubPoster(movedAnchorHandler).PostAsync(findings.RootElement);
+    Assert(movedAnchorHandler.ReviewDeleteCount == 1 && movedAnchorHandler.ReviewLine == 11,
+        "stale review comment was not deleted and recreated at the behavioral line");
 }
 finally
 {
@@ -500,6 +513,7 @@ Console.WriteLine("PASS: missing/wrong-case literals and fabricated citations ar
 Console.WriteLine("PASS: raw non-success and malformed responses survive diagnostic validation");
 Console.WriteLine("PASS: deterministic post precedes enrichment and the same comment is patched");
 Console.WriteLine("PASS: cause comment anchors on the changed hunk and summary links cause/effect lines");
+Console.WriteLine("PASS: stale review anchors are recreated on the behavioral line");
 Console.WriteLine("PASS: no-key posting never invokes Anthropic");
 Console.WriteLine("PASS: oversized evidence falls back below GitHub's body limit");
 Console.WriteLine("PASS: refused and clean budget fallbacks preserve their verdicts");
@@ -552,7 +566,12 @@ sealed class FakeHandler(
     }
 }
 
-sealed class GitHubHandler(List<string> order, ChangedFilePatch patch) : HttpMessageHandler
+sealed class GitHubHandler(
+    List<string> order,
+    ChangedFilePatch patch,
+    string? existingReviewBody = null,
+    string? existingReviewPath = null,
+    int? existingReviewLine = null) : HttpMessageHandler
 {
     internal int SummaryPostCount { get; private set; }
 
@@ -565,6 +584,8 @@ sealed class GitHubHandler(List<string> order, ChangedFilePatch patch) : HttpMes
     internal string? ReviewPath { get; private set; }
 
     internal int? ReviewLine { get; private set; }
+
+    internal int ReviewDeleteCount { get; private set; }
 
     protected override Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
@@ -579,7 +600,12 @@ sealed class GitHubHandler(List<string> order, ChangedFilePatch patch) : HttpMes
         }
         else if (request.Method == HttpMethod.Get && path.EndsWith("/pulls/1/comments", StringComparison.Ordinal))
         {
-            body = "[]";
+            body = existingReviewBody is null
+                ? "[]"
+                : JsonSerializer.Serialize(new[]
+                {
+                    new { id = 456, body = existingReviewBody, path = existingReviewPath, line = existingReviewLine },
+                });
         }
         else if (request.Method == HttpMethod.Get && path.EndsWith("/pulls/1/files", StringComparison.Ordinal))
         {
@@ -594,6 +620,11 @@ sealed class GitHubHandler(List<string> order, ChangedFilePatch patch) : HttpMes
             ReviewPath = payload.RootElement.GetProperty("path").GetString();
             ReviewLine = payload.RootElement.GetProperty("line").GetInt32();
             body = "{\"id\":456}";
+        }
+        else if (request.Method == HttpMethod.Delete && path.EndsWith("/pulls/comments/456", StringComparison.Ordinal))
+        {
+            ReviewDeleteCount++;
+            body = "{}";
         }
         else if (request.Method == HttpMethod.Post && path.EndsWith("/issues/1/comments", StringComparison.Ordinal))
         {
