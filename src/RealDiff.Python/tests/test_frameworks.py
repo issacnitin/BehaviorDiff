@@ -66,7 +66,7 @@ class FrameworkCorrelationTests(unittest.TestCase):
                 if framework == "pytest"
                 else [sys.executable, "-m", "unittest", "discover", "-s", str(root), "-v"]
             )
-            result = subprocess.run(command, env=environment, text=True, capture_output=True, check=False)
+            result = subprocess.run(command, cwd=root, env=environment, text=True, capture_output=True, check=False)
             output = result.stdout + result.stderr
             self.assertEqual(0, result.returncode, output)
             events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]

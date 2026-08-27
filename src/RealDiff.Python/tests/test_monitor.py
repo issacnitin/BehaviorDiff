@@ -8,6 +8,20 @@ from realdiff_python.monitor import Monitor, Scope, install, uninstall
 
 
 class ScopeTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows path semantics")
+    def test_scope_canonicalizes_windows_drive_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            alias = root / "alias"
+            alias.mkdir()
+            scope = Scope(alias / "..", (), ())
+            source = root / "src" / "app.py"
+            code = compile("pass", str(source), "exec")
+
+            self.assertTrue(scope.root.is_absolute())
+            self.assertEqual(root.resolve().drive.casefold(), scope.root.drive.casefold())
+            self.assertEqual("src/app.py", scope.relative_path(code))
+
     def test_scope_uses_segment_prefixes_and_exclude_wins(self):
         with tempfile.TemporaryDirectory() as root:
             scope = Scope(Path(root), (("src",),), (("src", "generated"),))

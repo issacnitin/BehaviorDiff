@@ -1,15 +1,30 @@
 using System.Text.Json;
 using RealDiff.Cli;
 
+if (args is ["--verify-github-markers"])
+{
+    const string marker = "<!-- realdiff:github:pr:1:summary -->";
+    if (!GitHubPoster.HasMarker(marker, marker)
+        || !GitHubPoster.HasMarker("<!-- behaviordiff:github:pr:1:summary -->", marker)
+        || GitHubPoster.HasMarker("<!-- behaviordiff:github:pr:2:summary -->", marker))
+    {
+        Console.Error.WriteLine("GitHub marker compatibility proof failed.");
+        return 1;
+    }
+
+    Console.WriteLine("GitHub marker compatibility proof: PASS");
+    return 0;
+}
+
 if (args.Length is < 1 or > 2)
 {
-    Console.Error.WriteLine("usage: RealDiff.CommentPreview [--provider=github|azuredevops] <findings.json>");
+    Console.Error.WriteLine("usage: RealDiff.CommentPreview [--provider=github|azuredevops] <findings.json> | --verify-github-markers");
     return 2;
 }
 
 if (args.Length == 2 && !args[0].StartsWith("--provider=", StringComparison.Ordinal))
 {
-    Console.Error.WriteLine("usage: RealDiff.CommentPreview [--provider=github|azuredevops] <findings.json>");
+    Console.Error.WriteLine("usage: RealDiff.CommentPreview [--provider=github|azuredevops] <findings.json> | --verify-github-markers");
     return 2;
 }
 

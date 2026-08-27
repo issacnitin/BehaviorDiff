@@ -26,6 +26,9 @@ class Scope:
     includes: tuple[tuple[str, ...], ...]
     excludes: tuple[tuple[str, ...], ...]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "root", self.root.resolve())
+
     @classmethod
     def from_environment(cls) -> "Scope":
         root_value = os.environ.get("REALDIFF_REPOSITORY_ROOT")
@@ -33,7 +36,7 @@ class Scope:
             raise RuntimeError("REALDIFF_REPOSITORY_ROOT is required for Python tracing")
         includes = _read_list(os.environ.get("REALDIFF_INCLUDE_NAMESPACES", ""))
         excludes = _read_list(os.environ.get("REALDIFF_EXCLUDE_NAMESPACES", ""))
-        return cls(Path(root_value).resolve(), includes, excludes)
+        return cls(Path(root_value), includes, excludes)
 
     def relative_path(self, code: CodeType) -> str | None:
         relative = self.repository_path(code)

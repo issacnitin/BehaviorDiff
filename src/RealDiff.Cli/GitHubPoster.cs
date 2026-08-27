@@ -87,7 +87,7 @@ namespace RealDiff.Cli
                     explanations,
                     context.Repository,
                     context.HeadSha)).ConfigureAwait(false);
-            if (!issueComments.Any(comment => comment.Body.Contains(summaryMarker, StringComparison.Ordinal)))
+            if (!issueComments.Any(comment => HasMarker(comment.Body, summaryMarker)))
             {
                 issueComments.Add(new ExistingComment(summaryCommentId, summaryMarker));
             }
@@ -391,7 +391,7 @@ namespace RealDiff.Cli
             string marker,
             string body)
         {
-            ExistingComment? match = existing.FirstOrDefault(comment => comment.Body.Contains(marker, StringComparison.Ordinal));
+            ExistingComment? match = existing.FirstOrDefault(comment => HasMarker(comment.Body, marker));
             if (match is not null)
             {
                 using JsonDocument _ = await Send(
@@ -413,6 +413,19 @@ namespace RealDiff.Cli
             return createdId;
         }
 
+        internal static bool HasMarker(string body, string marker)
+        {
+            if (body.Contains(marker, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            const string currentPrefix = "<!-- realdiff:github:";
+            const string legacyPrefix = "<!-- behaviordiff:github:";
+            return marker.StartsWith(currentPrefix, StringComparison.Ordinal)
+                && body.Contains(legacyPrefix + marker.Substring(currentPrefix.Length), StringComparison.Ordinal);
+        }
+
         private async Task UpsertReviewComment(
             HttpClient client,
             string root,
@@ -423,7 +436,7 @@ namespace RealDiff.Cli
             string filePath,
             int line)
         {
-            ExistingComment? match = existing.FirstOrDefault(comment => comment.Body.Contains(marker, StringComparison.Ordinal));
+            ExistingComment? match = existing.FirstOrDefault(comment => HasMarker(comment.Body, marker));
             if (match is not null)
             {
                 using JsonDocument _ = await Send(

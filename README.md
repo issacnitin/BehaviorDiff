@@ -1,7 +1,7 @@
 # RealDiff
 
 [![CI](https://github.com/issacnitin/RealDiff/actions/workflows/ci.yml/badge.svg)](https://github.com/issacnitin/RealDiff/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/issacnitin/RealDiff)](https://github.com/issacnitin/RealDiff/releases/tag/v0.3.0)
+[![Release](https://img.shields.io/github/v/release/issacnitin/RealDiff)](https://github.com/issacnitin/RealDiff/releases/tag/v0.4.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
 
@@ -19,11 +19,13 @@ flowchart LR
   O --> N
   O --> G
   O --> R
+  O --> P
   D[.NET / Cecil] --> T[realdiff.trace/1]
   J[Java / javaagent + ASM] --> T
   N[Node / CJS + ESM + Babel] --> T
   G[Go / stable AST rewrite] --> T
   R[Rust / stable syn rewrite cache] --> T
+  P[Python / PEP 669 sys.monitoring] --> T
   T --> E[Rust matching, noise, frontier, and findings]
   E --> F[findings.json]
   F --> P[GitHub, Azure DevOps, MCP]
@@ -119,15 +121,16 @@ This covers sort stability, retry policy, and configuration parsing.
 
 ### Cross-language release demos
 
-The `v0.3.0` release is exercised by five public sort-stability pull requests. Each fixture has exactly three tests, changes one configuration file, and leaves two broad assertions passing while one exact tie-winner assertion reacts. In every packaged run, the edited file contributes zero traced members, the frontier is in unedited pricing code, at least one call site is untested, and no tooling or manifest noise is present.
+The `v0.4.0` release is exercised by six public sort-stability pull requests. Each fixture has exactly three tests, changes one configuration file, and leaves two broad assertions passing while one exact tie-winner assertion reacts. In every packaged run, the edited file contributes zero traced members, the frontier is in unedited pricing code, at least one call site is untested, and no tooling or manifest noise is present.
 
-| Language | Matched keys | Frontier collapse | Pull request | Hosted run |
+| Language | Matched keys | Frontier collapse | Pull request | Hosted workflow |
 | --- | ---: | ---: | --- | --- |
-| .NET | 319 | 9 to 3 (3.0x) | [realdiff-sort-dotnet#1](https://github.com/issacnitin/realdiff-sort-dotnet/pull/1) | [successful run](https://github.com/issacnitin/realdiff-sort-dotnet/actions/runs/32996384741) |
-| Node | 129 | 117 to 3 (39.0x) | [realdiff-sort-node#1](https://github.com/issacnitin/realdiff-sort-node/pull/1) | [successful run](https://github.com/issacnitin/realdiff-sort-node/actions/runs/32996450162) |
-| Java | 132 | 117 to 3 (39.0x) | [realdiff-sort-java#1](https://github.com/issacnitin/realdiff-sort-java/pull/1) | [successful run](https://github.com/issacnitin/realdiff-sort-java/actions/runs/32996460852) |
-| Go | 315 | 9 to 3 (3.0x) | [realdiff-sort-go#1](https://github.com/issacnitin/realdiff-sort-go/pull/1) | [successful run](https://github.com/issacnitin/realdiff-sort-go/actions/runs/32996478489) |
-| Rust | 312 | 9 to 3 (3.0x) | [realdiff-sort-rust#1](https://github.com/issacnitin/realdiff-sort-rust/pull/1) | [successful run](https://github.com/issacnitin/realdiff-sort-rust/actions/runs/32996497931) |
+| .NET | 319 | 9 to 3 (3.0x) | [realdiff-sort-dotnet#1](https://github.com/issacnitin/realdiff-sort-dotnet/pull/1) | [workflow](https://github.com/issacnitin/realdiff-sort-dotnet/actions/workflows/realdiff.yml) |
+| Node | 129 | 117 to 3 (39.0x) | [realdiff-sort-node#1](https://github.com/issacnitin/realdiff-sort-node/pull/1) | [workflow](https://github.com/issacnitin/realdiff-sort-node/actions/workflows/realdiff.yml) |
+| Java | 132 | 117 to 3 (39.0x) | [realdiff-sort-java#1](https://github.com/issacnitin/realdiff-sort-java/pull/1) | [workflow](https://github.com/issacnitin/realdiff-sort-java/actions/workflows/realdiff.yml) |
+| Go | 315 | 9 to 3 (3.0x) | [realdiff-sort-go#1](https://github.com/issacnitin/realdiff-sort-go/pull/1) | [workflow](https://github.com/issacnitin/realdiff-sort-go/actions/workflows/realdiff.yml) |
+| Rust | 312 | 9 to 3 (3.0x) | [realdiff-sort-rust#1](https://github.com/issacnitin/realdiff-sort-rust/pull/1) | [workflow](https://github.com/issacnitin/realdiff-sort-rust/actions/workflows/realdiff.yml) |
+| Python | 319 | 12 to 3 (4.0x) | [realdiff-sort-python#1](https://github.com/issacnitin/realdiff-sort-python/pull/1) | [workflow](https://github.com/issacnitin/realdiff-sort-python/actions/workflows/realdiff.yml) |
 
 Two fresh packaged runs per language produced identical normalized behavioral artifacts. Each hosted workflow also posted exactly one RealDiff PR comment.
 
@@ -138,39 +141,39 @@ Two fresh packaged runs per language produced identical normalized behavioral ar
 The published Linux image contains the RealDiff CLI, default Rust diff engine, .NET 8 SDK/tracer, Java 17 agent, Node 24 tracer, Go rewriter, stable Rust toolchain/tracer, and Python 3.12 `sys.monitoring` tracer with pytest. The host needs only Docker:
 
 ```bash
-docker pull ghcr.io/issacnitin/realdiff:v0.3.0
+docker pull ghcr.io/issacnitin/realdiff:v0.4.0
 docker run --rm \
   --volume "$PWD:/workspace" \
-  ghcr.io/issacnitin/realdiff:v0.3.0 \
+  ghcr.io/issacnitin/realdiff:v0.4.0 \
   /workspace --base origin/main --pr HEAD \
   --findings /workspace/.realdiff/artifacts/findings.json
 ```
 
 The normal image entrypoint is `realdiff`; no PowerShell wrapper is involved. The unified CLI orchestrates .NET, Java, Node/TypeScript, Go, Rust, and Python repositories.
 
-The current locally verified Linux/amd64 image is 898,678,469 bytes by Docker image inspection and includes stable Rust 1.98 plus a native linker. The container workflow reports the exact size for every published build.
+The current locally verified Linux/amd64 image is 926,593,250 bytes by Docker image inspection and includes stable Rust 1.98, Python 3.12 with pytest, and a native linker. The container workflow reports the exact size for every published build.
 
 ### Install the GitHub release
 
-Download the archive for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, or `win-x64` from the [v0.3.0 release](https://github.com/issacnitin/RealDiff/releases/tag/v0.3.0). Verify it against `SHA256SUMS`, extract it, and place the extracted directory on `PATH`. The executable is self-contained; the host does not need a .NET runtime.
+Download the archive for `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, or `win-x64` from the [v0.4.0 release](https://github.com/issacnitin/RealDiff/releases/tag/v0.4.0). Verify it against `SHA256SUMS`, extract it, and place the extracted directory on `PATH`. The executable is self-contained; the host does not need a .NET runtime.
 
 ```bash
 sha256sum --check SHA256SUMS --ignore-missing
-tar -xzf realdiff-v0.3.0-linux-x64.tar.gz -C "$HOME/.local/lib/realdiff"
+tar -xzf realdiff-v0.4.0-linux-x64.tar.gz -C "$HOME/.local/lib/realdiff"
 ln -s "$HOME/.local/lib/realdiff/realdiff" "$HOME/.local/bin/realdiff"
 realdiff --help
 ```
 
 ```powershell
-Get-FileHash .\realdiff-v0.3.0-win-x64.zip -Algorithm SHA256
-Expand-Archive .\realdiff-v0.3.0-win-x64.zip "$env:LOCALAPPDATA\RealDiff"
+Get-FileHash .\realdiff-v0.4.0-win-x64.zip -Algorithm SHA256
+Expand-Archive .\realdiff-v0.4.0-win-x64.zip "$env:LOCALAPPDATA\RealDiff"
 & "$env:LOCALAPPDATA\RealDiff\realdiff.exe" --help
 ```
 
 The complete extracted directory must remain together because the Rust `realdiff` launcher starts `realdiff-managed` beside it and the directory also contains the native engine, language tracers, and separately launched .NET Weaver. The NuGet tool package remains available as a framework-dependent managed compatibility distribution:
 
 ```powershell
-dotnet tool install --global RealDiff.Tool --version 0.3.0 --add-source .
+dotnet tool install --global RealDiff.Tool --version 0.4.0 --add-source .
 realdiff --help
 ```
 
@@ -440,7 +443,7 @@ steps:
   - uses: actions/checkout@v4
     with:
       fetch-depth: 0
-  - uses: issacnitin/RealDiff@v0.3.0
+  - uses: issacnitin/RealDiff@v0.4.0
     env:
       GITHUB_TOKEN: ${{ github.token }}
 ```
