@@ -108,8 +108,10 @@ namespace RealDiff.Cli
         {
             Console.WriteLine();
             Console.WriteLine("=== 2. Java clean build ===");
-            MavenCommand maven = ResolveMaven(detection.EntryPoint, baseTree);
+            bool gradle = IsGradleEntryPoint(detection.EntryPoint);
+            MavenCommand maven = gradle ? ResolveGradle(detection.EntryPoint, baseTree) : ResolveMaven(detection.EntryPoint, baseTree);
             if (detection.HasCustomBuild) RunConfiguredBuild("base", detection);
+            else if (gradle) BuildGradle("base", detection, maven);
             else BuildJava("base", detection.EntryPoint, maven);
 
             string scope = string.Join(",", detection.IncludeNamespaces);
@@ -127,9 +129,9 @@ namespace RealDiff.Cli
             Console.WriteLine();
             Console.WriteLine("=== 3. Java base trace runs ===");
             var stopwatch = Stopwatch.StartNew();
-            string base1 = RunJavaTests("base_run1", detection, baseTree, maven, scope, agent);
-            RunJavaTests("base_run2", detection, baseTree, maven, scope, agent);
-            RunJavaTests("base_run3", detection, baseTree, maven, scope, agent);
+            string base1 = RunJavaTests("base_run1", detection, baseTree, maven, gradle, scope, agent);
+            RunJavaTests("base_run2", detection, baseTree, maven, gradle, scope, agent);
+            RunJavaTests("base_run3", detection, baseTree, maven, gradle, scope, agent);
             Pipeline.AssertTestIdsPresent(base1);
             stopwatch.Stop();
             _cache.Store(key, baseTree, stopwatch.ElapsedMilliseconds);
@@ -183,11 +185,19 @@ namespace RealDiff.Cli
         {
             Console.WriteLine();
             Console.WriteLine("=== 2. Java clean builds ===");
-            MavenCommand baseMaven = ResolveMaven(baseDetection.EntryPoint, baseTree);
-            MavenCommand prMaven = ResolveMaven(prDetection.EntryPoint, prTree);
+            bool baseGradle = IsGradleEntryPoint(baseDetection.EntryPoint);
+            bool prGradle = IsGradleEntryPoint(prDetection.EntryPoint);
+            if (baseGradle != prGradle)
+            {
+                throw new CliException("Base and PR use different Java build systems.", ExitCodes.RunInvalid);
+            }
+            MavenCommand baseMaven = baseGradle ? ResolveGradle(baseDetection.EntryPoint, baseTree) : ResolveMaven(baseDetection.EntryPoint, baseTree);
+            MavenCommand prMaven = prGradle ? ResolveGradle(prDetection.EntryPoint, prTree) : ResolveMaven(prDetection.EntryPoint, prTree);
             if (baseDetection.HasCustomBuild) RunConfiguredBuild("base", baseDetection);
+            else if (baseGradle) BuildGradle("base", baseDetection, baseMaven);
             else BuildJava("base", baseDetection.EntryPoint, baseMaven);
             if (prDetection.HasCustomBuild) RunConfiguredBuild("pr", prDetection);
+            else if (prGradle) BuildGradle("pr", prDetection, prMaven);
             else BuildJava("pr", prDetection.EntryPoint, prMaven);
 
             Console.WriteLine();
@@ -220,16 +230,16 @@ namespace RealDiff.Cli
             else
             {
                 var stopwatch = Stopwatch.StartNew();
-                base1 = RunJavaTests("base_run1", baseDetection, baseTree, baseMaven, scope, agent);
-                base2 = RunJavaTests("base_run2", baseDetection, baseTree, baseMaven, scope, agent);
-                base3 = RunJavaTests("base_run3", baseDetection, baseTree, baseMaven, scope, agent);
+                base1 = RunJavaTests("base_run1", baseDetection, baseTree, baseMaven, baseGradle, scope, agent);
+                base2 = RunJavaTests("base_run2", baseDetection, baseTree, baseMaven, baseGradle, scope, agent);
+                base3 = RunJavaTests("base_run3", baseDetection, baseTree, baseMaven, baseGradle, scope, agent);
                 stopwatch.Stop();
                 baseRoot = baseTree;
                 _cache.Store(key, baseRoot, stopwatch.ElapsedMilliseconds);
             }
 
             Pipeline.AssertTestIdsPresent(base1);
-            string pr = RunJavaTests("pr_run", prDetection, prTree, prMaven, scope, agent);
+            string pr = RunJavaTests("pr_run", prDetection, prTree, prMaven, prGradle, scope, agent);
             return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
         }
 
@@ -671,6 +681,21 @@ namespace RealDiff.Cli
             }
         }
 
+        private static void BuildGradle(string label, LanguageDetection detection, MavenCommand gradle)
+        {
+            var arguments = new[] { "--no-daemon", "build", "-x", "test" };
+            Console.WriteLine("  " + label + " command: " + gradle.DisplayName + " --no-daemon build -x test");
+            ProcessResult result = gradle.Run(arguments, detection.WorkDirectory);
+            if (!result.Ok)
+            {
+                throw new CliException(
+                    "This Gradle Java repository does not build in this environment, before instrumentation."
+                    + Environment.NewLine + "    Worktree: " + label
+                    + Environment.NewLine + Shell.Tail(result.Output, 25),
+                    ExitCodes.RepoDoesNotBuild);
+            }
+        }
+
         private static void BuildNode(string label, string directory)
         {
             Console.WriteLine("  " + label + " command: npm ci");
@@ -701,6 +726,7 @@ namespace RealDiff.Cli
             LanguageDetection detection,
             string repositoryRoot,
             MavenCommand maven,
+            bool gradle,
             string scope,
             string agent)
         {
@@ -712,6 +738,7 @@ namespace RealDiff.Cli
                 ["REALDIFF_TRACE"] = trace,
                 ["REALDIFF_NAMESPACES"] = scope,
                 ["REALDIFF_REPOSITORY_ROOT"] = repositoryRoot,
+                ["REALDIFF_JAVA_SOURCE_ROOTS"] = string.Join(";", detection.SourceRoots),
             };
             ProcessResult result;
             if (detection.HasCustomTest)
@@ -720,6 +747,17 @@ namespace RealDiff.Cli
                 environment["JAVA_TOOL_OPTIONS"] = (existing + " " + argLine).Trim();
                 Console.WriteLine("  " + label.PadRight(10) + " configured command: " + detection.TestCommand);
                 result = Shell.RunCommand(detection.TestCommand, detection.WorkDirectory, environment);
+            }
+            else if (gradle)
+            {
+                string initScript = Path.Combine(directory, "realdiff.init.gradle");
+                File.WriteAllText(initScript,
+                    "allprojects { tasks.withType(Test).configureEach { "
+                    + "jvmArgs '--add-opens=java.base/java.util=ALL-UNNAMED'; "
+                    + "jvmArgs '" + EscapeGradleString("-javaagent:" + agent) + "' } }" + Environment.NewLine);
+                var arguments = new[] { "--no-daemon", "--rerun-tasks", "--init-script", initScript, "test" };
+                Console.WriteLine("  " + label.PadRight(10) + " command: " + maven.DisplayName + " --rerun-tasks test (forked JVM += add-opens + javaagent)");
+                result = maven.Run(arguments, detection.WorkDirectory, environment);
             }
             else
             {
@@ -739,6 +777,9 @@ namespace RealDiff.Cli
             ReportTrace(label, summary, result.ExitCode);
             return directory;
         }
+
+        private static string EscapeGradleString(string value) =>
+            value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("'", "\\'", StringComparison.Ordinal);
 
         private string RunNodeTests(
             string label,
@@ -1166,6 +1207,29 @@ namespace RealDiff.Cli
 
             return OperatingSystem.IsWindows() ? MavenCommand.Script("mvn") : MavenCommand.Direct("mvn");
         }
+
+        private static MavenCommand ResolveGradle(string entryPoint, string repositoryRoot)
+        {
+            string entryDirectory = Path.GetDirectoryName(entryPoint)!;
+            foreach (string directory in new[] { entryDirectory, repositoryRoot }.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                string windowsWrapper = Path.Combine(directory, "gradlew.bat");
+                if (OperatingSystem.IsWindows() && File.Exists(windowsWrapper))
+                {
+                    return MavenCommand.Script(windowsWrapper);
+                }
+                string wrapper = Path.Combine(directory, "gradlew");
+                if (!OperatingSystem.IsWindows() && File.Exists(wrapper))
+                {
+                    return MavenCommand.Direct(wrapper);
+                }
+            }
+            return OperatingSystem.IsWindows() ? MavenCommand.Script("gradle") : MavenCommand.Direct("gradle");
+        }
+
+        private static bool IsGradleEntryPoint(string entryPoint) =>
+            entryPoint.EndsWith("build.gradle", StringComparison.OrdinalIgnoreCase)
+            || entryPoint.EndsWith("build.gradle.kts", StringComparison.OrdinalIgnoreCase);
 
         private static ProcessResult RunScriptCommand(
             string command,

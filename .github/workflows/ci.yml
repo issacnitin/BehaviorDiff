@@ -138,7 +138,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [dotnet, java, node-js, node-ts, go, rust, python]
+        suite: [dotnet, java, java-gradle, node-js, node-ts, go, rust, python]
     steps:
       - uses: actions/checkout@v4
       - name: Use Rust 1.98
@@ -148,12 +148,17 @@ jobs:
         with:
           dotnet-version: 8.x
       - name: Use Java 17
-        if: matrix.suite == 'java'
+        if: startsWith(matrix.suite, 'java')
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: maven
+      - name: Use Gradle 8.10
+        if: matrix.suite == 'java-gradle'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
       - name: Use Node 24
         if: startsWith(matrix.suite, 'node-')
         uses: actions/setup-node@v4

@@ -1,0 +1,20 @@
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+}
+
+sourceSets {
+    main.java.srcDirs = ['code/main']
+    test.java.srcDirs = ['code/test']
+}
+
+test {
+    useJUnitPlatform()
+}

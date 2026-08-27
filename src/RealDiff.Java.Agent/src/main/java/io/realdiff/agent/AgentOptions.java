@@ -13,17 +13,20 @@ final class AgentOptions {
     static final String EXCLUDE_ENVIRONMENT = "REALDIFF_EXCLUDE_NAMESPACES";
     static final String TRACE_ENVIRONMENT = "REALDIFF_TRACE";
     static final String REPOSITORY_ROOT_ENVIRONMENT = "REALDIFF_REPOSITORY_ROOT";
+    static final String SOURCE_ROOTS_ENVIRONMENT = "REALDIFF_JAVA_SOURCE_ROOTS";
 
     private final List<String> includes;
     private final List<String> excludes;
     private final String tracePath;
     private final Path repositoryRoot;
+    private final List<String> sourceRoots;
 
-    private AgentOptions(List<String> includes, List<String> excludes, String tracePath, Path repositoryRoot) {
+    private AgentOptions(List<String> includes, List<String> excludes, String tracePath, Path repositoryRoot, List<String> sourceRoots) {
         this.includes = includes;
         this.excludes = excludes;
         this.tracePath = tracePath;
         this.repositoryRoot = repositoryRoot;
+        this.sourceRoots = sourceRoots;
     }
 
     static AgentOptions parse(String agentArguments, Map<String, String> environment) {
@@ -40,7 +43,8 @@ final class AgentOptions {
             includes,
             parsePrefixes(excludeText),
             arguments.getOrDefault("trace", environment.get(TRACE_ENVIRONMENT)),
-            parsePath(arguments.getOrDefault("repositoryRoot", environment.get(REPOSITORY_ROOT_ENVIRONMENT))));
+            parsePath(arguments.getOrDefault("repositoryRoot", environment.get(REPOSITORY_ROOT_ENVIRONMENT))),
+            parsePaths(arguments.getOrDefault("sourceRoots", environment.get(SOURCE_ROOTS_ENVIRONMENT))));
     }
 
     static AgentOptions fromProcess(String agentArguments) {
@@ -63,6 +67,10 @@ final class AgentOptions {
         return repositoryRoot;
     }
 
+    List<String> sourceRoots() {
+        return sourceRoots;
+    }
+
     private static Map<String, String> parseArguments(String text) {
         if (text == null || text.trim().isEmpty()) {
             return Collections.emptyMap();
@@ -78,7 +86,7 @@ final class AgentOptions {
             String name = part.substring(0, separator).trim();
             String value = part.substring(separator + 1).trim();
             if (!name.equals("include") && !name.equals("exclude") && !name.equals("trace")
-                && !name.equals("repositoryRoot")) {
+                && !name.equals("repositoryRoot") && !name.equals("sourceRoots")) {
                 throw new IllegalArgumentException("Unknown RealDiff agent option: " + name);
             }
 
@@ -110,6 +118,20 @@ final class AgentOptions {
         }
 
         return Collections.unmodifiableList(prefixes);
+    }
+
+    private static List<String> parsePaths(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return List.of("src/main/java", "src/test/java");
+        }
+        List<String> roots = new ArrayList<>();
+        for (String value : text.split("[,;]")) {
+            String root = value.trim().replace('\\', '/');
+            if (!root.isEmpty() && !roots.contains(root)) {
+                roots.add(root);
+            }
+        }
+        return Collections.unmodifiableList(roots);
     }
 
     private static String normalize(String value) {

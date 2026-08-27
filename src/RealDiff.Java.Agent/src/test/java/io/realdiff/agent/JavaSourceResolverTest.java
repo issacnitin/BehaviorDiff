@@ -52,4 +52,18 @@ final class JavaSourceResolverTest {
         assertNull(new JavaSourceResolver(repositoryRoot).resolve(
             output, "io/realdiff/reference/Subject", "Subject.java"));
     }
+
+    @Test
+    void resolvesConfiguredGradleSourceRoot() throws Exception {
+        Path output = repositoryRoot.resolve("build/classes/java/main");
+        Path source = repositoryRoot.resolve("code/production/io/realdiff/reference/Subject.java");
+        Files.createDirectories(output);
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "class Subject {}");
+
+        assertEquals(
+            "code/production/io/realdiff/reference/Subject.java",
+            new JavaSourceResolver(repositoryRoot, java.util.List.of("code/production")).resolve(
+                output, "io/realdiff/reference/Subject", "Subject.java"));
+    }
 }

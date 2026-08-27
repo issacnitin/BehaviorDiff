@@ -15,7 +15,7 @@ public final class RealDiffAgent {
             new ScopeSelectingTransformer(
                 new PackageScope(options),
                 traceSession,
-                new JavaSourceResolver(options.repositoryRoot())),
+                new JavaSourceResolver(options.repositoryRoot(), options.sourceRoots())),
             false);
     }
 }

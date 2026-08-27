@@ -36,6 +36,8 @@ namespace RealDiff.Cli
 
         internal string[] TestProjects { get; init; } = Array.Empty<string>();
 
+        internal string[] SourceRoots { get; init; } = Array.Empty<string>();
+
         internal string[] IncludeNamespaces { get; init; } = Array.Empty<string>();
 
         internal string[] ExcludeNamespaces { get; init; } = Array.Empty<string>();
@@ -120,7 +122,10 @@ namespace RealDiff.Cli
             string[] testProjects = config.Value.TestProjects.Count > 0
                 ? config.Value.TestProjects.ToArray()
                 : inferredProjects;
-            string[] inferredScope = InferScope(language, root, workDirectory);
+            string[] sourceRoots = language == RepositoryLanguage.Java
+                ? InferJavaSourceRoots(root, entryPoint, workDirectory, config.Value.SourceRoots)
+                : Array.Empty<string>();
+            string[] inferredScope = InferScope(language, root, workDirectory, sourceRoots);
             string[] include = config.Value.IncludeNamespaces.Count > 0
                 ? config.Value.IncludeNamespaces.ToArray()
                 : inferredScope;
@@ -136,9 +141,10 @@ namespace RealDiff.Cli
                     ? DefaultBuild(language, evidence)
                     : config.Value.Build!,
                 TestCommand = string.IsNullOrWhiteSpace(config.Value.Test)
-                    ? DefaultTest(language, testProjects)
+                    ? DefaultTest(language, evidence, testProjects)
                     : config.Value.Test!,
                 TestProjects = testProjects,
+                SourceRoots = sourceRoots,
                 IncludeNamespaces = include,
                 ExcludeNamespaces = config.Value.ExcludeNamespaces.ToArray(),
                 Config = config,
@@ -173,6 +179,7 @@ namespace RealDiff.Cli
                 Build = detection.BuildCommand,
                 Test = detection.TestCommand,
                 TestProjects = detection.TestProjects,
+                SourceRoots = detection.SourceRoots,
                 IncludeNamespaces = detection.IncludeNamespaces,
                 ExcludeNamespaces = detection.ExcludeNamespaces,
                 Source = detection.Config.Exists ? ".realdiff/config.yml + detection" : "auto-detection",
@@ -186,7 +193,7 @@ namespace RealDiff.Cli
             Add(candidates, root, RepositoryLanguage.DotNet, solutions.Length > 0
                 ? solutions
                 : Directory.EnumerateFiles(root, "*.csproj", SearchOption.TopDirectoryOnly));
-            Add(candidates, root, RepositoryLanguage.Java, Existing(root, "pom.xml"));
+            Add(candidates, root, RepositoryLanguage.Java, Existing(root, "pom.xml", "build.gradle", "build.gradle.kts"));
             Add(candidates, root, RepositoryLanguage.Node, Existing(root, "package.json"));
             Add(candidates, root, RepositoryLanguage.Go, Existing(root, "go.mod"));
             Add(candidates, root, RepositoryLanguage.Rust, Existing(root, "Cargo.toml"));
@@ -199,7 +206,9 @@ namespace RealDiff.Cli
             var candidates = new List<LanguageDetection>();
             string[] solutions = Find(root, "*.sln").ToArray();
             Add(candidates, root, RepositoryLanguage.DotNet, solutions.Length > 0 ? solutions : Find(root, "*.csproj"));
-            Add(candidates, root, RepositoryLanguage.Java, Find(root, "pom.xml"));
+            Add(candidates, root, RepositoryLanguage.Java, Find(root, "pom.xml")
+                .Concat(Find(root, "build.gradle"))
+                .Concat(Find(root, "build.gradle.kts")));
             Add(candidates, root, RepositoryLanguage.Node, Find(root, "package.json"));
             Add(candidates, root, RepositoryLanguage.Go, Find(root, "go.mod"));
             Add(candidates, root, RepositoryLanguage.Rust, Find(root, "Cargo.toml"));
@@ -230,7 +239,11 @@ namespace RealDiff.Cli
                 .OrderBy(value => value, StringComparer.Ordinal)
                 .ToArray();
 
-        private static string[] InferScope(RepositoryLanguage language, string repositoryRoot, string workDirectory)
+        private static string[] InferScope(
+            RepositoryLanguage language,
+            string repositoryRoot,
+            string workDirectory,
+            IReadOnlyList<string> sourceRoots)
         {
             if (language == RepositoryLanguage.DotNet)
             {
@@ -245,9 +258,9 @@ namespace RealDiff.Cli
             if (language == RepositoryLanguage.Java)
             {
                 var packages = new SortedSet<string>(StringComparer.Ordinal);
-                foreach (string sourceRoot in new[] { "src/main/java", "src/test/java" })
+                foreach (string sourceRoot in sourceRoots)
                 {
-                    string directory = Path.Combine(workDirectory, sourceRoot.Replace('/', Path.DirectorySeparatorChar));
+                    string directory = Path.Combine(repositoryRoot, sourceRoot.Replace('/', Path.DirectorySeparatorChar));
                     if (!Directory.Exists(directory)) continue;
                     foreach (string source in Directory.EnumerateFiles(directory, "*.java", SearchOption.AllDirectories))
                     {
@@ -274,6 +287,7 @@ namespace RealDiff.Cli
         private static string DefaultBuild(RepositoryLanguage language, string entryPoint) => language switch
         {
             RepositoryLanguage.DotNet => "dotnet build " + Quote(entryPoint) + " -c Release --nologo",
+            RepositoryLanguage.Java when IsGradleEntryPoint(entryPoint) => "gradlew build -x test",
             RepositoryLanguage.Java => "mvn --batch-mode --no-transfer-progress package -DskipTests",
             RepositoryLanguage.Node => "npm ci && npm run build --if-present",
             RepositoryLanguage.Go => "go build ./...",
@@ -282,10 +296,11 @@ namespace RealDiff.Cli
             _ => string.Empty,
         };
 
-        private static string DefaultTest(RepositoryLanguage language, string[] projects) => language switch
+        private static string DefaultTest(RepositoryLanguage language, string entryPoint, string[] projects) => language switch
         {
             RepositoryLanguage.DotNet when projects.Length > 0 => "dotnet test " + string.Join(" ", projects.Select(Quote)) + " -c Release --no-build --nologo",
             RepositoryLanguage.DotNet => "dotnet test -c Release --no-build --nologo",
+            RepositoryLanguage.Java when IsGradleEntryPoint(entryPoint) => "gradlew test",
             RepositoryLanguage.Java => "mvn --batch-mode --no-transfer-progress test",
             RepositoryLanguage.Node => "npm test",
             RepositoryLanguage.Go => "go test ./...",
@@ -293,6 +308,76 @@ namespace RealDiff.Cli
             RepositoryLanguage.Python => "python -m pytest",
             _ => string.Empty,
         };
+
+        private static string[] InferJavaSourceRoots(
+            string repositoryRoot,
+            string entryPoint,
+            string workDirectory,
+            IReadOnlyList<string> configured)
+        {
+            if (configured.Count > 0)
+            {
+                return configured
+                    .Select(root => RepositoryRelativeSourceRoot(repositoryRoot, repositoryRoot, root))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+            }
+
+            var roots = new SortedSet<string>(StringComparer.Ordinal);
+            if (IsGradleEntryPoint(entryPoint) && File.Exists(entryPoint))
+            {
+                string text = File.ReadAllText(entryPoint);
+                foreach (Match match in Regex.Matches(
+                    text,
+                    @"(?:(?:srcDirs?|setSrcDirs)\s*(?:=|\()\s*\[?)(?<values>[^\]\)\r\n]+)",
+                    RegexOptions.CultureInvariant))
+                {
+                    foreach (Match value in Regex.Matches(match.Groups["values"].Value, "['\\\"](?<path>[^'\\\"]+)['\\\"]"))
+                    {
+                        roots.Add(RepositoryRelativeSourceRoot(
+                            repositoryRoot,
+                            Path.GetDirectoryName(entryPoint)!,
+                            value.Groups["path"].Value));
+                    }
+                }
+            }
+
+            foreach (string candidate in new[] { "src/main/java", "src/test/java" })
+            {
+                if (Directory.Exists(Path.Combine(workDirectory, candidate.Replace('/', Path.DirectorySeparatorChar))))
+                {
+                    roots.Add(RepositoryRelativeSourceRoot(repositoryRoot, workDirectory, candidate));
+                }
+            }
+            return roots.ToArray();
+        }
+
+        private static string NormalizeRelativePath(string value) =>
+            value.Trim().TrimEnd('/', '\\').Replace('\\', '/');
+
+        private static string RepositoryRelativeSourceRoot(
+            string repositoryRoot,
+            string baseDirectory,
+            string value)
+        {
+            string fullRoot = Path.GetFullPath(repositoryRoot);
+            string fullPath = Path.GetFullPath(Path.Combine(baseDirectory, value));
+            string rootPrefix = fullRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            if (!string.Equals(fullPath, fullRoot, StringComparison.OrdinalIgnoreCase)
+                && !fullPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new CliException(
+                    "Java source root escapes the repository root: " + value,
+                    ExitCodes.RunInvalid);
+            }
+
+            return NormalizeRelativePath(Path.GetRelativePath(fullRoot, fullPath));
+        }
+
+        private static bool IsGradleEntryPoint(string entryPoint) =>
+            entryPoint.EndsWith("build.gradle", StringComparison.OrdinalIgnoreCase)
+            || entryPoint.EndsWith("build.gradle.kts", StringComparison.OrdinalIgnoreCase);
 
         private static bool HasBothCommands(RepositoryConfig config) =>
             !string.IsNullOrWhiteSpace(config.Build) && !string.IsNullOrWhiteSpace(config.Test);
@@ -351,6 +436,7 @@ namespace RealDiff.Cli
             public string Build { get; init; } = string.Empty;
             public string Test { get; init; } = string.Empty;
             public string[] TestProjects { get; init; } = Array.Empty<string>();
+            public string[] SourceRoots { get; init; } = Array.Empty<string>();
             public string[] IncludeNamespaces { get; init; } = Array.Empty<string>();
             public string[] ExcludeNamespaces { get; init; } = Array.Empty<string>();
             public string Source { get; init; } = string.Empty;

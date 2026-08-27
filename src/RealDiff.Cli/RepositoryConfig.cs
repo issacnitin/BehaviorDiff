@@ -26,6 +26,9 @@ namespace RealDiff.Cli
         [YamlMember(Alias = "test_projects")]
         public List<string> TestProjects { get; set; } = new();
 
+        [YamlMember(Alias = "source_roots")]
+        public List<string> SourceRoots { get; set; } = new();
+
         [YamlMember(Alias = "include_namespaces")]
         public List<string> IncludeNamespaces { get; set; } = new();
 
@@ -196,6 +199,7 @@ namespace RealDiff.Cli
             foreach ((IEnumerable<string> values, string field) in new[]
             {
                 (config.TestProjects, "test_projects"),
+                (config.SourceRoots, "source_roots"),
                 (config.IncludeNamespaces, "include_namespaces"),
                 (config.ExcludeNamespaces, "exclude_namespaces"),
                 (config.Redaction.Names, "redaction.names"),

@@ -14,11 +14,13 @@ final class AgentOptionsTest {
         Map<String, String> environment = new HashMap<>();
         environment.put(AgentOptions.INCLUDE_ENVIRONMENT, "com.example, org.acme");
         environment.put(AgentOptions.EXCLUDE_ENVIRONMENT, "com.example.generated");
+        environment.put(AgentOptions.SOURCE_ROOTS_ENVIRONMENT, "code/main;code/test");
 
         AgentOptions options = AgentOptions.parse(null, environment);
 
         assertEquals(java.util.List.of("com.example", "org.acme"), options.includes());
         assertEquals(java.util.List.of("com.example.generated"), options.excludes());
+        assertEquals(java.util.List.of("code/main", "code/test"), options.sourceRoots());
     }
 
     @Test

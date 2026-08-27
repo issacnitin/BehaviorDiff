@@ -44,9 +44,33 @@ try {
 
     Assert-Language 'dotnet' 'sample.sln' 'dotnet' 'dotnet build sample.sln -c Release --nologo' 'dotnet test -c Release --no-build --nologo'
     Assert-Language 'java' 'pom.xml' 'java' 'mvn --batch-mode --no-transfer-progress package -DskipTests' 'mvn --batch-mode --no-transfer-progress test'
+    Assert-Language 'java-gradle' 'build.gradle' 'java' 'gradlew build -x test' 'gradlew test'
+    Assert-Language 'java-gradle-kts' 'build.gradle.kts' 'java' 'gradlew build -x test' 'gradlew test'
     Assert-Language 'node' 'package.json' 'node' 'npm ci && npm run build --if-present' 'npm test'
     Assert-Language 'go' 'go.mod' 'go' 'go build ./...' 'go test ./...'
     Assert-Language 'rust' 'Cargo.toml' 'rust' 'cargo build' 'cargo test -- --test-threads=1'
+
+    $customJava = Join-Path $work 'java-custom-source-root'
+    New-Item -ItemType Directory -Path (Join-Path $customJava '.realdiff') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $customJava 'code/production/com/example') -Force | Out-Null
+    New-Item -ItemType File -Path (Join-Path $customJava 'build.gradle') -Force | Out-Null
+    'package com.example; public class Subject {}' | Set-Content (Join-Path $customJava 'code/production/com/example/Subject.java')
+    @'
+source_roots:
+    - code/production
+'@ | Set-Content (Join-Path $customJava '.realdiff/config.yml')
+    $customJavaResult = Invoke-Detect $customJava
+    if ($customJavaResult.Exit -ne 0) { throw "custom Java detection exited $($customJavaResult.Exit): $($customJavaResult.Text)" }
+    Assert-Contains $customJavaResult.Text '- code/production' 'custom Java source roots'
+    Assert-Contains $customJavaResult.Text '- com.example' 'custom Java package scope'
+
+    @'
+source_roots:
+    - ../outside
+'@ | Set-Content (Join-Path $customJava '.realdiff/config.yml')
+    $escapingJavaResult = Invoke-Detect $customJava
+    if ($escapingJavaResult.Exit -ne 3) { throw "escaping Java source root exit was $($escapingJavaResult.Exit), expected 3" }
+    Assert-Contains $escapingJavaResult.Text 'Java source root escapes the repository root' 'escaping Java source root refusal'
 
     $monorepo = Join-Path $work 'monorepo'
     New-Item -ItemType Directory -Path (Join-Path $monorepo 'services/web/.realdiff') -Force | Out-Null
@@ -97,7 +121,7 @@ exclude_namespaces:
     Assert-Contains $solutionResult.Text 'Multiple dotnet build entry points' 'multiple-solution refusal'
 
     Write-Host 'Repository config and detection: PASS' -ForegroundColor Green
-    Write-Host '  languages=5 configuredOverrides=7 ambiguityRefusals=2'
+    Write-Host '  languages=7 configuredOverrides=8 ambiguityRefusals=2'
 }
 finally {
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
