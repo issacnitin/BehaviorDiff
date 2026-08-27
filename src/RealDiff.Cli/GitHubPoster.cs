@@ -205,7 +205,8 @@ namespace RealDiff.Cli
                         comment.GetProperty("id").GetInt64(),
                         String(comment, bodyProperty),
                         NullableString(comment, "path"),
-                        NullableInt(comment, "line")));
+                        NullableInt(comment, "line"),
+                        NullableString(comment, "commit_id")));
                 }
 
                 if (pageComments.Length < 100)
@@ -478,7 +479,8 @@ namespace RealDiff.Cli
             ExistingComment? match = existing.FirstOrDefault(comment => HasMarker(comment.Body, marker));
             if (match is not null
                 && string.Equals(match.Path, filePath, StringComparison.Ordinal)
-                && match.Line == line)
+                && match.Line == line
+                && string.Equals(match.CommitId, context.HeadSha, StringComparison.Ordinal))
             {
                 using JsonDocument _ = await Send(
                     client,
@@ -1471,7 +1473,12 @@ namespace RealDiff.Cli
 
         private static string Truncate(string text, int length) => text.Length <= length ? text : text.Substring(0, length);
 
-        private sealed record ExistingComment(long Id, string Body, string? Path = null, int? Line = null);
+        private sealed record ExistingComment(
+            long Id,
+            string Body,
+            string? Path = null,
+            int? Line = null,
+            string? CommitId = null);
 
         private sealed record GitHubContext(int PullRequestNumber, string Repository, string HeadSha, bool IsFork);
 

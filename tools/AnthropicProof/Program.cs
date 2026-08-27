@@ -604,7 +604,14 @@ sealed class GitHubHandler(
                 ? "[]"
                 : JsonSerializer.Serialize(new[]
                 {
-                    new { id = 456, body = existingReviewBody, path = existingReviewPath, line = existingReviewLine },
+                    new
+                    {
+                        id = 456,
+                        body = existingReviewBody,
+                        path = existingReviewPath,
+                        line = existingReviewLine,
+                        commit_id = "stale-head",
+                    },
                 });
         }
         else if (request.Method == HttpMethod.Get && path.EndsWith("/pulls/1/files", StringComparison.Ordinal))
