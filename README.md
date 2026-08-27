@@ -130,7 +130,7 @@ The `v0.4.0` release is exercised by six public sort-stability pull requests. Ea
 | Java | 132 | 117 to 3 (39.0x) | [realdiff-sort-java#1](https://github.com/issacnitin/realdiff-sort-java/pull/1) | [workflow](https://github.com/issacnitin/realdiff-sort-java/actions/workflows/realdiff.yml) |
 | Go | 315 | 9 to 3 (3.0x) | [realdiff-sort-go#1](https://github.com/issacnitin/realdiff-sort-go/pull/1) | [workflow](https://github.com/issacnitin/realdiff-sort-go/actions/workflows/realdiff.yml) |
 | Rust | 312 | 9 to 3 (3.0x) | [realdiff-sort-rust#1](https://github.com/issacnitin/realdiff-sort-rust/pull/1) | [workflow](https://github.com/issacnitin/realdiff-sort-rust/actions/workflows/realdiff.yml) |
-| Python | 319 | 12 to 3 (4.0x) | [realdiff-sort-python#1](https://github.com/issacnitin/realdiff-sort-python/pull/1) | [workflow](https://github.com/issacnitin/realdiff-sort-python/actions/workflows/realdiff.yml) |
+| Python | 310 | 6 to 3 (2.0x) | [realdiff-sort-python#1](https://github.com/issacnitin/realdiff-sort-python/pull/1) | [workflow](https://github.com/issacnitin/realdiff-sort-python/actions/workflows/realdiff.yml) |
 
 Two fresh packaged runs per language produced identical normalized behavioral artifacts. Each hosted workflow also posted exactly one RealDiff PR comment.
 
