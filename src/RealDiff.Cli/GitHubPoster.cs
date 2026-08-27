@@ -86,7 +86,8 @@ namespace RealDiff.Cli
                     anchorFailures,
                     explanations,
                     context.Repository,
-                    context.HeadSha)).ConfigureAwait(false);
+                    context.HeadSha,
+                    patches)).ConfigureAwait(false);
             if (!issueComments.Any(comment => HasMarker(comment.Body, summaryMarker)))
             {
                 issueComments.Add(new ExistingComment(summaryCommentId, summaryMarker));
@@ -147,7 +148,8 @@ namespace RealDiff.Cli
                         anchorFailures,
                         explanations,
                         context.Repository,
-                        context.HeadSha)).ConfigureAwait(false);
+                        context.HeadSha,
+                        patches)).ConfigureAwait(false);
             }
 
             try
@@ -167,7 +169,8 @@ namespace RealDiff.Cli
                             anchorFailures,
                             explanations,
                             context.Repository,
-                            context.HeadSha)).ConfigureAwait(false);
+                            context.HeadSha,
+                            patches)).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
@@ -315,6 +318,7 @@ namespace RealDiff.Cli
             foreach (ChangedFilePatch patch in patches)
             {
                 int? newLine = null;
+                int? hunkStart = null;
                 foreach (string rawLine in patch.Patch.Split('\n'))
                 {
                     string line = rawLine.TrimEnd('\r');
@@ -322,6 +326,7 @@ namespace RealDiff.Cli
                     if (hunk.Success)
                     {
                         newLine = int.Parse(hunk.Groups["line"].Value, CultureInfo.InvariantCulture);
+                        hunkStart = newLine;
                         continue;
                     }
 
@@ -336,6 +341,8 @@ namespace RealDiff.Cli
                         candidates.Add(new CauseAnchor(
                             patch.FilePath,
                             newLine.Value,
+                            newLine.Value,
+                            hunkStart ?? newLine.Value,
                             line.Substring(1).Trim(),
                             MultipleCandidates: false));
                         newLine++;
@@ -347,9 +354,21 @@ namespace RealDiff.Cli
                 }
             }
 
-            return candidates.Count == 0
-                ? null
-                : candidates[0] with { MultipleCandidates = candidates.Count > 1 };
+            if (candidates.Count == 0)
+            {
+                return null;
+            }
+
+            CauseAnchor first = candidates[0];
+            CauseAnchor[] sameHunk = candidates
+                .Where(candidate => candidate.FilePath == first.FilePath
+                    && candidate.HunkStart == first.HunkStart)
+                .ToArray();
+            return first with
+            {
+                EndLine = sameHunk.Max(candidate => candidate.Line),
+                MultipleCandidates = candidates.Count > 1,
+            };
         }
 
         private static string RenderCauseComment(
@@ -534,7 +553,8 @@ namespace RealDiff.Cli
             IReadOnlyList<string> anchorFailures,
             IReadOnlyDictionary<string, ModelExplanation>? explanations = null,
             string? repository = null,
-            string? headSha = null)
+            string? headSha = null,
+            IReadOnlyList<ChangedFilePatch>? patches = null)
         {
             var builder = new StringBuilder();
             string status = String(findings, "status");
@@ -609,8 +629,12 @@ namespace RealDiff.Cli
                     : "## RealDiff: " + covered.Length + " test-covered behavior "
                         + (covered.Length == 1 ? "change" : "changes") + " outside this diff");
                 builder.AppendLine();
-                builder.AppendLine("**" + Code(ShortMember(String(lead, "memberName")))
-                    + " changed, but this PR didn't edit it.**");
+                CauseAnchor? cause = patches is null ? null : FindCauseAnchor(patches);
+                string? causalHeadline = CausalHeadline(lead, cause, repository, headSha);
+                builder.AppendLine(causalHeadline is null
+                    ? "**" + Code(ShortMember(String(lead, "memberName")))
+                        + " changed, but this PR didn't edit it.**"
+                    : "**" + causalHeadline + "**");
                 builder.AppendLine(Int(lead, "untestedCallSiteCount") > 0
                     ? LeadImpact(lead) + " " + UntestedLead(lead)
                     : "Every test that executed this member had an assertion react; this is a test-covered "
@@ -861,6 +885,41 @@ namespace RealDiff.Cli
             }
 
             return untested + " of the " + tests + " tests that executed this did not assert on the change.";
+        }
+
+        private static string? CausalHeadline(
+            JsonElement member,
+            CauseAnchor? cause,
+            string? repository,
+            string? headSha)
+        {
+            if (cause is null
+                || repository is null
+                || headSha is null
+                || NullableString(member, "filePath") is not string effectPath
+                || NullableInt(member, "line") is not int effectLine)
+            {
+                return null;
+            }
+
+            string causeLabel = cause.EndLine == cause.Line
+                ? "Line " + cause.Line + " of " + Code(cause.FilePath)
+                : "Lines " + cause.Line + "-" + cause.EndLine + " of " + Code(cause.FilePath);
+            string causeFragment = cause.EndLine == cause.Line
+                ? "#L" + cause.Line
+                : "#L" + cause.Line + "-L" + cause.EndLine;
+            string effectLabel = "line " + effectLine + " of " + Code(effectPath);
+            string effectUrl = "https://github.com/" + repository + "/blob/" + headSha
+                + "/" + effectPath + "#L" + effectLine;
+            string causeUrl = "https://github.com/" + repository + "/blob/" + headSha
+                + "/" + cause.FilePath + causeFragment;
+            int untested = Int(member, "untestedCallSiteCount");
+            int tests = Int(member, "distinctTestCount");
+            string assertion = untested == tests
+                ? "no test asserts on"
+                : untested + " of " + tests + " tests did not assert on";
+            return "[" + causeLabel + "](" + causeUrl + ") changed the behavior of ["
+                + effectLabel + "](" + effectUrl + "), which " + assertion + ".";
         }
 
         private static string CoverageFooter(
@@ -1388,6 +1447,8 @@ namespace RealDiff.Cli
         private sealed record CauseAnchor(
             string FilePath,
             int Line,
+            int EndLine,
+            int HunkStart,
             string AddedLine,
             bool MultipleCandidates);
 

@@ -13,6 +13,9 @@ if (args.Length != 1 || !File.Exists(args[0]))
 using JsonDocument findings = JsonDocument.Parse(File.ReadAllText(args[0]));
 JsonElement member = findings.RootElement.GetProperty("members").EnumerateArray()
     .First(item => item.GetProperty("attribution").GetString() == "unexpected");
+string effectPath = member.GetProperty("filePath").GetString()
+    ?? throw new InvalidOperationException("unexpected member has no source path");
+int effectLine = member.GetProperty("line").GetInt32();
 var patches = new[]
 {
     new ChangedFilePatch(
@@ -441,7 +444,13 @@ try
     Assert(gitHubHandler.ReviewBody.Contains("This added line is the likely cause", StringComparison.Ordinal),
         "cause comment does not explain its anchor");
     Assert(gitHubHandler.SummaryBody.Contains(
-        "https://github.com/example/repo/blob/proof-head/samples/SampleApp/ShippingCalculator.cs#L10",
+        "[Line 10 of `samples/SampleApp/SettingsParser.cs`](https://github.com/example/repo/blob/proof-head/samples/SampleApp/SettingsParser.cs#L10) changed the behavior of [line "
+            + effectLine + " of `" + effectPath + "`](https://github.com/example/repo/blob/proof-head/"
+            + effectPath + "#L" + effectLine + ")",
+        StringComparison.Ordinal),
+        "summary did not connect linked cause and effect lines");
+    Assert(gitHubHandler.SummaryBody.Contains(
+        "https://github.com/example/repo/blob/proof-head/" + effectPath + "#L" + effectLine,
         StringComparison.Ordinal),
         "summary did not deep-link the unedited source at the PR head");
 
@@ -463,6 +472,10 @@ try
     Assert(noKeyHandler.ReviewLine == 10
         && noKeyHandler.ReviewBody.Contains("several added lines participate", StringComparison.Ordinal),
         "multi-line cause did not anchor on the first addition and identify the hunk-level cause");
+    Assert(noKeyHandler.SummaryBody.Contains(
+        "https://github.com/example/repo/blob/proof-head/samples/SampleApp/SettingsParser.cs#L10-L11",
+        StringComparison.Ordinal),
+        "multi-line cause did not link the changed hunk range");
 }
 finally
 {
@@ -486,7 +499,7 @@ Console.WriteLine("PASS: related frontier evidence requires an exact citation");
 Console.WriteLine("PASS: missing/wrong-case literals and fabricated citations are rejected");
 Console.WriteLine("PASS: raw non-success and malformed responses survive diagnostic validation");
 Console.WriteLine("PASS: deterministic post precedes enrichment and the same comment is patched");
-Console.WriteLine("PASS: cause comment anchors on the changed hunk and summary deep-links unedited source");
+Console.WriteLine("PASS: cause comment anchors on the changed hunk and summary links cause/effect lines");
 Console.WriteLine("PASS: no-key posting never invokes Anthropic");
 Console.WriteLine("PASS: oversized evidence falls back below GitHub's body limit");
 Console.WriteLine("PASS: refused and clean budget fallbacks preserve their verdicts");
