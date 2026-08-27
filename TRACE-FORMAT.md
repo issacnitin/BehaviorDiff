@@ -165,6 +165,8 @@ The member-record count for the module MUST equal `discoveredMembers`. The engin
 | `assembly` | non-empty string | yes | Owning module key. |
 | `method` | non-empty string | yes | Exact `methodFullName` used by events. |
 | `status` | string | yes | `Patched` or `Skipped`. `PatchFailed` and `EnumerationFailed` are legacy values and invalidate a conforming completed run. |
+| `filePath` | repository-relative string | when resolved | Source file containing the member or structural boundary. |
+| `line` | positive integer | when exact | Source line containing the member or structural boundary. |
 | `skipReason` | string | iff skipped | One neutral reason from the table below. |
 | `detail` | string | iff skipped/failure | Language-specific reason, prefixed by language, for example `.NET: ByRefOrPointer`. |
 | `returnKind` | string | yes | Language-specific completion shape used to select synchronous/asynchronous instrumentation. |
@@ -179,7 +181,7 @@ The member-record count for the module MUST equal `discoveredMembers`. The engin
 
 | Neutral value | Meaning |
 | --- | --- |
-| `Unobservable` | A generated/runtime companion is represented by another instrumented source-level member, or observing it would violate runtime safety. It does not create a hidden descendant candidate. |
+| `Unobservable` | Observing the member would violate runtime safety, or the runtime cannot expose an independent callable frame. Structural instances create a hidden descendant candidate and degrade frontier confidence. |
 | `CompilerGenerated` | Compiler-generated callable not represented as an independently attributable source member. |
 | `ExcludedByScope` | Explicit include/exclude or callable-kind policy excluded it. |
 | `UnsupportedShape` | The tracer cannot preserve semantics for this callable shape. |
@@ -194,6 +196,19 @@ The member-record count for the module MUST equal `discoveredMembers`. The engin
 | `ExcludedNamespace`, `PropertyOrOperator` | `ExcludedByScope` |
 | `ByRefOrPointer`, `GenericTypeDefinition`, `GenericDefinition`, `Unresolvable`, `WeaverAsyncNotSupported` | `UnsupportedShape` |
 | `NoBody`, `DeclaredOnSystemType` | `DeclaredExternally` |
+
+Structural boundaries use stable language details so manifests and PR comments explain the cause without changing neutral engine semantics:
+
+| Language detail | Neutral value | Cause |
+| --- | --- | --- |
+| `DotNet: TypeInitializer` | `Unobservable` | A hook under the CLR type-initialization lock can deadlock startup. |
+| `Java: ClassInitializer` | `Unobservable` | A hook under the JVM class-initialization lock can deadlock startup. |
+| `Python: NativeCallable (...)` | `UnsupportedShape` | A native/C callable has no Python frame for `sys.monitoring`; the record identifies its repository call site and no fake event is emitted. |
+| `Rust: MacroExpansionUnavailable` | `UnsupportedShape` | Stable source parsing cannot enter compiler-expanded callable bodies. |
+| `Rust: ConstOrExternFunction` | `UnsupportedShape` | Stable source hooks cannot preserve const evaluation or enter externally owned ABI bodies. |
+| `Rust: UnionValue (...)` | `UnsupportedShape` | Stable rewriting cannot determine an active union field safely. |
+| `Rust: TraitObjectValue (...)` | `UnsupportedShape` | Stable rewriting cannot enumerate dynamic concrete state behind a trait object. |
+| `Rust: DependencyOwnedValue (...)` | `DeclaredExternally` | The rewriter cannot inject structural readers into dependency source. |
 
 ### Digest statistics record
 

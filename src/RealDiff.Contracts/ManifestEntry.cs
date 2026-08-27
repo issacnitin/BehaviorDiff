@@ -41,6 +41,12 @@ namespace RealDiff.Contracts
 
         public PatchStatus Status { get; init; }
 
+        /// <summary>Repository-relative source path when the tracer can resolve one.</summary>
+        public string? FilePath { get; init; }
+
+        /// <summary>One-based source line, or zero when no exact line is available.</summary>
+        public int Line { get; init; }
+
         /// <summary>Language-neutral <see cref="NeutralSkipReason"/> value. Null unless skipped.</summary>
         public string? SkipReason { get; init; }
 

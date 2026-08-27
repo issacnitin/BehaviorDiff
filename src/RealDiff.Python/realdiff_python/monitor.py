@@ -4,7 +4,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from types import CodeType, FrameType
+from types import BuiltinFunctionType, BuiltinMethodType, CodeType, FrameType, MethodDescriptorType, WrapperDescriptorType
 from typing import Callable
 
 
@@ -127,6 +127,17 @@ class Monitor:
             return
         self._observe("unwind", code, exception)
 
+    def called(self, code: CodeType, instruction_offset: int, callable_object: object, arg0: object) -> None:
+        del arg0
+        if not self._is_scoped(code) or type(callable_object) not in (
+            BuiltinFunctionType,
+            BuiltinMethodType,
+            MethodDescriptorType,
+            WrapperDescriptorType,
+        ):
+            return
+        self._observe("native_call", code, (callable_object, instruction_offset))
+
     def _is_scoped(self, code: CodeType) -> bool:
         scoped = self._scoped_codes.get(code)
         if scoped is None:
@@ -163,6 +174,7 @@ def install(
     sys.monitoring.register_callback(TOOL_ID, events.PY_YIELD, monitor.yielded)
     sys.monitoring.register_callback(TOOL_ID, events.RAISE, monitor.raised)
     sys.monitoring.register_callback(TOOL_ID, events.PY_UNWIND, monitor.unwind)
+    sys.monitoring.register_callback(TOOL_ID, events.CALL, monitor.called)
     sys.monitoring.set_events(
         TOOL_ID,
         events.PY_START
@@ -170,7 +182,8 @@ def install(
         | events.PY_RETURN
         | events.PY_YIELD
         | events.RAISE
-        | events.PY_UNWIND,
+        | events.PY_UNWIND
+        | events.CALL,
     )
     _monitor = monitor
     return monitor

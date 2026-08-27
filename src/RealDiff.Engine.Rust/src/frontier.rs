@@ -79,6 +79,8 @@ struct CoverageMember {
     file_path: Option<String>,
     status: String,
     skip_reason: Option<String>,
+    detail: Option<String>,
+    line: Option<i32>,
     source_resolution: Option<String>,
     #[serde(default)]
     is_test_root: bool,
@@ -167,6 +169,16 @@ struct ChangedFileCoverageSummary {
     base_call_count: usize,
     pr_call_count: usize,
     total_call_count: usize,
+    skipped_members: usize,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkippedMemberCoverage {
+    method_full_name: String,
+    skip_reason: String,
+    detail: String,
+    line: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -179,6 +191,8 @@ struct ChangedFileCoverage {
     base_call_count: usize,
     pr_call_count: usize,
     total_call_count: usize,
+    skipped_members: usize,
+    skipped: Vec<SkippedMemberCoverage>,
     interpretation: &'static str,
 }
 
@@ -187,6 +201,72 @@ struct CallIdentity {
     test_id: String,
     process: String,
     call_id: i64,
+}
+
+#[derive(Default)]
+struct SkippedBoundaryIndex {
+    by_declaring_type: HashMap<String, String>,
+    by_file: HashMap<String, String>,
+    file_by_method: HashMap<String, String>,
+}
+
+impl SkippedBoundaryIndex {
+    fn build(members: &[CoverageMember]) -> Self {
+        let mut index = Self::default();
+        for member in members {
+            let Some(method) = member.method_full_name.as_deref() else {
+                continue;
+            };
+            if let Some(file) = member.file_path.as_deref() {
+                index
+                    .file_by_method
+                    .entry(method.to_owned())
+                    .or_insert_with(|| file.to_owned());
+            }
+            if member.status != "Skipped"
+                || member.skip_reason.as_deref() == Some("ExcludedByScope")
+            {
+                continue;
+            }
+            let description = format!(
+                "{} ({}) - {}",
+                method,
+                member.skip_reason.as_deref().unwrap_or("Unobservable"),
+                member
+                    .detail
+                    .as_deref()
+                    .unwrap_or("no language-specific detail")
+            );
+            index
+                .by_declaring_type
+                .entry(declaring_type(method))
+                .or_insert_with(|| description.clone());
+            if let Some(file) = member.file_path.as_deref() {
+                index.by_file.entry(file.to_owned()).or_insert(description);
+            }
+        }
+        index
+    }
+
+    fn boundary_for(&self, method: &str) -> Option<&str> {
+        self.by_declaring_type
+            .get(&declaring_type(method))
+            .or_else(|| {
+                self.file_by_method
+                    .get(method)
+                    .and_then(|file| self.by_file.get(file))
+            })
+            .map(String::as_str)
+    }
+}
+
+fn descendant_skip_reason(index: &SkippedBoundaryIndex, method: &str) -> Option<String> {
+    index.boundary_for(method).map(|skipped| {
+        let declared = declaring_type(method);
+        format!(
+            "DescendantSkipped: {declared} has structural boundary {skipped}, which was never instrumented, so a call to it from this subtree would be invisible"
+        )
+    })
 }
 
 impl CallIdentity {
@@ -296,7 +376,7 @@ pub(crate) fn run(options: &FrontierOptions) -> Result<i32, String> {
         .filter(|member| member.is_test_root)
         .filter_map(|member| member.method_full_name.as_deref())
         .collect::<HashSet<_>>();
-    let mut skipped_by_type = HashMap::<String, String>::new();
+    let skipped_boundaries = SkippedBoundaryIndex::build(&set.coverage.members);
     let mut member_assembly = HashMap::<&str, &str>::new();
     let mut unresolved_members = HashMap::<&str, &str>::new();
     for member in &set.coverage.members {
@@ -304,20 +384,6 @@ pub(crate) fn run(options: &FrontierOptions) -> Result<i32, String> {
             continue;
         };
         member_assembly.entry(method).or_insert(&member.assembly);
-        if member.status == "Skipped" && member.skip_reason.as_deref() != Some("Unobservable") {
-            skipped_by_type.insert(
-                declaring_type(method),
-                format!(
-                    "{}{}",
-                    method,
-                    member
-                        .skip_reason
-                        .as_ref()
-                        .map(|reason| format!(" ({reason})"))
-                        .unwrap_or_default()
-                ),
-            );
-        }
         if let Some(resolution) = member.source_resolution.as_deref() {
             if resolution != "sequencePoints" && resolution != "stateMachine" {
                 unresolved_members.insert(method, resolution);
@@ -415,11 +481,8 @@ pub(crate) fn run(options: &FrontierOptions) -> Result<i32, String> {
             .map(String::as_str)
             .chain(std::iter::once(first.method_full_name.as_str()))
         {
-            let declared = declaring_type(method);
-            if let Some(skipped) = skipped_by_type.get(&declared) {
-                node.downgrade_reasons.push(format!(
-                    "DescendantSkipped: {declared} also declares {skipped}, which was never instrumented, so a call to it from this subtree would be invisible"
-                ));
+            if let Some(reason) = descendant_skip_reason(&skipped_boundaries, method) {
+                node.downgrade_reasons.push(reason);
                 break;
             }
         }
@@ -475,7 +538,12 @@ pub(crate) fn run(options: &FrontierOptions) -> Result<i32, String> {
     for file in changed.iter().take(10) {
         println!("    {file}");
     }
-    let coverage = changed_file_coverage(&changed, &set.call_tree, &set.pr_call_tree);
+    let coverage = changed_file_coverage(
+        &changed,
+        &set.call_tree,
+        &set.pr_call_tree,
+        &set.coverage.members,
+    );
     print_changed_file_coverage(&coverage.files);
     if changed.is_empty() && !nodes.is_empty() {
         refusals.push(format!(
@@ -637,6 +705,7 @@ fn changed_file_coverage(
     changed: &[String],
     base: &[CallNode],
     pr: &[CallNode],
+    members: &[CoverageMember],
 ) -> ChangedFileCoverageReport {
     let files = changed
         .iter()
@@ -664,6 +733,34 @@ fn changed_file_coverage(
             let base_call_count = base_calls.len();
             let pr_call_count = pr_calls.len();
             let total_call_count = base_call_count + pr_call_count;
+            let mut skipped = members
+                .iter()
+                .filter(|member| {
+                    member.status == "Skipped" && member.file_path.as_deref() == Some(file)
+                })
+                .map(|member| SkippedMemberCoverage {
+                    method_full_name: member
+                        .method_full_name
+                        .clone()
+                        .unwrap_or_else(|| "(unknown member)".to_owned()),
+                    skip_reason: member
+                        .skip_reason
+                        .clone()
+                        .unwrap_or_else(|| "Unobservable".to_owned()),
+                    detail: member
+                        .detail
+                        .clone()
+                        .unwrap_or_else(|| "No language-specific detail was recorded".to_owned()),
+                    line: member.line,
+                })
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            skipped.sort_by(|left, right| {
+                left.line
+                    .cmp(&right.line)
+                    .then_with(|| left.method_full_name.cmp(&right.method_full_name))
+            });
             ChangedFileCoverage {
                 file_path: file.clone(),
                 exercised: total_call_count > 0,
@@ -672,6 +769,8 @@ fn changed_file_coverage(
                 base_call_count,
                 pr_call_count,
                 total_call_count,
+                skipped_members: skipped.len(),
+                skipped,
                 interpretation: if total_call_count > 0 {
                     "executed by tests in the representative base or PR run"
                 } else {
@@ -689,6 +788,7 @@ fn changed_file_coverage(
             base_call_count: files.iter().map(|file| file.base_call_count).sum(),
             pr_call_count: files.iter().map(|file| file.pr_call_count).sum(),
             total_call_count: files.iter().map(|file| file.total_call_count).sum(),
+            skipped_members: files.iter().map(|file| file.skipped_members).sum(),
         },
         files,
     }
@@ -720,6 +820,13 @@ fn print_changed_file_coverage(coverage: &[ChangedFileCoverage]) {
     let base_calls: usize = coverage.iter().map(|file| file.base_call_count).sum();
     let pr_calls: usize = coverage.iter().map(|file| file.pr_call_count).sum();
     println!("  total calls             : {total_calls} (base={base_calls} pr={pr_calls})");
+    println!(
+        "  skipped members         : {}",
+        coverage
+            .iter()
+            .map(|file| file.skipped_members)
+            .sum::<usize>()
+    );
     for file in coverage {
         println!(
             "    {}  {}  members={} callSites={} calls={} (base={} pr={}){}",
@@ -850,6 +957,8 @@ mod tests {
             file_path: Some("src/config.go".to_owned()),
             status: "Skipped".to_owned(),
             skip_reason: Some("Unobservable".to_owned()),
+            detail: Some("Go: GenericTemplate".to_owned()),
+            line: Some(7),
             source_resolution: Some("debugInfo".to_owned()),
             is_test_root: false,
         }];
@@ -858,5 +967,120 @@ mod tests {
             &members,
             &["src/config.go".to_owned()]
         ));
+    }
+
+    #[test]
+    fn reports_skipped_members_in_edited_files_with_language_detail() {
+        let members = vec![CoverageMember {
+            method_full_name: Some("Example..cctor()".to_owned()),
+            assembly: "Example".to_owned(),
+            file_path: Some("src/Example.cs".to_owned()),
+            status: "Skipped".to_owned(),
+            skip_reason: Some("Unobservable".to_owned()),
+            detail: Some("DotNet: TypeInitializer".to_owned()),
+            line: Some(4),
+            source_resolution: Some("debugInfo".to_owned()),
+            is_test_root: false,
+        }];
+
+        let coverage = changed_file_coverage(&["src/Example.cs".to_owned()], &[], &[], &members);
+
+        assert_eq!(coverage.summary.skipped_members, 1);
+        assert_eq!(coverage.files[0].skipped_members, 1);
+        assert_eq!(coverage.files[0].skipped[0].skip_reason, "Unobservable");
+        assert_eq!(
+            coverage.files[0].skipped[0].detail,
+            "DotNet: TypeInitializer"
+        );
+    }
+
+    #[test]
+    fn structural_skips_degrade_frontiers_for_all_tracer_method_formats() {
+        let cases = [
+            (
+                "Example.Run()",
+                "Example..cctor()",
+                "src/Example.cs",
+                "DotNet: TypeInitializer",
+            ),
+            (
+                "example.Widget.run()V",
+                "example.Widget.<clinit>()V",
+                "src/Widget.java",
+                "Java: ClassInitializer",
+            ),
+            (
+                "src/subject.js#run",
+                "src/subject.js#generator",
+                "src/subject.js",
+                "Node: GeneratorFunction",
+            ),
+            (
+                "example/src.run",
+                "example/src.genericBoundary",
+                "src/subject.go",
+                "Go: GenericTemplate",
+            ),
+            (
+                "src/lib.rs::run",
+                "src/lib.rs::macro::generated",
+                "src/lib.rs",
+                "Rust: MacroExpansionUnavailable",
+            ),
+            (
+                "src.subject::run",
+                "src.subject::<module>",
+                "src/subject.py",
+                "Python: NativeCallable",
+            ),
+        ];
+
+        for (observed, skipped, file, detail) in cases {
+            let members = vec![
+                CoverageMember {
+                    method_full_name: Some(observed.to_owned()),
+                    assembly: "fixture".to_owned(),
+                    file_path: Some(file.to_owned()),
+                    status: "Patched".to_owned(),
+                    skip_reason: None,
+                    detail: None,
+                    line: Some(1),
+                    source_resolution: Some("debugInfo".to_owned()),
+                    is_test_root: false,
+                },
+                CoverageMember {
+                    method_full_name: Some(skipped.to_owned()),
+                    assembly: "fixture".to_owned(),
+                    file_path: Some(file.to_owned()),
+                    status: "Skipped".to_owned(),
+                    skip_reason: Some("UnsupportedShape".to_owned()),
+                    detail: Some(detail.to_owned()),
+                    line: Some(2),
+                    source_resolution: Some("debugInfo".to_owned()),
+                    is_test_root: false,
+                },
+            ];
+            let reason = descendant_skip_reason(&SkippedBoundaryIndex::build(&members), observed)
+                .unwrap_or_else(|| panic!("no downgrade for {detail}"));
+            assert!(reason.starts_with("DescendantSkipped:"));
+            assert!(reason.contains(detail));
+        }
+
+        let excluded = vec![CoverageMember {
+            method_full_name: Some("src/subject.js#excluded".to_owned()),
+            assembly: "fixture".to_owned(),
+            file_path: Some("src/subject.js".to_owned()),
+            status: "Skipped".to_owned(),
+            skip_reason: Some("ExcludedByScope".to_owned()),
+            detail: Some("Node: ExcludedByScope".to_owned()),
+            line: Some(2),
+            source_resolution: Some("debugInfo".to_owned()),
+            is_test_root: false,
+        }];
+        assert!(descendant_skip_reason(
+            &SkippedBoundaryIndex::build(&excluded),
+            "src/subject.js#run"
+        )
+        .is_none());
     }
 }

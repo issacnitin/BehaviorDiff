@@ -168,6 +168,36 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(1, module["patchedMembers"])
             self.assertEqual(0, module["tracedCalls"])
 
+    def test_native_callable_is_manifest_visible_without_a_fake_event(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root_path = Path(temporary)
+            trace = root_path / "run.ndjson"
+            source = root_path / "src" / "subject.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("def calls_native(value):\n    return len(value)\n", encoding="utf-8")
+            runtime = Runtime(trace, Scope(root_path, (("src",),), ()))
+            install(runtime.on_event, runtime.scope)
+
+            def calls_native(value):
+                return len(value)
+
+            calls_native.__code__ = calls_native.__code__.replace(co_filename=str(source), co_firstlineno=1)
+            self.assertEqual(2, calls_native([1, 2]))
+            uninstall()
+            runtime.close()
+
+            events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+            self.assertFalse(any("::native::" in event["methodFullName"] for event in events))
+            manifest = [
+                json.loads(line)
+                for line in trace.with_name("run.manifest.ndjson").read_text(encoding="utf-8").splitlines()
+            ]
+            native = next(record for record in manifest if "::native::builtins.len@" in record.get("method", ""))
+            self.assertEqual("Skipped", native["status"])
+            self.assertEqual("UnsupportedShape", native["skipReason"])
+            self.assertIn("has no Python frame", native["detail"])
+            self.assertEqual("src/subject.py", native["filePath"])
+
     def test_generators_and_coroutines_emit_only_at_final_completion(self):
         with tempfile.TemporaryDirectory() as temporary:
             root_path = Path(temporary)

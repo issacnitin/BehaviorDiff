@@ -64,7 +64,8 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(42, observed())
 
         self.assertIsInstance(monitor, Monitor)
-        self.assertEqual(["start", "return"], [event[0] for event in events])
+        self.assertIn("native_call", [event[0] for event in events])
+        self.assertEqual(["start", "return"], [event[0] for event in events if event[0] != "native_call"])
 
 
 if __name__ == "__main__":

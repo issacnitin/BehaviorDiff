@@ -240,6 +240,43 @@ final class ClassRewriterTest {
             "\"kind\":\"writer\",\"enqueued\":2,\"written\":1,\"dropped\":1,\"capacity\":1"));
     }
 
+    @Test
+    void classInitializerIsAnExplicitSkippedManifestMember() throws Exception {
+        Path output = repositoryRoot.resolve("module/target/test-classes");
+        Path source = repositoryRoot.resolve("module/src/test/java/io/realdiff/agent/RewriteFixture.java");
+        Files.createDirectories(output);
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "class RewriteFixture {}\n");
+        String name = RewriteFixture.class.getName();
+        String resource = "/" + name.replace('.', '/') + ".class";
+        byte[] bytes;
+        try (InputStream stream = RewriteFixture.class.getResourceAsStream(resource)) {
+            bytes = stream.readAllBytes();
+        }
+        TraceSession session = TraceSession.start(repositoryRoot.resolve("run.ndjson").toString());
+        session.registerClass(
+            "test-classes",
+            name.replace('.', '/'),
+            bytes,
+            false,
+            output,
+            new JavaSourceResolver(repositoryRoot));
+        session.close();
+
+        Path manifest = Files.list(repositoryRoot)
+            .filter(path -> path.getFileName().toString().matches("run\\.\\d+\\.manifest\\.ndjson"))
+            .findFirst()
+            .orElseThrow();
+        String initializer = Files.readAllLines(manifest).stream()
+            .filter(line -> line.contains(".<clinit>"))
+            .findFirst()
+            .orElseThrow();
+        assertTrue(initializer.contains("\"skipReason\":\"Unobservable\""));
+        assertTrue(initializer.contains("\"detail\":\"Java: ClassInitializer\""));
+        assertTrue(initializer.contains("\"filePath\":\"module/src/test/java/io/realdiff/agent/RewriteFixture.java\""));
+        assertTrue(initializer.matches(".*\\\"line\\\":[1-9][0-9]*.*"));
+    }
+
     private static CallFrame enter(String methodFullName) {
         return RuntimeHooks.enter(
             methodFullName,

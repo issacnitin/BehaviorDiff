@@ -211,6 +211,8 @@ final class TraceSession {
                             excluded ? "Java: ExcludedPackage" : initializer ? "Java: ClassInitializer" : harnessConstructor ? "Java: TestClassConstructor" : noBody ? "Java: NoCode" : null,
                             returnKind,
                             roots.getOrDefault(key, false),
+                            resolvedSourcePath,
+                            lines.getOrDefault(key, 0),
                             resolution));
                     }
                 };
@@ -290,6 +292,12 @@ final class TraceSession {
                         if (member.testRoot) {
                             record.append(",\"isTestRoot\":true");
                         }
+                        if (member.filePath != null) {
+                            record.append(",\"filePath\":").append(Json.string(member.filePath));
+                        }
+                        if (member.line > 0) {
+                            record.append(",\"line\":").append(member.line);
+                        }
                         record.append(",\"sourceResolution\":").append(Json.string(member.resolution)).append('}');
                         writeLine(manifest, record.toString());
                     }
@@ -340,6 +348,8 @@ final class TraceSession {
         private final String detail;
         private final String returnKind;
         private final boolean testRoot;
+        private final String filePath;
+        private final int line;
         private final String resolution;
 
         MemberCoverage(
@@ -349,6 +359,8 @@ final class TraceSession {
             String detail,
             String returnKind,
             boolean testRoot,
+            String filePath,
+            int line,
             String resolution) {
             this.method = method;
             this.skipped = skipped;
@@ -356,6 +368,8 @@ final class TraceSession {
             this.detail = detail;
             this.returnKind = returnKind;
             this.testRoot = testRoot;
+            this.filePath = filePath;
+            this.line = line;
             this.resolution = resolution;
         }
     }

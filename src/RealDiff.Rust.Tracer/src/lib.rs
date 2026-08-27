@@ -8,8 +8,9 @@ use std::path::{Path, PathBuf};
 use syn::spanned::Spanned;
 use syn::visit_mut::{self, VisitMut};
 use syn::{
-    parse_quote, Block, Fields, FnArg, GenericArgument, ImplItemFn, Item, ItemEnum, ItemFn,
-    ItemImpl, ItemStruct, ItemTrait, ItemUnion, Pat, PathArguments, ReturnType, TraitItemFn, Type,
+    parse_quote, Block, Fields, FnArg, GenericArgument, ImplItem, ImplItemFn, Item, ItemEnum,
+    ItemFn, ItemImpl, ItemStruct, ItemTrait, ItemUnion, Pat, PathArguments, ReturnType, TraitItem,
+    TraitItemFn, Type,
 };
 use toml_edit::{DocumentMut, InlineTable, Item as TomlItem, Value};
 use walkdir::{DirEntry, WalkDir};
@@ -187,6 +188,12 @@ fn build_cache_entry(
                 let local_types = local_type_names(&syntax.items);
                 let mut instrumenter =
                     ExitHookInstrumenter::new(slash(relative), local_types.clone());
+                inventory_structural_value_boundaries(
+                    &syntax.items,
+                    &slash(relative),
+                    &local_types,
+                    &mut instrumenter,
+                );
                 instrumenter.visit_file_mut(&mut syntax);
                 inventory_macro_boundaries(&syntax.items, &slash(relative), &mut instrumenter);
                 if instrumenter.members.is_empty() {
@@ -765,6 +772,151 @@ fn skipped_type_detail(ty: &Type, generic_names: &HashSet<String>) -> String {
     }
 }
 
+fn inventory_structural_value_boundaries(
+    items: &[Item],
+    relative_path: &str,
+    local_types: &HashSet<String>,
+    instrumenter: &mut ExitHookInstrumenter,
+) {
+    for item in items {
+        match item {
+            Item::Union(item) => instrumenter.add_structural_boundary(
+                item.union_token.span.start().line as u32,
+                &format!("union-{}", item.ident),
+                "UnsupportedShape",
+                "Rust: UnionValue (stable source rewriting cannot observe the active field)",
+            ),
+            Item::Fn(function) => inventory_signature_value_boundaries(
+                &function.sig,
+                relative_path,
+                local_types,
+                instrumenter,
+            ),
+            Item::Impl(item) => {
+                for function in item.items.iter().filter_map(|item| match item {
+                    ImplItem::Fn(function) => Some(function),
+                    _ => None,
+                }) {
+                    inventory_signature_value_boundaries(
+                        &function.sig,
+                        relative_path,
+                        local_types,
+                        instrumenter,
+                    );
+                }
+            }
+            Item::Trait(item) => {
+                for function in item.items.iter().filter_map(|item| match item {
+                    TraitItem::Fn(function) => Some(function),
+                    _ => None,
+                }) {
+                    inventory_signature_value_boundaries(
+                        &function.sig,
+                        relative_path,
+                        local_types,
+                        instrumenter,
+                    );
+                }
+            }
+            Item::Mod(module) => {
+                if let Some((_, nested)) = &module.content {
+                    inventory_structural_value_boundaries(
+                        nested,
+                        relative_path,
+                        local_types,
+                        instrumenter,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn inventory_signature_value_boundaries(
+    signature: &syn::Signature,
+    _relative_path: &str,
+    local_types: &HashSet<String>,
+    instrumenter: &mut ExitHookInstrumenter,
+) {
+    let generic_names = generic_type_names(&signature.generics);
+    for (index, ty) in signature
+        .inputs
+        .iter()
+        .filter_map(|argument| match argument {
+            FnArg::Typed(argument) => Some(argument.ty.as_ref()),
+            FnArg::Receiver(_) => None,
+        })
+        .chain(match &signature.output {
+            ReturnType::Type(_, ty) => Some(ty.as_ref()),
+            ReturnType::Default => None,
+        })
+        .enumerate()
+    {
+        let Some((skip_reason, detail)) =
+            structural_value_boundary(ty, local_types, &generic_names)
+        else {
+            continue;
+        };
+        instrumenter.add_structural_boundary(
+            ty.span().start().line as u32,
+            &format!("{}-{index}", signature.ident),
+            skip_reason,
+            detail,
+        );
+    }
+}
+
+fn structural_value_boundary<'a>(
+    ty: &Type,
+    local_types: &HashSet<String>,
+    generic_names: &HashSet<String>,
+) -> Option<(&'static str, &'a str)> {
+    if contains_trait_object(ty) {
+        return Some((
+            "UnsupportedShape",
+            "Rust: TraitObjectValue (stable source rewriting cannot enumerate dynamic concrete state)",
+        ));
+    }
+    if exact_type(ty, local_types, generic_names)
+        || generic_names.iter().any(|name| {
+            ty.to_token_stream()
+                .to_string()
+                .split(|character: char| !character.is_alphanumeric() && character != '_')
+                .any(|part| part == name)
+        })
+    {
+        return None;
+    }
+    Some((
+        "DeclaredExternally",
+        "Rust: DependencyOwnedValue (stable source rewriting cannot inject readers into dependency source)",
+    ))
+}
+
+fn contains_trait_object(ty: &Type) -> bool {
+    match ty {
+        Type::TraitObject(_) => true,
+        Type::Reference(value) => contains_trait_object(&value.elem),
+        Type::Slice(value) => contains_trait_object(&value.elem),
+        Type::Array(value) => contains_trait_object(&value.elem),
+        Type::Tuple(value) => value.elems.iter().any(contains_trait_object),
+        Type::Paren(value) => contains_trait_object(&value.elem),
+        Type::Group(value) => contains_trait_object(&value.elem),
+        Type::Path(value) => value.path.segments.iter().any(|segment| match &segment.arguments {
+            PathArguments::AngleBracketed(arguments) => arguments.args.iter().any(|argument| {
+                matches!(argument, GenericArgument::Type(ty) if contains_trait_object(ty))
+            }),
+            PathArguments::Parenthesized(arguments) => {
+                arguments.inputs.iter().any(contains_trait_object)
+                    || matches!(&arguments.output, ReturnType::Type(_, ty) if contains_trait_object(ty))
+            }
+            PathArguments::None => false,
+        }),
+        _ => false,
+    }
+}
+
 struct ExitHookInstrumenter {
     relative_path: String,
     context: Option<String>,
@@ -786,6 +938,21 @@ impl ExitHookInstrumenter {
             skipped: 0,
             members: Vec::new(),
         }
+    }
+
+    fn add_structural_boundary(&mut self, line: u32, label: &str, skip_reason: &str, detail: &str) {
+        self.members.push(OriginMember {
+            method: format!("{}::boundary::{line}:{label}", self.relative_path),
+            file_path: self.relative_path.clone(),
+            line,
+            status: "Skipped".to_owned(),
+            skip_reason: Some(skip_reason.to_owned()),
+            detail: Some(detail.to_owned()),
+            return_kind: "boundary".to_owned(),
+            is_test_root: false,
+            generic_template: false,
+        });
+        self.skipped += 1;
     }
 
     fn instrument(&mut self, signature: &syn::Signature, block: &mut Block, is_test_root: bool) {
@@ -970,9 +1137,7 @@ fn return_capture(
     match output {
         ReturnType::Default => quote::quote!(None),
         ReturnType::Type(_, ty) if exact_type(ty, local_types, generic_names) => {
-            quote::quote!(Some(::realdiff_rust_runtime::capture(
-                &__realdiff_result
-            )))
+            quote::quote!(Some(::realdiff_rust_runtime::capture(&__realdiff_result)))
         }
         ReturnType::Type(_, ty) => {
             let detail = skipped_type_detail(ty, generic_names);
@@ -1188,15 +1353,9 @@ mod tests {
         assert_eq!(first.source_files, 2);
         assert_eq!(first.rust_files, 1);
         assert_eq!(fs::read(source.join("src/lib.rs")).unwrap(), before);
-        assert!(first
-            .output
-            .join(".realdiff-rust-origin.json")
-            .is_file());
+        assert!(first.output.join(".realdiff-rust-origin.json").is_file());
         assert!(first.output.join("src/lib.rs").is_file());
-        assert!(first
-            .output
-            .join(".realdiff/runtime/src/lib.rs")
-            .is_file());
+        assert!(first.output.join(".realdiff/runtime/src/lib.rs").is_file());
         let rewritten = fs::read_to_string(first.output.join("src/lib.rs")).unwrap();
         assert!(rewritten.contains("realdiff_rust_runtime::enter"));
         assert!(rewritten.contains("impl ::realdiff_rust_runtime::Canonicalize"));
@@ -1215,6 +1374,58 @@ mod tests {
         fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
         let error = rewrite(&root, &root.join("cache")).unwrap_err();
         assert!(error.contains("outside the source tree"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rewrite_inventories_structural_boundaries_without_execution() {
+        let root = std::env::temp_dir().join(format!(
+            "realdiff-rust-structural-test-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        let source = root.join("source");
+        let cache = root.join("cache");
+        fs::create_dir_all(source.join("src")).unwrap();
+        fs::write(
+            source.join("Cargo.toml"),
+            "[package]\nname='structural-fixture'\nversion='0.1.0'\nedition='2021'\n",
+        )
+        .unwrap();
+        fs::write(
+            source.join("src/lib.rs"),
+            r#"
+external_macro!();
+union Choice { integer: i32, floating: f32 }
+trait Service {}
+pub const fn constant() -> i32 { 1 }
+pub extern "C" fn foreign() -> i32 { 2 }
+pub fn trait_value(value: Box<dyn Service>) { let _ = value; }
+pub fn dependency_value(value: dependency::Owned) { let _ = value; }
+"#,
+        )
+        .unwrap();
+
+        let report = rewrite(&source, &cache).unwrap();
+        let manifest: OriginManifest =
+            serde_json::from_slice(&fs::read(report.output.join(ORIGIN_MANIFEST)).unwrap())
+                .unwrap();
+        let details = manifest
+            .members
+            .iter()
+            .filter(|member| member.status == "Skipped")
+            .filter_map(|member| member.detail.as_deref())
+            .collect::<HashSet<_>>();
+
+        for expected in [
+            "Rust: MacroExpansionUnavailable",
+            "Rust: ConstOrExternFunction",
+            "Rust: UnionValue (stable source rewriting cannot observe the active field)",
+            "Rust: TraitObjectValue (stable source rewriting cannot enumerate dynamic concrete state)",
+            "Rust: DependencyOwnedValue (stable source rewriting cannot inject readers into dependency source)",
+        ] {
+            assert!(details.contains(expected), "missing {expected}: {details:?}");
+        }
         fs::remove_dir_all(root).unwrap();
     }
 }

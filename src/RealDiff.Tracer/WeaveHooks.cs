@@ -132,6 +132,8 @@ namespace RealDiff.Tracer
                     Assembly = coverage.Name,
                     MethodFullName = fullName,
                     Status = PatchStatus.Patched,
+                    FilePath = filePath,
+                    Line = line,
                     ReturnKind = ((ReturnKind)returnKind).ToString(),
                     IsTestRoot = isTestRoot,
                     SourceResolution = sourceResolution,
@@ -160,6 +162,8 @@ namespace RealDiff.Tracer
             string detail,
             string returnKind,
             bool isTestRoot,
+            string? filePath,
+            int line,
             string sourceResolution)
         {
             lock (s_gate)
@@ -178,6 +182,8 @@ namespace RealDiff.Tracer
                     Status = PatchStatus.Skipped,
                     SkipReason = skipReason,
                     Detail = detail,
+                    FilePath = filePath,
+                    Line = line,
                     ReturnKind = returnKind,
                     IsTestRoot = isTestRoot,
                     SourceResolution = sourceResolution,

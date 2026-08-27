@@ -91,6 +91,43 @@ class Runtime:
                 self._complete(frame, return_value=value)
             elif event == "unwind":
                 self._complete(frame, exception=value)
+            elif event == "native_call":
+                self._record_native_boundary(code, value)
+
+    def _record_native_boundary(self, caller: CodeType, value: object | None) -> None:
+        if not isinstance(value, tuple) or len(value) != 2:
+            return
+        callable_object, instruction_offset = value
+        file_path = self.scope.relative_path(caller)
+        if file_path is None:
+            return
+        try:
+            name = object.__getattribute__(callable_object, "__qualname__")
+            owner = object.__getattribute__(callable_object, "__module__") or "builtins"
+        except (AttributeError, TypeError):
+            name = type(callable_object).__qualname__
+            owner = type(callable_object).__module__
+        line = caller.co_firstlineno
+        if isinstance(instruction_offset, int):
+            for start, end, candidate in caller.co_lines():
+                if start <= instruction_offset < end and candidate is not None:
+                    line = candidate
+                    break
+        module = _module_name(file_path)
+        method = f"{module}::native::{owner}.{name}@{line}"
+        self._members.setdefault(
+            method,
+            Member(
+                module,
+                method,
+                file_path,
+                line,
+                "Skipped",
+                "Native",
+                "UnsupportedShape",
+                f"Python: NativeCallable ({owner}.{name} has no Python frame)",
+            ),
+        )
 
     def _discover_source_members(self) -> None:
         for source in sorted(self.scope.root.rglob("*.py")):

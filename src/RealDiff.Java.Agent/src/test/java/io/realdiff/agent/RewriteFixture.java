@@ -1,6 +1,8 @@
 package io.realdiff.agent;
 
 final class RewriteFixture {
+    static final Object INITIALIZED = new Object();
+
     int normal(int value) {
         return value + 1;
     }

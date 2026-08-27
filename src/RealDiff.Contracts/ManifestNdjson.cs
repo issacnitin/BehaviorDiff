@@ -122,6 +122,8 @@ namespace RealDiff.Contracts
         public const string AssemblyField = "assembly";
         public const string MethodFullNameField = "method";
         public const string StatusField = "status";
+        public const string FilePathField = "filePath";
+        public const string LineField = "line";
         public const string SkipReasonField = "skipReason";
         public const string ReturnKindField = "returnKind";
         public const string IsTestRootField = "isTestRoot";
@@ -178,6 +180,16 @@ namespace RealDiff.Contracts
             }
 
             AppendString(builder, StatusField, entry.Status.ToString(), first: false);
+
+            if (entry.FilePath != null)
+            {
+                AppendString(builder, FilePathField, entry.FilePath, first: false);
+            }
+
+            if (entry.Line > 0)
+            {
+                AppendNumber(builder, LineField, entry.Line, first: false);
+            }
 
             if (entry.SkipReason != null)
             {
@@ -465,6 +477,8 @@ namespace RealDiff.Contracts
                 Assembly = assembly!,
                 MethodFullName = GetString(fields, MethodFullNameField),
                 Status = status,
+                FilePath = GetString(fields, FilePathField),
+                Line = (int)(GetInt64(fields, LineField) ?? 0),
                 SkipReason = GetString(fields, SkipReasonField),
                 ReturnKind = GetString(fields, ReturnKindField),
                 IsTestRoot = GetBoolean(fields, IsTestRootField),

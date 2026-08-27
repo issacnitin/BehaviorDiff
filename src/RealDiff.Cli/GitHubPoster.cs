@@ -634,6 +634,7 @@ namespace RealDiff.Cli
                 builder.AppendLine(CoverageFooter(findings, lead, repository, headSha));
             }
 
+            AppendUnobservedBoundaries(builder, findings);
             AppendCommentPolicy(builder, findings);
             AppendBaselinePolicy(builder, findings, repository, headSha);
             builder.AppendLine();
@@ -879,6 +880,42 @@ namespace RealDiff.Cli
                     : Code(source);
             return "_" + Int(coverage, "exercisedEditedFiles") + " of " + Int(coverage, "editedFiles")
                 + " edited files exercised. " + renderedSource + "._";
+        }
+
+        private static void AppendUnobservedBoundaries(StringBuilder builder, JsonElement findings)
+        {
+            if (!findings.TryGetProperty("coverage", out JsonElement coverage)
+                || !coverage.TryGetProperty("files", out JsonElement files))
+            {
+                return;
+            }
+
+            var skipped = files.EnumerateArray()
+                .Where(file => file.TryGetProperty("skipped", out JsonElement members)
+                    && members.ValueKind == JsonValueKind.Array)
+                .SelectMany(file => file.GetProperty("skipped").EnumerateArray()
+                    .Select(member => new { File = String(file, "filePath"), Member = member }))
+                .ToArray();
+            if (skipped.Length == 0)
+            {
+                return;
+            }
+
+            builder.AppendLine();
+            builder.AppendLine("**" + skipped.Length + (skipped.Length == 1
+                ? " member in this diff could not be observed.**"
+                : " members in this diff could not be observed.**"));
+            foreach (var group in skipped.GroupBy(
+                item => new
+                {
+                    item.File,
+                    Reason = String(item.Member, "skipReason"),
+                    Detail = String(item.Member, "detail"),
+                }))
+            {
+                builder.AppendLine("- " + Code(group.Key.File) + ": " + group.Count() + " × "
+                    + Code(group.Key.Reason) + " - " + Escape(group.Key.Detail) + ".");
+            }
         }
 
         private static void AppendBaselinePolicy(
