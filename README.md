@@ -33,7 +33,7 @@ flowchart LR
 
 [`TRACE-FORMAT.md`](TRACE-FORMAT.md) is the contract between tracers and the engine. The maintained .NET, Java, Node, Go, Rust, and Python gates apply the same conformance rules: identical method sets, per-key event counts and entry ordinals, source tripwires, digest proofs, and zero engine divergences from non-empty runs.
 
-> Status: early preview. The unified CLI detects .NET, Maven/Gradle Java, npm Node, Go modules, Cargo Rust, and Python 3.12+ repositories from conventional root markers.
+> Status: early preview. The unified CLI detects .NET, Maven/Gradle Java, npm/pnpm/Yarn/Bun Node, Go modules, Cargo Rust, and Python 3.12+ repositories from conventional root markers.
 
 ## Supported languages
 
@@ -41,7 +41,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | .NET 8 | Mono.Cecil build-time IL weaving | xUnit and portable PDBs | Properties, events, and operators are policy exclusions. Type initializers are structurally unobservable because hooks run under the CLR type-initialization lock and can deadlock startup. |
 | Java | `java.lang.instrument` agent with ASM | Maven/Gradle, JUnit/TestNG annotations, inferred or configured source roots | Gradle source-set inference covers literal `srcDir`/`srcDirs` declarations; dynamic source-set configuration requires `source_roots`. Collection shape rules require `java.util` module access. Class initializers are structurally unobservable because hooks run under the JVM class-initialization lock and can deadlock startup. |
-| Node / TypeScript | CommonJS require hook and ESM loader with Babel | npm, direct JavaScript locations, TypeScript source maps, Jest/Vitest adapters | npm/package-lock only; workers are out of scope; generators and unsupported callables are skipped. |
+| Node / TypeScript | CommonJS require hook and ESM loader with Babel | npm, pnpm, Yarn Classic/Berry, Bun, direct JavaScript locations, TypeScript source maps, Jest/Vitest adapters | Exactly one supported lockfile is required; workers are out of scope; generators and unsupported callables are skipped. |
 | Go | Stable module-aware AST rewriting into a build cache | `go test`, original `.go` parser positions | Dynamic interface/function boundaries and unrewritten goroutine boundaries are explicit skips. |
 | Rust | Stable `syn`/`quote` rewriting into a SHA-256 build cache | `cargo test`, structural `#[test]` roots, original `.rs` parser positions | Macro expansions, extern/const callables, unions, trait objects, and dependency-owned values are structurally unreachable because stable source rewriting cannot enter expanded/compiler-owned code or inject readers into dependency source. The MIR prototype emitted zero runtime events. |
 | Python 3.12+ | PEP 669 `sys.monitoring` attached at process start; no build, bytecode weaving, or AST rewriting | pytest and unittest structural roots; `co_filename`/`co_firstlineno`; source AST inventory | Native/C callables are structurally unobservable because they have no Python frame for `sys.monitoring`; synthetic code without repository source and module/class setup bodies are explicit unsupported boundaries. Python 3.11 and older are refused; there is no `sys.settrace` fallback. |
@@ -96,7 +96,7 @@ The edited helper is in `Infrastructure.Collections`; the observed effect is in 
 
 ## Five-minute .NET demo
 
-Prerequisites for this .NET demo: Git, .NET 8 SDK, and PowerShell 7. Java analysis additionally requires a JDK and the repository's Maven/Gradle wrapper or corresponding system tool; Node analysis requires Node.js and npm.
+Prerequisites for this .NET demo: Git, .NET 8 SDK, and PowerShell 7. Java analysis additionally requires a JDK and the repository's Maven/Gradle wrapper or corresponding system tool; Node analysis requires Node.js and the package manager selected by its lockfile.
 
 ```powershell
 git clone https://github.com/issacnitin/RealDiff.git
@@ -264,7 +264,7 @@ realdiff C:\src\java-service --base origin/main --pr HEAD
 
 ### Node and TypeScript
 
-Prerequisites: Node.js, npm, `package-lock.json`, and a test script. TypeScript must emit usable source maps. Jest/Vitest callbacks must use the included adapters so the tracer can open structural test roots; an insufficiently correlated run is refused.
+Prerequisites: Node.js, a test script, and exactly one of `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, or legacy `bun.lockb`. The corresponding npm, pnpm, Yarn, or Bun executable must be on `PATH`. Installs are frozen (`npm ci`, pnpm/Yarn Classic/Bun `--frozen-lockfile`, or Yarn Berry `--immutable` when `.yarnrc.yml` is present), and the base and PR revisions must select the same manager. TypeScript must emit usable source maps. Jest/Vitest callbacks must use the included adapters so the tracer can open structural test roots; an insufficiently correlated run is refused.
 
 ```powershell
 realdiff C:\src\node-service --base origin/main --pr HEAD
@@ -334,7 +334,7 @@ Configuration overrides inference field by field; detection fills fields left un
 
 The effective build and test commands run unchanged for both base and PR revisions. Custom tests do not replace instrumentation: .NET receives the woven/injected environment, Java receives the javaagent through `JAVA_TOOL_OPTIONS`, Node receives the loader/hooks through `NODE_OPTIONS`, and Go/Rust tests execute in their rewritten caches. A command that exits successfully but produces zero trace events is refused with exit `3` and reports the command and trace/manifest counts.
 
-Automatic detection recognizes conventional root or unambiguous nested `.sln`/`.csproj`, Java `pom.xml`/`build.gradle`/`build.gradle.kts`, npm `package.json`, Go `go.mod`, Cargo `Cargo.toml`, and Python `pyproject.toml`/`setup.py`/`requirements.txt` entry points. Java execution prefers `mvnw`/`gradlew` and falls back to Maven/Gradle on `PATH`; Node execution requires npm and `package-lock.json`. Mixed-language repositories, monorepos, and multiple entry points are refused rather than guessed; set `language` and `workdir` (plus both commands when the language normally has a build step and no conventional entry point exists) to resolve them.
+Automatic detection recognizes conventional root or unambiguous nested `.sln`/`.csproj`, Java `pom.xml`/`build.gradle`/`build.gradle.kts`, Node `package.json`, Go `go.mod`, Cargo `Cargo.toml`, and Python `pyproject.toml`/`setup.py`/`requirements.txt` entry points. Java execution prefers `mvnw`/`gradlew` and falls back to Maven/Gradle on `PATH`; Node execution selects npm, pnpm, Yarn, or Bun from its single lockfile and refuses missing or ambiguous lockfiles. Mixed-language repositories, monorepos, and multiple entry points are refused rather than guessed; set `language` and `workdir` (plus both commands when the language normally has a build step and no conventional entry point exists) to resolve them.
 
 ### Base trace cache
 

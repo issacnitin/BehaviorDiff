@@ -138,10 +138,10 @@ namespace RealDiff.Cli
                 WorkDirectory = workDirectory,
                 Workdir = Relative(root, workDirectory),
                 BuildCommand = string.IsNullOrWhiteSpace(config.Value.Build)
-                    ? DefaultBuild(language, evidence)
+                    ? DefaultBuild(language, evidence, workDirectory)
                     : config.Value.Build!,
                 TestCommand = string.IsNullOrWhiteSpace(config.Value.Test)
-                    ? DefaultTest(language, evidence, testProjects)
+                    ? DefaultTest(language, evidence, workDirectory, testProjects)
                     : config.Value.Test!,
                 TestProjects = testProjects,
                 SourceRoots = sourceRoots,
@@ -284,30 +284,46 @@ namespace RealDiff.Cli
             return new[] { Relative(repositoryRoot, workDirectory) };
         }
 
-        private static string DefaultBuild(RepositoryLanguage language, string entryPoint) => language switch
+        private static string DefaultBuild(
+            RepositoryLanguage language,
+            string entryPoint,
+            string workDirectory) => language switch
         {
             RepositoryLanguage.DotNet => "dotnet build " + Quote(entryPoint) + " -c Release --nologo",
             RepositoryLanguage.Java when IsGradleEntryPoint(entryPoint) => "gradlew build -x test",
             RepositoryLanguage.Java => "mvn --batch-mode --no-transfer-progress package -DskipTests",
-            RepositoryLanguage.Node => "npm ci && npm run build --if-present",
+            RepositoryLanguage.Node => DefaultNodeBuild(workDirectory),
             RepositoryLanguage.Go => "go build ./...",
             RepositoryLanguage.Rust => "cargo build",
             RepositoryLanguage.Python => string.Empty,
             _ => string.Empty,
         };
 
-        private static string DefaultTest(RepositoryLanguage language, string entryPoint, string[] projects) => language switch
+        private static string DefaultTest(
+            RepositoryLanguage language,
+            string entryPoint,
+            string workDirectory,
+            string[] projects) => language switch
         {
             RepositoryLanguage.DotNet when projects.Length > 0 => "dotnet test " + string.Join(" ", projects.Select(Quote)) + " -c Release --no-build --nologo",
             RepositoryLanguage.DotNet => "dotnet test -c Release --no-build --nologo",
             RepositoryLanguage.Java when IsGradleEntryPoint(entryPoint) => "gradlew test",
             RepositoryLanguage.Java => "mvn --batch-mode --no-transfer-progress test",
-            RepositoryLanguage.Node => "npm test",
+            RepositoryLanguage.Node => (NodePackageManagers.TryDetect(workDirectory) ?? "npm") + " run test",
             RepositoryLanguage.Go => "go test ./...",
             RepositoryLanguage.Rust => "cargo test -- --test-threads=1",
             RepositoryLanguage.Python => "python -m pytest",
             _ => string.Empty,
         };
+
+        private static string DefaultNodeBuild(string workDirectory)
+        {
+            string manager = NodePackageManagers.TryDetect(workDirectory) ?? "npm";
+            string install = NodePackageManagers.InstallCommand(manager, workDirectory);
+            return NodePackageManagers.HasScript(workDirectory, "build")
+                ? install + " && " + manager + " run build"
+                : install;
+        }
 
         private static string[] InferJavaSourceRoots(
             string repositoryRoot,

@@ -38,6 +38,23 @@ function Assert-Language([string]$name, [string]$marker, [string]$expected, [str
     Assert-Contains $result.Text 'source: auto-detection' "$name detection"
 }
 
+function Assert-NodeManager(
+    [string]$name,
+    [string]$lockfile,
+    [string]$build,
+    [string]$test,
+    [switch]$YarnBerry) {
+    $directory = Join-Path $work $name
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    '{"scripts":{"build":"node build.js","test":"node --test"}}' | Set-Content (Join-Path $directory 'package.json')
+    New-Item -ItemType File -Path (Join-Path $directory $lockfile) -Force | Out-Null
+    if ($YarnBerry) { New-Item -ItemType File -Path (Join-Path $directory '.yarnrc.yml') -Force | Out-Null }
+    $result = Invoke-Detect $directory
+    if ($result.Exit -ne 0) { throw "$name detection exited $($result.Exit): $($result.Text)" }
+    Assert-Contains $result.Text "build: $build" "$name detection"
+    Assert-Contains $result.Text "test: $test" "$name detection"
+}
+
 try {
     & dotnet build $project -c Release --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw 'CLI build failed' }
@@ -46,9 +63,34 @@ try {
     Assert-Language 'java' 'pom.xml' 'java' 'mvn --batch-mode --no-transfer-progress package -DskipTests' 'mvn --batch-mode --no-transfer-progress test'
     Assert-Language 'java-gradle' 'build.gradle' 'java' 'gradlew build -x test' 'gradlew test'
     Assert-Language 'java-gradle-kts' 'build.gradle.kts' 'java' 'gradlew build -x test' 'gradlew test'
-    Assert-Language 'node' 'package.json' 'node' 'npm ci && npm run build --if-present' 'npm test'
+    Assert-Language 'node' 'package.json' 'node' 'npm ci' 'npm run test'
     Assert-Language 'go' 'go.mod' 'go' 'go build ./...' 'go test ./...'
     Assert-Language 'rust' 'Cargo.toml' 'rust' 'cargo build' 'cargo test -- --test-threads=1'
+
+    Assert-NodeManager 'node-npm' 'package-lock.json' 'npm ci && npm run build' 'npm run test'
+    Assert-NodeManager 'node-pnpm' 'pnpm-lock.yaml' 'pnpm install --frozen-lockfile && pnpm run build' 'pnpm run test'
+    Assert-NodeManager 'node-yarn-classic' 'yarn.lock' 'yarn install --frozen-lockfile && yarn run build' 'yarn run test'
+    Assert-NodeManager 'node-yarn-berry' 'yarn.lock' 'yarn install --immutable && yarn run build' 'yarn run test' -YarnBerry
+    Assert-NodeManager 'node-bun' 'bun.lock' 'bun install --frozen-lockfile && bun run build' 'bun run test'
+    Assert-NodeManager 'node-bun-legacy' 'bun.lockb' 'bun install --frozen-lockfile && bun run build' 'bun run test'
+
+    $conflictingNode = Join-Path $work 'node-conflicting-locks'
+    New-Item -ItemType Directory -Path $conflictingNode -Force | Out-Null
+    '{}' | Set-Content (Join-Path $conflictingNode 'package.json')
+    New-Item -ItemType File -Path (Join-Path $conflictingNode 'package-lock.json') -Force | Out-Null
+    New-Item -ItemType File -Path (Join-Path $conflictingNode 'pnpm-lock.yaml') -Force | Out-Null
+    $conflictingNodeResult = Invoke-Detect $conflictingNode
+    if ($conflictingNodeResult.Exit -ne 3) { throw "conflicting Node lockfile exit was $($conflictingNodeResult.Exit), expected 3" }
+    Assert-Contains $conflictingNodeResult.Text 'Multiple Node lockfiles were detected' 'conflicting Node lockfile refusal'
+
+    $conflictingBun = Join-Path $work 'node-conflicting-bun-locks'
+    New-Item -ItemType Directory -Path $conflictingBun -Force | Out-Null
+    '{}' | Set-Content (Join-Path $conflictingBun 'package.json')
+    New-Item -ItemType File -Path (Join-Path $conflictingBun 'bun.lock') -Force | Out-Null
+    New-Item -ItemType File -Path (Join-Path $conflictingBun 'bun.lockb') -Force | Out-Null
+    $conflictingBunResult = Invoke-Detect $conflictingBun
+    if ($conflictingBunResult.Exit -ne 3) { throw "conflicting Bun lockfile exit was $($conflictingBunResult.Exit), expected 3" }
+    Assert-Contains $conflictingBunResult.Text 'Multiple Node lockfiles were detected' 'conflicting Bun lockfile refusal'
 
     $customJava = Join-Path $work 'java-custom-source-root'
     New-Item -ItemType Directory -Path (Join-Path $customJava '.realdiff') -Force | Out-Null
@@ -121,7 +163,7 @@ exclude_namespaces:
     Assert-Contains $solutionResult.Text 'Multiple dotnet build entry points' 'multiple-solution refusal'
 
     Write-Host 'Repository config and detection: PASS' -ForegroundColor Green
-    Write-Host '  languages=7 configuredOverrides=8 ambiguityRefusals=2'
+    Write-Host '  languages=7 nodeManagers=6 configuredOverrides=8 ambiguityRefusals=4'
 }
 finally {
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue

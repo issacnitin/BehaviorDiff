@@ -142,17 +142,10 @@ namespace RealDiff.Cli
             Console.WriteLine();
             Console.WriteLine("=== 2. Node clean build ===");
             string baseDirectory = Path.GetDirectoryName(detection.EntryPoint)!;
-            string manager = DetectNodePackageManager(baseDirectory);
-            if (manager != "npm")
-            {
-                throw new CliException(
-                    "Detected " + manager + " from " + LockfileName(manager)
-                    + ", but this RealDiff version supports npm/package-lock.json only.",
-                    ExitCodes.RunInvalid);
-            }
+            string manager = NodePackageManagers.Detect(baseDirectory);
 
             if (detection.HasCustomBuild) RunConfiguredBuild("base", detection);
-            else BuildNode("base", baseDirectory);
+            else BuildNode("base", baseDirectory, manager);
             string scope = string.Join(";", detection.IncludeNamespaces);
             string tracer = ResolveNodeTracer();
             var key = new TraceCacheKey(
@@ -168,9 +161,9 @@ namespace RealDiff.Cli
             Console.WriteLine();
             Console.WriteLine("=== 3. Node base trace runs ===");
             var stopwatch = Stopwatch.StartNew();
-            string base1 = RunNodeTests("base_run1", detection, baseTree, scope, tracer);
-            RunNodeTests("base_run2", detection, baseTree, scope, tracer);
-            RunNodeTests("base_run3", detection, baseTree, scope, tracer);
+            string base1 = RunNodeTests("base_run1", detection, baseTree, manager, scope, tracer);
+            RunNodeTests("base_run2", detection, baseTree, manager, scope, tracer);
+            RunNodeTests("base_run3", detection, baseTree, manager, scope, tracer);
             Pipeline.AssertTestIdsPresent(base1);
             stopwatch.Stop();
             _cache.Store(key, baseTree, stopwatch.ElapsedMilliseconds);
@@ -255,8 +248,8 @@ namespace RealDiff.Cli
             var buildStopwatch = Stopwatch.StartNew();
             string baseDirectory = Path.GetDirectoryName(baseDetection.EntryPoint)!;
             string prDirectory = Path.GetDirectoryName(prDetection.EntryPoint)!;
-            string baseManager = DetectNodePackageManager(baseDirectory);
-            string prManager = DetectNodePackageManager(prDirectory);
+            string baseManager = NodePackageManagers.Detect(baseDirectory);
+            string prManager = NodePackageManagers.Detect(prDirectory);
             if (!string.Equals(baseManager, prManager, StringComparison.Ordinal))
             {
                 throw new CliException(
@@ -265,18 +258,10 @@ namespace RealDiff.Cli
                     ExitCodes.RunInvalid);
             }
 
-            if (baseManager != "npm")
-            {
-                throw new CliException(
-                    "Detected " + baseManager + " from " + LockfileName(baseManager)
-                    + ", but this RealDiff version supports npm/package-lock.json only.",
-                    ExitCodes.RunInvalid);
-            }
-
             if (baseDetection.HasCustomBuild) RunConfiguredBuild("base", baseDetection);
-            else BuildNode("base", baseDirectory);
+            else BuildNode("base", baseDirectory, baseManager);
             if (prDetection.HasCustomBuild) RunConfiguredBuild("pr", prDetection);
-            else BuildNode("pr", prDirectory);
+            else BuildNode("pr", prDirectory, prManager);
             buildStopwatch.Stop();
             _timings.BuildMilliseconds += buildStopwatch.ElapsedMilliseconds;
 
@@ -310,9 +295,9 @@ namespace RealDiff.Cli
             else
             {
                 var stopwatch = Stopwatch.StartNew();
-                base1 = RunNodeTests("base_run1", baseDetection, baseTree, scope, tracer);
-                base2 = RunNodeTests("base_run2", baseDetection, baseTree, scope, tracer);
-                base3 = RunNodeTests("base_run3", baseDetection, baseTree, scope, tracer);
+                base1 = RunNodeTests("base_run1", baseDetection, baseTree, baseManager, scope, tracer);
+                base2 = RunNodeTests("base_run2", baseDetection, baseTree, baseManager, scope, tracer);
+                base3 = RunNodeTests("base_run3", baseDetection, baseTree, baseManager, scope, tracer);
                 stopwatch.Stop();
                 _timings.InstrumentedRunMilliseconds += stopwatch.ElapsedMilliseconds;
                 baseRoot = baseTree;
@@ -321,7 +306,7 @@ namespace RealDiff.Cli
 
             Pipeline.AssertTestIdsPresent(base1);
             var prStopwatch = Stopwatch.StartNew();
-            string pr = RunNodeTests("pr_run", prDetection, prTree, scope, tracer);
+            string pr = RunNodeTests("pr_run", prDetection, prTree, prManager, scope, tracer);
             prStopwatch.Stop();
             _timings.InstrumentedRunMilliseconds += prStopwatch.ElapsedMilliseconds;
             return new CrossLanguageRunSet { Base1 = base1, Base2 = base2, Base3 = base3, Pr = pr, BaseRoot = baseRoot };
@@ -696,21 +681,29 @@ namespace RealDiff.Cli
             }
         }
 
-        private static void BuildNode(string label, string directory)
+        private static void BuildNode(string label, string directory, string manager)
         {
-            Console.WriteLine("  " + label + " command: npm ci");
-            ProcessResult install = RunScriptCommand("npm", new[] { "ci" }, directory);
+            string[] installArguments = NodePackageManagers.InstallArguments(manager, directory);
+            Console.WriteLine("  " + label + " command: " + manager + " " + string.Join(" ", installArguments));
+            ProcessResult install = RunScriptCommand(manager, installArguments, directory);
             if (!install.Ok)
             {
                 throw new CliException(
-                    "This Node repository does not install from package-lock.json in this environment, before instrumentation."
+                    "This Node repository does not install from " + NodePackageManagers.LockfileName(manager)
+                    + " in this environment, before instrumentation."
                     + Environment.NewLine + "    Worktree: " + label
                     + Environment.NewLine + Shell.Tail(install.Output, 25),
                     ExitCodes.RepoDoesNotBuild);
             }
 
-            Console.WriteLine("  " + label + " command: npm run build --if-present");
-            ProcessResult build = RunScriptCommand("npm", new[] { "run", "build", "--if-present" }, directory);
+            if (!NodePackageManagers.HasScript(directory, "build"))
+            {
+                Console.WriteLine("  " + label + " command: no build script");
+                return;
+            }
+
+            Console.WriteLine("  " + label + " command: " + manager + " run build");
+            ProcessResult build = RunScriptCommand(manager, new[] { "run", "build" }, directory);
             if (!build.Ok)
             {
                 throw new CliException(
@@ -785,6 +778,7 @@ namespace RealDiff.Cli
             string label,
             LanguageDetection detection,
             string repositoryRoot,
+            string manager,
             string scope,
             string tracer)
         {
@@ -812,8 +806,8 @@ namespace RealDiff.Cli
             }
             else
             {
-                Console.WriteLine("  " + label.PadRight(10) + " command: npm test (NODE_OPTIONS += --require register.cjs --loader loader.mjs)");
-                result = RunScriptCommand("npm", new[] { "test" }, detection.WorkDirectory, environment);
+                Console.WriteLine("  " + label.PadRight(10) + " command: " + manager + " run test (NODE_OPTIONS += --require register.cjs --loader loader.mjs)");
+                result = RunScriptCommand(manager, new[] { "run", "test" }, detection.WorkDirectory, environment);
             }
             TraceSummary summary = ValidateTrace(directory, label, result.Output);
             ReportTrace(label, summary, result.ExitCode);
@@ -903,37 +897,6 @@ namespace RealDiff.Cli
 
             return scopes;
         }
-
-        private static string DetectNodePackageManager(string directory)
-        {
-            var managers = new List<string>();
-            if (File.Exists(Path.Combine(directory, "package-lock.json"))) managers.Add("npm");
-            if (File.Exists(Path.Combine(directory, "pnpm-lock.yaml"))) managers.Add("pnpm");
-            if (File.Exists(Path.Combine(directory, "yarn.lock"))) managers.Add("yarn");
-            if (managers.Count > 1)
-            {
-                throw new CliException(
-                    "Multiple Node lockfiles were detected beside package.json: " + string.Join(", ", managers.Select(LockfileName)) + ".",
-                    ExitCodes.RunInvalid);
-            }
-
-            if (managers.Count == 0)
-            {
-                throw new CliException(
-                    "Node execution requires package-lock.json beside package.json so npm ci is reproducible.",
-                    ExitCodes.RunInvalid);
-            }
-
-            return managers[0];
-        }
-
-        private static string LockfileName(string manager) => manager switch
-        {
-            "npm" => "package-lock.json",
-            "pnpm" => "pnpm-lock.yaml",
-            "yarn" => "yarn.lock",
-            _ => manager,
-        };
 
         private static string ResolveJavaAgent()
         {

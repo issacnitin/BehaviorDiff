@@ -188,6 +188,50 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tools/conformance-${{ matrix.suite }}.ps1
 
+  node-package-managers:
+    name: Node ${{ matrix.manager }} conformance
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        manager: [npm, pnpm, yarn, yarn-berry, bun]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install package manager
+        if: matrix.manager != 'npm'
+        shell: pwsh
+        run: |
+          $package = switch ('${{ matrix.manager }}') {
+            'pnpm'       { 'pnpm@10.17.1' }
+            'yarn'       { 'yarn@1.22.22' }
+            'yarn-berry' { '@yarnpkg/cli-dist@4.10.3' }
+            'bun'        { 'bun@1.2.22' }
+          }
+          $prefix = Join-Path $env:RUNNER_TEMP 'node-package-manager'
+          npm install --prefix $prefix $package
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Join-Path $prefix 'node_modules/.bin' | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Verify language and package-manager detection
+        if: matrix.manager == 'npm'
+        shell: pwsh
+        run: pwsh -NoProfile -File tools/verify-language-detection.ps1
+      - name: Run package-manager conformance
+        shell: pwsh
+        run: |
+          if ('${{ matrix.manager }}' -eq 'yarn-berry') {
+            pwsh -NoProfile -File tools/conformance-node-package-manager.ps1 -Manager yarn -YarnBerry
+          } else {
+            pwsh -NoProfile -File tools/conformance-node-package-manager.ps1 -Manager '${{ matrix.manager }}'
+          }
+
   demos:
     name: Three demo fixtures
     runs-on: windows-2022
