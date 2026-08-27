@@ -69,15 +69,15 @@ The canonicalizer never invokes a property, descriptor, user iterator, `repr`, e
 A harmless-looking refactor can change behavior far from the edited file:
 
 ```diff
- public static List<T> ByPriority<T>(
-     this IEnumerable<T> src,
--    Func<T, int> key)
+ public static List<(int Priority, T Value)> ByPriority<T>(
+-    this IEnumerable<(int Priority, T Value)> src)
 -{
 -    var list = src.ToList();
--    list.Sort((a, b) => key(a).CompareTo(key(b)));
+-    list.Sort((a, b) => a.Priority.CompareTo(b.Priority));
 -    return list;
 -}
-+    Func<T, int> key) => src.OrderBy(key).ToList();
++    this IEnumerable<(int Priority, T Value)> src) =>
++        src.OrderBy(item => item.Priority).ToList();
 ```
 
 `List.Sort` is not stable; `OrderBy` is. In the included demo, that one-line infrastructure change alters an unedited pricing engine:

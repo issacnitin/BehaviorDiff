@@ -30,11 +30,10 @@ $cases = @(
     [pscustomobject]@{
         Name = 'sort'
         File = 'src/Infrastructure.Collections/SortingExtensions.cs'
-        Pattern = '(?s)public static List<T> ByPriority<T>\(\s*this IEnumerable<T> src,\s*Func<T, int> key\)\s*\{\s*var list = src\.ToList\(\);\s*list\.Sort\(\(a, b\) => key\(a\)\.CompareTo\(key\(b\)\)\);\s*return list;\s*\}'
+        Pattern = '(?s)public static List<\(int Priority, T Value\)> ByPriority<T>\(\s*this IEnumerable<\(int Priority, T Value\)> src\)\s*\{\s*var list = src\.ToList\(\);\s*list\.Sort\(\(a, b\) => a\.Priority\.CompareTo\(b\.Priority\)\);\s*return list;\s*\}'
         Replacement = @'
-public static List<T> ByPriority<T>(
-        this IEnumerable<T> src,
-        Func<T, int> key) => src.OrderBy(key).ToList();
+    public static List<(int Priority, T Value)> ByPriority<T>(
+            this IEnumerable<(int Priority, T Value)> src) => src.OrderBy(item => item.Priority).ToList();
 '@
         Headline = 'Commerce.Pricing.DiscountEngine.SelectDiscount(System.Decimal)'
     },

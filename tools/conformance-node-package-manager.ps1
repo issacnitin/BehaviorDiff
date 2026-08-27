@@ -62,7 +62,7 @@ try {
         npm { Invoke-PackageManager @('install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund') }
         pnpm { Invoke-PackageManager @('install', '--lockfile-only', '--ignore-scripts') }
         yarn {
-            if ($YarnBerry) { Invoke-PackageManager @('install') }
+            if ($YarnBerry) { Invoke-PackageManager @('install', '--no-immutable') }
             else { Invoke-PackageManager @('install', '--ignore-scripts', '--non-interactive') }
         }
         bun { Invoke-PackageManager @('install', '--lockfile-only', '--ignore-scripts') }

@@ -81,10 +81,9 @@ if (-not $SkipPrRebuild) {
         if ($Change -eq 'sort') {
             $target = Join-Path $prTree 'src/Infrastructure.Collections/SortingExtensions.cs'
             $text = Get-Content $target -Raw
-            $mutated = $text -replace '(?s)public static List<T> ByPriority<T>\(\s*this IEnumerable<T> src,\s*Func<T, int> key\)\s*\{\s*var list = src\.ToList\(\);\s*list\.Sort\(\(a, b\) => key\(a\)\.CompareTo\(key\(b\)\)\);\s*return list;\s*\}', @'
-public static List<T> ByPriority<T>(
-            this IEnumerable<T> src,
-            Func<T, int> key) => src.OrderBy(key).ToList();
+            $mutated = $text -replace '(?s)public static List<\(int Priority, T Value\)> ByPriority<T>\(\s*this IEnumerable<\(int Priority, T Value\)> src\)\s*\{\s*var list = src\.ToList\(\);\s*list\.Sort\(\(a, b\) => a\.Priority\.CompareTo\(b\.Priority\)\);\s*return list;\s*\}', @'
+public static List<(int Priority, T Value)> ByPriority<T>(
+            this IEnumerable<(int Priority, T Value)> src) => src.OrderBy(item => item.Priority).ToList();
 '@
             $label = 'SortingExtensions restores stable ordering for equal-priority items'
         }

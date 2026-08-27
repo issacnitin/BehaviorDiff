@@ -38,6 +38,8 @@ try {
     $env:REALDIFF_RUST_ENGINE = Join-Path $repo 'src/RealDiff.Engine.Rust/target/release/realdiff-engine.exe'
     & cargo build --release --manifest-path (Join-Path $repo 'src/RealDiff.Engine.Rust/Cargo.toml')
     if ($LASTEXITCODE -ne 0) { throw 'Rust engine build failed' }
+    & dotnet build (Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj') -c Release --nologo
+    if ($LASTEXITCODE -ne 0) { throw 'CLI build failed' }
 
     & dotnet run --project (Join-Path $repo 'src/RealDiff.Cli/RealDiff.Cli.csproj') -c Release --no-build -- `
         $fixture --base $base --pr $pr --work $run --findings (Join-Path $run 'findings.json') `

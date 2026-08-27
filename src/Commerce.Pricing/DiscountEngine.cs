@@ -1,5 +1,5 @@
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using Infrastructure.Collections;
 
 namespace Commerce.Pricing
@@ -29,10 +29,21 @@ namespace Commerce.Pricing
 
         public string SelectDiscount(decimal listPrice)
         {
-            return _rules
-                .ByPriority(rule => rule.Priority)
-                .First(rule => listPrice >= rule.MinimumTotal)
-                .Code;
+            var candidates = new List<(int Priority, DiscountRule Value)>(_rules.Count);
+            foreach (DiscountRule rule in _rules)
+            {
+                candidates.Add((rule.Priority, rule));
+            }
+
+            foreach ((int _, DiscountRule rule) in candidates.ByPriority())
+            {
+                if (listPrice >= rule.MinimumTotal)
+                {
+                    return rule.Code;
+                }
+            }
+
+            throw new InvalidOperationException("No eligible discount rule.");
         }
     }
 
@@ -45,10 +56,10 @@ namespace Commerce.Pricing
             MinimumTotal = minimumTotal;
         }
 
-        internal string Code { get; }
+        internal readonly string Code;
 
-        internal int Priority { get; }
+        internal readonly int Priority;
 
-        internal decimal MinimumTotal { get; }
+        internal readonly decimal MinimumTotal;
     }
 }
