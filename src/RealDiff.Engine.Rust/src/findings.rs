@@ -142,13 +142,10 @@ pub(crate) fn run(options: &FindingsOptions) -> Result<i32, String> {
             pr_nodes.len()
         ));
     }
-    let coverage = frontier
+    let mut coverage = frontier
         .get("changedFileCoverage")
         .cloned()
         .ok_or_else(|| "Frontier report has no changedFileCoverage".to_owned())?;
-    let coverage_summary = coverage
-        .get("summary")
-        .ok_or_else(|| "Frontier changedFileCoverage has no summary".to_owned())?;
     let changed_files = frontier
         .pointer("/attributionInputs/changedFiles")
         .and_then(Value::as_array)
@@ -157,6 +154,20 @@ pub(crate) fn run(options: &FindingsOptions) -> Result<i32, String> {
         .filter_map(Value::as_str)
         .map(str::to_owned)
         .collect::<HashSet<_>>();
+    let additions = added_code_coverage(
+        divergence.pointer("/coverage/members").and_then(Value::as_array),
+        divergence
+            .pointer("/prCoverage/members")
+            .and_then(Value::as_array),
+        &changed_files,
+    );
+    coverage
+        .as_object_mut()
+        .ok_or_else(|| "Frontier changedFileCoverage is not an object".to_owned())?
+        .insert("additions".to_owned(), additions);
+    let coverage_summary = coverage
+        .get("summary")
+        .ok_or_else(|| "Frontier changedFileCoverage has no summary".to_owned())?;
     let noise_methods = methods(&divergence, "noiseExclusions");
     let manifest_noise_methods = methods(&divergence, "manifestNoise");
     let base_index = TreeIndex::new(base_nodes);
@@ -164,8 +175,16 @@ pub(crate) fn run(options: &FindingsOptions) -> Result<i32, String> {
 
     let mut groups = Vec::<(String, Vec<&Value>)>::new();
     let mut group_index = HashMap::<String, usize>::new();
+    let added_methods = observations
+        .iter()
+        .filter(|item| text(item, "kind") == "MethodAdded")
+        .map(|item| text(item, "methodFullName"))
+        .collect::<HashSet<_>>();
     for node in frontier_nodes {
         let method = text(node, "methodFullName");
+        if added_methods.contains(&method) {
+            continue;
+        }
         let index = *group_index.entry(method.clone()).or_insert_with(|| {
             groups.push((method.clone(), Vec::new()));
             groups.len() - 1
@@ -195,6 +214,7 @@ pub(crate) fn run(options: &FindingsOptions) -> Result<i32, String> {
             &manifest_noise_methods,
         )?);
     }
+    rank_members(&mut members);
     let unexpected = members
         .iter()
         .filter(|member| text(member, "attribution") == "unexpected")
@@ -736,6 +756,78 @@ fn has_causal_connectivity(
     })
 }
 
+fn added_code_coverage(
+    base_members: Option<&Vec<Value>>,
+    pr_members: Option<&Vec<Value>>,
+    changed_files: &HashSet<String>,
+) -> Value {
+    let base_names = base_members
+        .into_iter()
+        .flatten()
+        .map(|member| text(member, "methodFullName"))
+        .collect::<HashSet<_>>();
+    let additions = pr_members
+        .into_iter()
+        .flatten()
+        .filter(|member| {
+            let method = text(member, "methodFullName");
+            !method.is_empty()
+                && !base_names.contains(&method)
+                && nullable_text(member, "filePath")
+                    .is_some_and(|path| changed_files.contains(&path))
+        })
+        .collect::<Vec<_>>();
+    let mut member_names = additions
+        .iter()
+        .filter(|member| !boolean(member, "isTestRoot"))
+        .map(|member| text(member, "methodFullName"))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut test_ids = additions
+        .iter()
+        .filter(|member| boolean(member, "isTestRoot"))
+        .map(|member| text(member, "methodFullName"))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    member_names.sort();
+    test_ids.sort();
+    object([
+        ("members", Value::from(member_names.len())),
+        ("tests", Value::from(test_ids.len())),
+        (
+            "memberNames",
+            Value::Array(member_names.into_iter().map(Value::String).collect()),
+        ),
+        (
+            "testNames",
+            Value::Array(test_ids.into_iter().map(Value::String).collect()),
+        ),
+        (
+            "interpretation",
+            Value::String(
+                "members and test roots present only in the PR manifest and declared in changed files; additions have no base behavior to compare"
+                    .to_owned(),
+            ),
+        ),
+    ])
+}
+
+fn rank_members(members: &mut [Value]) {
+    members.sort_by(|left, right| {
+        let left_unexpected = text(left, "attribution") == "unexpected";
+        let right_unexpected = text(right, "attribution") == "unexpected";
+        let left_unasserted = integer(left, "untestedCallSiteCount") > 0;
+        let right_unasserted = integer(right, "untestedCallSiteCount") > 0;
+        right_unexpected
+            .cmp(&left_unexpected)
+            .then_with(|| right_unasserted.cmp(&left_unasserted))
+            .then_with(|| integer(right, "callSiteCount").cmp(&integer(left, "callSiteCount")))
+            .then_with(|| text(left, "memberName").cmp(&text(right, "memberName")))
+    });
+}
+
 fn has_related(
     tree: &TreeIndex<'_>,
     test: &str,
@@ -1103,5 +1195,57 @@ mod tests {
             behavior_digest(&divergence, "base").unwrap(),
             "sha256:e7d085b56610964d327cb1dbd02d6952980dbbb4344d050edb597a3f9c14b849"
         );
+    }
+
+    #[test]
+    fn method_additions_are_coverage_not_behavior_changes() {
+        let base_members = vec![object([
+            ("methodFullName", Value::String("Pricing.Existing".to_owned())),
+            ("filePath", Value::String("src/Pricing.cs".to_owned())),
+            ("isTestRoot", Value::Bool(false)),
+        ])];
+        let pr_members = vec![
+            object([
+                ("methodFullName", Value::String("Pricing.NewRule".to_owned())),
+                ("filePath", Value::String("src/Pricing.cs".to_owned())),
+                ("isTestRoot", Value::Bool(false)),
+            ]),
+            object([
+                ("methodFullName", Value::String("Tests.NewRule".to_owned())),
+                ("filePath", Value::String("tests/PricingTests.cs".to_owned())),
+                ("isTestRoot", Value::Bool(true)),
+            ]),
+        ];
+        let changed_files = ["src/Pricing.cs".to_owned(), "tests/PricingTests.cs".to_owned()]
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        let additions = added_code_coverage(Some(&base_members), Some(&pr_members), &changed_files);
+        assert_eq!(integer(&additions, "members"), 1);
+        assert_eq!(integer(&additions, "tests"), 1);
+        assert_eq!(strings(&additions, "memberNames").collect::<Vec<_>>(), ["Pricing.NewRule"]);
+        assert_eq!(strings(&additions, "testNames").collect::<Vec<_>>(), ["Tests.NewRule"]);
+    }
+
+    #[test]
+    fn unasserted_unexpected_members_rank_first() {
+        let mut members = vec![
+            object([
+                ("memberName", Value::String("Caught".to_owned())),
+                ("attribution", Value::String("unexpected".to_owned())),
+                ("untestedCallSiteCount", Value::from(0)),
+                ("callSiteCount", Value::from(100)),
+            ]),
+            object([
+                ("memberName", Value::String("Unasserted".to_owned())),
+                ("attribution", Value::String("unexpected".to_owned())),
+                ("untestedCallSiteCount", Value::from(1)),
+                ("callSiteCount", Value::from(1)),
+            ]),
+        ];
+
+        rank_members(&mut members);
+        assert_eq!(text(&members[0], "memberName"), "Unasserted");
+        assert_eq!(text(&members[1], "memberName"), "Caught");
     }
 }

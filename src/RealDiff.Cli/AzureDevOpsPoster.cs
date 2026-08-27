@@ -48,7 +48,9 @@ namespace RealDiff.Cli
             }
 
             foreach (JsonElement member in members.EnumerateArray().Where(member =>
-                String(member, "attribution") == "unexpected" && FindingPolicy.IsCommentEligible(findings, member)))
+                String(member, "attribution") == "unexpected"
+                && Int(member, "untestedCallSiteCount") > 0
+                && FindingPolicy.IsCommentEligible(findings, member)))
             {
                 string? filePath = NullableString(member, "filePath");
                 int? line = NullableInt(member, "line");
@@ -232,22 +234,23 @@ namespace RealDiff.Cli
                     .ToArray();
                 if (gaps.Length > 0)
                 {
-                    builder.AppendLine("**UNASSERTED: " + gaps.Length + " member(s), across "
-                        + gaps.Sum(member => Int(member, "callSiteCount")) + " call site(s).**");
+                    builder.AppendLine("**" + gaps.Length + (gaps.Length == 1 ? " member changed" : " members changed")
+                        + " behavior with no assertion reacting - these would have merged silently.**");
                     builder.AppendLine();
                     AppendMembers(builder, findings, "unexpected", "Unasserted behavior gaps", hasUntested: true);
+                    AppendAssertedSupport(builder, gaps, covered);
                 }
-
-                if (covered.Length > 0)
+                else
                 {
-                    builder.AppendLine("**TEST-COVERED: " + covered.Length + " member(s), across "
-                        + covered.Sum(member => Int(member, "callSiteCount")) + " call site(s).**");
-                    builder.AppendLine("Every executing test had an assertion react; these are recorded changes, not unasserted gaps.");
-                    builder.AppendLine();
-                    AppendMembers(builder, findings, "unexpected", "Test-covered changes", hasUntested: false);
+                    builder.AppendLine("**" + covered.Length
+                        + (covered.Length == 1 ? " behavior change was" : " behavior changes were")
+                        + " caught by existing assertions.**");
+                    builder.AppendLine("CI already exposes these changes. RealDiff keeps their causal evidence without presenting them as unasserted gaps.");
+                    AppendAssertedSupport(builder, Array.Empty<JsonElement>(), covered);
                 }
             }
 
+            AppendAddedCodeCoverage(builder, findings);
             builder.AppendLine();
             builder.AppendLine("**EXPECTED: " + Int(summary, "expectedMembers") + " member(s), across "
                 + Int(summary, "expectedCallSites") + " call site(s).**");
@@ -284,6 +287,96 @@ namespace RealDiff.Cli
                     + string.Join(", ", unexercised.Select(file => "`" + NullableString(file, "filePath") + "`")) + ".");
                 builder.AppendLine("Zero observed calls are not evidence that these files did not change behavior.");
             }
+        }
+
+        private static void AppendAssertedSupport(
+            StringBuilder builder,
+            IReadOnlyList<JsonElement> headlineMembers,
+            IReadOnlyList<JsonElement> coveredMembers)
+        {
+            var lines = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (JsonElement member in headlineMembers)
+            {
+                if (!member.TryGetProperty("consequences", out JsonElement consequences)
+                    || consequences.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (JsonElement consequence in consequences.EnumerateArray())
+                {
+                    if (!consequence.TryGetProperty("evidence", out JsonElement evidence)
+                        || !Bool(evidence, "assertionReacted"))
+                    {
+                        continue;
+                    }
+
+                    string line = "`" + Escape(String(consequence, "memberName")) + "` returned "
+                        + RenderValue(NullableString(evidence, "baseReturn"), NullableString(evidence, "baseException"))
+                        + "; PR returns "
+                        + RenderValue(NullableString(evidence, "prReturn"), NullableString(evidence, "prException"))
+                        + " in `" + Escape(String(evidence, "testId")) + "`; an assertion reacted.";
+                    if (seen.Add(line))
+                    {
+                        lines.Add(line);
+                    }
+                }
+            }
+
+            foreach (JsonElement member in coveredMembers)
+            {
+                JsonElement evidence = member.TryGetProperty("evidence", out JsonElement items)
+                    ? items.EnumerateArray().FirstOrDefault(item => Bool(item, "assertionReacted"))
+                    : default;
+                string line = "`" + Escape(String(member, "memberName")) + "` changed; existing assertions reacted.";
+                if (evidence.ValueKind != JsonValueKind.Undefined)
+                {
+                    line = "`" + Escape(String(member, "memberName")) + "` returned "
+                        + RenderValue(NullableString(evidence, "baseReturn"), NullableString(evidence, "baseException"))
+                        + "; PR returns "
+                        + RenderValue(NullableString(evidence, "prReturn"), NullableString(evidence, "prException"))
+                        + "; existing assertions reacted.";
+                }
+                if (seen.Add(line))
+                {
+                    lines.Add(line);
+                }
+            }
+
+            if (lines.Count == 0)
+            {
+                return;
+            }
+
+            builder.AppendLine();
+            builder.AppendLine("### Caught by existing assertions");
+            foreach (string line in lines.Take(5))
+            {
+                builder.AppendLine("- " + line);
+            }
+        }
+
+        private static void AppendAddedCodeCoverage(StringBuilder builder, JsonElement findings)
+        {
+            if (!findings.TryGetProperty("coverage", out JsonElement coverage)
+                || !coverage.TryGetProperty("additions", out JsonElement additions))
+            {
+                return;
+            }
+
+            int members = Int(additions, "members");
+            int tests = Int(additions, "tests");
+            if (members == 0 && tests == 0)
+            {
+                return;
+            }
+
+            builder.AppendLine();
+            builder.AppendLine("### Added-code coverage");
+            builder.AppendLine("This PR added " + members + (members == 1 ? " member and " : " members and ")
+                + tests + (tests == 1 ? " test." : " tests."));
+            builder.AppendLine("Added code has no base behavior to compare, so it is not included in the behavior-change count.");
         }
 
         private static void AppendBaselinePolicy(StringBuilder builder, JsonElement findings)

@@ -287,10 +287,16 @@ Assert(!withoutKey.Contains("Optional model explanation", StringComparison.Ordin
 Assert(withKey.Contains("Optional model explanation", StringComparison.Ordinal), "key-enabled comment omitted accepted model output");
 Assert(withKey.Contains("grounded", StringComparison.Ordinal), "model output is not labeled as grounded");
 Assert(!withKey.Contains("422", StringComparison.Ordinal), "comment leaked raw GitHub 422 details");
-Assert(withoutKey.StartsWith("## RealDiff: 1 behavior gap outside this diff", StringComparison.Ordinal),
-    "comment does not lead with the outside-diff behavior gap count");
+Assert(withoutKey.StartsWith("## RealDiff: 1 member changed behavior with no assertion reacting", StringComparison.Ordinal),
+    "comment does not lead with the unasserted member count");
+Assert(withoutKey.Contains("These would have merged silently", StringComparison.Ordinal),
+    "comment does not explain why unasserted changes lead");
 Assert(withoutKey.Contains("**`ShippingCalculator.IsFreeShipping` changed, but this PR didn't edit it.**", StringComparison.Ordinal),
     "comment does not lead with the unedited member");
+Assert(withoutKey.Contains("**Caught by existing assertions**", StringComparison.Ordinal)
+    && withoutKey.Contains("`ShippingCalculator.TotalWithShipping` returned `44.99`; PR returns `40`", StringComparison.Ordinal)
+    && withoutKey.Contains("an assertion reacted", StringComparison.Ordinal),
+    "asserted downstream consequence was not retained as supporting evidence");
 Assert(withoutKey.Contains("<details><summary>Why, and the evidence</summary>", StringComparison.Ordinal),
     "evidence is not collapsed under details");
 Assert(withoutKey.Contains("**Distinct call paths**", StringComparison.Ordinal), "deduplicated call paths section is missing");
@@ -305,23 +311,58 @@ JsonObject fullyAssertedMember = fullyAsserted["members"]?[0]?.AsObject()
 fullyAssertedMember["untestedCallSiteCount"] = 0;
 fullyAssertedMember["testsWithAssertionReaction"] = fullyAssertedMember["distinctTestCount"]?.GetValue<int>() ?? 0;
 fullyAssertedMember["assertionReactionSummary"] = "5 tests executed this; 5 tests had an assertion react.";
+fullyAsserted["coverage"]!["additions"] = new JsonObject
+{
+    ["members"] = 2,
+    ["tests"] = 1,
+};
 using JsonDocument fullyAssertedDocument = JsonDocument.Parse(fullyAsserted.ToJsonString());
 string fullyAssertedComment = GitHubPoster.RenderSummary(
     fullyAssertedDocument.RootElement,
     marker,
     Array.Empty<string>());
 Assert(fullyAssertedComment.StartsWith(
-    "## RealDiff: 1 test-covered behavior change outside this diff",
+    "## RealDiff: 1 behavior change was caught by existing assertions",
     StringComparison.Ordinal),
     "fully asserted change was not labeled test-covered");
 Assert(fullyAssertedComment.Contains(
-    "this is a test-covered change, not an unasserted behavior gap",
+    "CI already exposes these changes",
     StringComparison.Ordinal),
     "fully asserted change was framed as an unasserted gap");
+Assert(fullyAssertedComment.Contains("This PR added 2 members and 1 test.", StringComparison.Ordinal)
+    && fullyAssertedComment.Contains("not included in the behavior-change count", StringComparison.Ordinal),
+    "added code was not reported separately as coverage");
 Assert(!fullyAssertedComment.Contains(
     "An order totaling 40 now qualifies for free shipping",
     StringComparison.Ordinal),
     "fully asserted change retained the breaking-impact lead");
+
+JsonObject mixed = JsonNode.Parse(File.ReadAllText(args[0]))?.AsObject()
+    ?? throw new InvalidOperationException("could not create mixed assertion proof");
+JsonObject coveredPeer = JsonNode.Parse(mixed["members"]?[0]?.ToJsonString() ?? "null")?.AsObject()
+    ?? throw new InvalidOperationException("mixed assertion proof has no member");
+coveredPeer["memberName"] = "SampleApp.CheckoutTotals.Compute(System.Decimal)";
+coveredPeer["untestedCallSiteCount"] = 0;
+coveredPeer["testsWithAssertionReaction"] = coveredPeer["distinctTestCount"]?.GetValue<int>() ?? 0;
+coveredPeer["assertionReactionSummary"] = "5 tests executed this; 5 tests had an assertion react.";
+coveredPeer["consequences"] = new JsonArray();
+JsonObject coveredEvidence = coveredPeer["evidence"]?[0]?.AsObject()
+    ?? throw new InvalidOperationException("mixed assertion proof has no evidence");
+coveredEvidence["baseReturn"] = "Primitive:85";
+coveredEvidence["prReturn"] = "Primitive:60";
+coveredEvidence["assertionReacted"] = true;
+mixed["members"]?.AsArray().Add(coveredPeer);
+using JsonDocument mixedDocument = JsonDocument.Parse(mixed.ToJsonString());
+string mixedComment = GitHubPoster.RenderSummary(
+    mixedDocument.RootElement,
+    marker,
+    Array.Empty<string>());
+Assert(mixedComment.StartsWith("## RealDiff: 1 member changed behavior with no assertion reacting", StringComparison.Ordinal),
+    "covered peer outranked the unasserted member");
+Assert(mixedComment.Contains("`CheckoutTotals.Compute` returned `85`; PR returns `60`; existing assertions reacted.", StringComparison.Ordinal),
+    "covered peer was not retained as a support line");
+Assert(!mixedComment.Contains("**Evidence for `CheckoutTotals.Compute`**", StringComparison.Ordinal),
+    "covered peer was rendered as a full finding");
 
 JsonObject oversized = JsonNode.Parse(File.ReadAllText(args[0]))?.AsObject()
     ?? throw new InvalidOperationException("could not create oversized findings proof");

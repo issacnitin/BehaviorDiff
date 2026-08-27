@@ -657,40 +657,51 @@ namespace RealDiff.Cli
                 }
 
                 builder.AppendLine(gaps.Length > 0
-                    ? "## RealDiff: " + gaps.Length + " behavior "
-                        + (gaps.Length == 1 ? "gap" : "gaps") + " outside this diff"
-                    : "## RealDiff: " + covered.Length + " test-covered behavior "
-                        + (covered.Length == 1 ? "change" : "changes") + " outside this diff");
+                    ? "## RealDiff: " + gaps.Length + (gaps.Length == 1 ? " member changed" : " members changed")
+                        + " behavior with no assertion reacting"
+                    : "## RealDiff: " + covered.Length + (covered.Length == 1 ? " behavior change was" : " behavior changes were")
+                        + " caught by existing assertions");
                 builder.AppendLine();
-                CauseAnchor? cause = patches is null ? null : FindCauseAnchor(patches);
-                string? causalHeadline = CausalHeadline(lead, cause, repository, headSha);
-                builder.AppendLine(causalHeadline is null
-                    ? "**" + Code(ShortMember(String(lead, "memberName")))
-                        + " changed, but this PR didn't edit it.**"
-                    : "**" + causalHeadline + "**");
-                builder.AppendLine(Int(lead, "untestedCallSiteCount") > 0
-                    ? LeadImpact(lead) + (causalHeadline is null ? " " + UntestedLead(lead) : string.Empty)
-                    : "Every test that executed this member had an assertion react; this is a test-covered "
-                        + "change, not an unasserted behavior gap.");
-                builder.AppendLine();
-                builder.AppendLine("<details><summary>Why, and the evidence</summary>");
-                foreach (JsonElement member in gaps.Concat(covered))
+                if (gaps.Length > 0)
                 {
-                    AppendConciseMember(
-                        builder,
-                        member,
-                        explanations is not null
-                            && explanations.TryGetValue(String(member, "memberName"), out ModelExplanation? explanation)
-                                ? explanation
-                                : null);
+                    builder.AppendLine("**These would have merged silently.**");
+                    builder.AppendLine();
+                    CauseAnchor? cause = patches is null ? null : FindCauseAnchor(patches);
+                    string? causalHeadline = CausalHeadline(lead, cause, repository, headSha);
+                    builder.AppendLine(causalHeadline is null
+                        ? "**" + Code(ShortMember(String(lead, "memberName")))
+                            + " changed, but this PR didn't edit it.**"
+                        : "**" + causalHeadline + "**");
+                    builder.AppendLine(LeadImpact(lead)
+                        + (causalHeadline is null ? " " + UntestedLead(lead) : string.Empty));
+                    AppendAssertedSupport(builder, gaps, covered);
+                    builder.AppendLine();
+                    builder.AppendLine("<details><summary>Why, and the evidence</summary>");
+                    foreach (JsonElement member in gaps)
+                    {
+                        AppendConciseMember(
+                            builder,
+                            member,
+                            explanations is not null
+                                && explanations.TryGetValue(String(member, "memberName"), out ModelExplanation? explanation)
+                                    ? explanation
+                                    : null);
+                    }
+
+                    builder.AppendLine();
+                    builder.AppendLine("</details>");
+                }
+                else
+                {
+                    builder.AppendLine("CI already exposes these changes. RealDiff keeps their causal evidence without presenting them as unasserted gaps.");
+                    AppendAssertedSupport(builder, Array.Empty<JsonElement>(), covered);
                 }
 
-                builder.AppendLine();
-                builder.AppendLine("</details>");
                 builder.AppendLine();
                 builder.AppendLine(CoverageFooter(findings, lead, repository, headSha));
             }
 
+            AppendAddedCodeCoverage(builder, findings);
             AppendUnobservedBoundaries(builder, findings);
             AppendCommentPolicy(builder, findings);
             AppendBaselinePolicy(builder, findings, repository, headSha);
@@ -729,6 +740,108 @@ namespace RealDiff.Cli
                 builder.AppendLine(explanation.Why);
                 builder.AppendLine("Suggested test: " + explanation.Test);
             }
+        }
+
+        private static void AppendAssertedSupport(
+            StringBuilder builder,
+            IReadOnlyList<JsonElement> headlineMembers,
+            IReadOnlyList<JsonElement> coveredMembers)
+        {
+            var lines = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (JsonElement member in headlineMembers)
+            {
+                if (!member.TryGetProperty("consequences", out JsonElement consequences)
+                    || consequences.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (JsonElement consequence in consequences.EnumerateArray())
+                {
+                    if (!consequence.TryGetProperty("evidence", out JsonElement evidence)
+                        || NullableBool(evidence, "assertionReacted") != true)
+                    {
+                        continue;
+                    }
+
+                    string line = RenderAssertedConsequence(consequence);
+                    if (seen.Add(line))
+                    {
+                        lines.Add(line);
+                    }
+                }
+            }
+
+            foreach (JsonElement member in coveredMembers)
+            {
+                string line = RenderAssertedMember(member);
+                if (seen.Add(line))
+                {
+                    lines.Add(line);
+                }
+            }
+
+            if (lines.Count == 0)
+            {
+                return;
+            }
+
+            builder.AppendLine();
+            builder.AppendLine("**Caught by existing assertions**");
+            foreach (string line in lines.Take(5))
+            {
+                builder.AppendLine("- " + line);
+            }
+        }
+
+        private static string RenderAssertedConsequence(JsonElement consequence)
+        {
+            JsonElement evidence = consequence.GetProperty("evidence");
+            return Code(ShortMember(String(consequence, "memberName"))) + " returned "
+                + RenderValue(NullableString(evidence, "baseReturn"), NullableString(evidence, "baseException"))
+                + "; PR returns "
+                + RenderValue(NullableString(evidence, "prReturn"), NullableString(evidence, "prException"))
+                + " in " + Code(String(evidence, "testId")) + "; an assertion reacted.";
+        }
+
+        private static string RenderAssertedMember(JsonElement member)
+        {
+            JsonElement evidence = member.TryGetProperty("evidence", out JsonElement items)
+                ? items.EnumerateArray().FirstOrDefault(item => NullableBool(item, "assertionReacted") == true)
+                : default;
+            if (evidence.ValueKind == JsonValueKind.Undefined)
+            {
+                return Code(ShortMember(String(member, "memberName"))) + " changed; existing assertions reacted.";
+            }
+
+            return Code(ShortMember(String(member, "memberName"))) + " returned "
+                + RenderValue(NullableString(evidence, "baseReturn"), NullableString(evidence, "baseException"))
+                + "; PR returns "
+                + RenderValue(NullableString(evidence, "prReturn"), NullableString(evidence, "prException"))
+                + "; existing assertions reacted.";
+        }
+
+        private static void AppendAddedCodeCoverage(StringBuilder builder, JsonElement findings)
+        {
+            if (!findings.TryGetProperty("coverage", out JsonElement coverage)
+                || !coverage.TryGetProperty("additions", out JsonElement additions))
+            {
+                return;
+            }
+
+            int members = Int(additions, "members");
+            int tests = Int(additions, "tests");
+            if (members == 0 && tests == 0)
+            {
+                return;
+            }
+
+            builder.AppendLine();
+            builder.AppendLine("### Added-code coverage");
+            builder.AppendLine("This PR added " + members + (members == 1 ? " member and " : " members and ")
+                + tests + (tests == 1 ? " test." : " tests."));
+            builder.AppendLine("Added code has no base behavior to compare, so it is not included in the behavior-change count.");
         }
 
         private static string RenderCollapsedObservations(JsonElement member)
@@ -858,12 +971,6 @@ namespace RealDiff.Cli
                 return "A suspended account can now withdraw.";
             }
 
-            if (name.Contains("DiscountEngine.SelectDiscount", StringComparison.Ordinal))
-            {
-                return "DiscountEngine.SelectDiscount returned \"CLEARANCE_40\", now returns \"SEASONAL_15\"; "
-                    + "CheckoutTotals.Compute returned 60, now returns 85.";
-            }
-
             if (member.TryGetProperty("consequences", out JsonElement consequences)
                 && consequences.ValueKind == JsonValueKind.Array
                 && consequences.EnumerateArray().Any(item =>
@@ -892,19 +999,6 @@ namespace RealDiff.Cli
                 : ShortMember(name) + " changed from "
                     + RenderValue(NullableString(fallback, "baseReturn"), NullableString(fallback, "baseException"))
                     + " to " + RenderValue(NullableString(fallback, "prReturn"), NullableString(fallback, "prException")) + ".";
-            if (member.TryGetProperty("consequences", out JsonElement genericConsequences)
-                && genericConsequences.ValueKind == JsonValueKind.Array)
-            {
-                JsonElement consequence = genericConsequences.EnumerateArray().FirstOrDefault();
-                if (consequence.ValueKind != JsonValueKind.Undefined
-                    && consequence.TryGetProperty("evidence", out JsonElement consequenceEvidence))
-                {
-                    lead += " " + ShortMember(String(consequence, "memberName")) + " changed from "
-                        + RenderValue(NullableString(consequenceEvidence, "baseReturn"), NullableString(consequenceEvidence, "baseException"))
-                        + " to " + RenderValue(NullableString(consequenceEvidence, "prReturn"), NullableString(consequenceEvidence, "prException")) + ".";
-                }
-            }
-
             return lead;
         }
 
@@ -1170,9 +1264,11 @@ namespace RealDiff.Cli
                 foreach (JsonElement member in members.EnumerateArray()
                     .Where(item => String(item, "attribution") == "unexpected"
                         && FindingPolicy.IsCommentEligible(findings, item))
+                    .OrderByDescending(item => Int(item, "untestedCallSiteCount") > 0)
                     .Take(100))
                 {
-                    string line = "- " + Code(String(member, "memberName")) + " at " + Code(Source(member))
+                    string category = Int(member, "untestedCallSiteCount") > 0 ? "unasserted" : "caught";
+                    string line = "- **" + category + ":** " + Code(String(member, "memberName")) + " at " + Code(Source(member))
                         + ": " + Escape(String(member, "assertionReactionSummary"));
                     int remaining = MaxCommentLength - builder.Length - marker.Length - (Environment.NewLine.Length * 2);
                     if (remaining <= 0)
@@ -1184,6 +1280,7 @@ namespace RealDiff.Cli
                 }
             }
 
+            AppendAddedCodeCoverage(builder, findings);
             AppendBaselinePolicy(builder, findings, repository: null, headSha: null);
             builder.AppendLine();
             builder.Append(marker);

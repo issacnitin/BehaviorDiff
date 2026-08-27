@@ -1080,7 +1080,7 @@ struct Artifact<'a> {
 
 impl Serialize for Artifact<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("DivergenceSet", 13)?;
+        let mut state = serializer.serialize_struct("DivergenceSet", 14)?;
         let runs_counts_started = self.profile.borrow().start();
         state.serialize_field("schema", "realdiff.divergenceset/2")?;
         state.serialize_field(
@@ -1177,6 +1177,13 @@ impl Serialize for Artifact<'_> {
             &CoverageView {
                 members: &self.base1.members,
                 assemblies: &self.base1.assemblies,
+            },
+        )?;
+        state.serialize_field(
+            "prCoverage",
+            &CoverageView {
+                members: &self.pr.members,
+                assemblies: &self.pr.assemblies,
             },
         )?;
         if let Some(started) = coverage_started {

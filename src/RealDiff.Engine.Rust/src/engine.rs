@@ -503,6 +503,10 @@ fn artifact(
             "members": base1.members.iter().map(describe_member).collect::<Vec<_>>(),
             "assemblies": base1.assemblies.iter().map(describe_assembly).collect::<Vec<_>>(),
         },
+        "prCoverage": {
+            "members": pr.members.iter().map(describe_member).collect::<Vec<_>>(),
+            "assemblies": pr.assemblies.iter().map(describe_assembly).collect::<Vec<_>>(),
+        },
         "callTree": describe_call_tree(base1),
         "prCallTree": describe_call_tree(pr),
     })

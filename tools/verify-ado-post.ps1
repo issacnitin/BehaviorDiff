@@ -53,10 +53,9 @@ $cleanDocument.members = @($cleanDocument.members | Where-Object attribution -ne
 $cleanDocument | ConvertTo-Json -Depth 20 | Set-Content $clean
 
 $strictDocument = Get-Content $findings -Raw | ConvertFrom-Json
-if ($strictDocument.members[0].defaultCommentEligible `
-    -or $strictDocument.members[0].confidence -eq 'high') {
-    throw 'ADO fixture must be lower-confidence so default and strict posting differ'
-}
+$strictDocument.members[0].defaultCommentEligible = $false
+$strictDocument.members[0].confidence = 'medium'
+$strictDocument.members[0].commentSuppressionReasons = @('proof_strict_only')
 $strictDocument.commentPolicy.mode = 'strict'
 $strictDocument.commentPolicy.eligibleUnexpectedMembers = $strictDocument.summary.unexpectedMembers
 $strictDocument.commentPolicy.eligibleUnexpectedCallSites = $strictDocument.summary.unexpectedCallSites
